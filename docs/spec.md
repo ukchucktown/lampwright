@@ -1,0 +1,324 @@
+# skill-cleaner v1 specification
+
+Status: Accepted product direction; implementation not started  
+Last updated: 2026-08-06
+
+## 1. Summary
+
+`skill-cleaner` is a cross-platform terminal application that discovers and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
+
+The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to make that target unavailable in the selected scope. The cleaner determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
+
+The primary interface is an interactive fuzzy-search terminal UI invoked with `npx skill-cleaner`. A compact non-interactive interface and JSON output support automation and future agent sessions.
+
+## 2. Product principles
+
+1. **Live state over a second registry.** Inventory is rebuilt from the filesystem, manager records, plugin manifests, and adapter evidence on every run.
+2. **Ownership before deletion.** A discovered `SKILL.md` does not by itself prove that a directory is an independently removable installation.
+3. **Managed removal first.** Use an available owner's lifecycle operation before direct filesystem cleanup.
+4. **Explicit fallback.** Never silently replace a failed managed removal with brute-force deletion.
+5. **Recoverability.** Brute-force cleanup moves artifacts into quarantine instead of permanently deleting them.
+6. **Strong identity.** Skill names and content hashes alone never merge installations into one logical skill.
+7. **Project source is protected.** Files inside a Git worktree are immutable unless Git classifies them as ignored.
+8. **Pluggable support without executable extensions.** Tool support is described through local, versioned JSONC adapters.
+9. **Cross-platform behavior.** macOS, Linux, and Windows are first-class; adapters do not assume a shell or POSIX paths.
+10. **Small command surface.** The v1 interface stays focused on scan, remove, restore, and purge.
+
+## 3. Goals
+
+- Find installed skills across common agent, manager, and plugin layouts.
+- Search installed skills by normalized and tool-specific metadata.
+- Distinguish logical skills from their physical installations.
+- Explain who owns each installation and what else would be affected by removal.
+- Remove standalone, manager-owned, and independently selectable plugin-owned skills.
+- Explicitly uninstall containing plugins when the user includes plugins in the plan.
+- Fall back to recoverable brute-force cleanup when managed removal cannot be used.
+- Preserve a reliable audit trail without maintaining an installation database.
+- Allow new tool support through local declarative adapters.
+- Provide deterministic JSON output and non-interactive execution for automation.
+
+## 4. Non-goals for v1
+
+- Installing skill managers, agent runtimes, or plugins globally or into a project.
+- Enabling or disabling skills without removing them.
+- Executable adapter plugins or remote adapter downloads.
+- A public adapter registry.
+- Telemetry or transmission of local inventory data.
+- Whole-machine or full-home-directory scans by default.
+- Editing tracked or unignored project files.
+- Removing system skills supplied as inseparable runtime components.
+- Silently uninstalling plugins as part of an ordinary remove-all operation.
+- Providing transactional rollback across external managers.
+
+## 5. Runtime and distribution
+
+- Language: TypeScript.
+- Runtime: Node.js 20 or newer.
+- Distribution: npm package named `skill-cleaner`.
+- Executable: `skill-cleaner`.
+- Primary invocation: `npx skill-cleaner`.
+- License: MIT.
+- Supported operating systems: current macOS, mainstream Linux distributions, and supported Windows releases.
+
+The cleaner may itself be downloaded by `npx`. It must not add dependencies to a user's project, install global packages, or install missing managers.
+
+## 6. Inventory and discovery
+
+### 6.1 Scan boundaries
+
+A normal scan includes:
+
+- Built-in adapter locations for supported agents, managers, and plugin systems.
+- User-wide locations appropriate to the current operating system.
+- The current project and its recognized agent skill locations.
+- Explicit custom roots supplied for the current invocation.
+- Roots declared by local adapters.
+
+A normal scan must not recursively crawl the entire home directory. Arbitrary locations require an explicit scan root. Deep scanning is not part of the v1 default interface.
+
+### 6.2 Finding classification
+
+Every finding is classified as one of:
+
+- Active installation
+- Managed plugin resource
+- Standalone project skill
+- Source artifact
+- Cache or vendor artifact
+- System skill
+- Unknown
+
+Source, cache, vendor, system, and unknown findings are hidden from ordinary cleanup results unless the user enables the relevant inspection filter. Their discovery never authorizes deletion.
+
+### 6.3 Inventory fields
+
+The normalized inventory schema includes:
+
+- Stable inventory ID for the current scan
+- Skill name and description
+- Skill identity evidence
+- Source identifier and URL
+- Plugin identifier and version
+- Manager and adapter identifiers
+- Agent and scope
+- Filesystem path and canonical path
+- Link type and target
+- Content hash and modification time
+- Ownership classification and confidence
+- Installation status
+- Tags
+- Hard dependencies and soft references
+- Git protection status
+- Adapter-specific namespaced metadata
+
+The inventory is never a durable source of truth. A disposable cache may accelerate search, but deleting the cache must not change behavior.
+
+### 6.4 Logical grouping
+
+Installations may be grouped into a Logical Skill only with strong evidence:
+
+- Same normalized source and skill path
+- Same plugin identifier and skill identifier
+- Same canonical directory or link target
+- Same explicit package identity
+
+Matching names or hashes are displayed as possible relationships but never merge records automatically.
+
+## 7. Search and terminal UI
+
+Running `npx skill-cleaner` without a subcommand opens the terminal UI.
+
+The UI must:
+
+- Fuzzy-search normalized metadata and adapter-specific namespaced fields.
+- Support concise field filters such as `plugin:`, `agent:`, `scope:`, `source:`, `manager:`, and `status:`.
+- Show one row per Logical Skill by default.
+- Expand a logical row into individual Installations.
+- Permit selection of a Logical Skill, one Installation, or a Plugin boundary.
+- Display ownership, dependency, Git protection, and removal-method summaries before planning.
+- Clearly distinguish removable, blocked, unresolved, and source-only findings.
+
+Selecting a Logical Skill means making that identity unavailable across all selected installations. Selecting one Installation limits removal to that occurrence.
+
+## 8. Adapters
+
+### 8.1 Model
+
+Adapters are declarative JSONC files validated against a versioned JSON Schema. They may be built into the package or explicitly loaded from a local file. HTTPS and other remote adapter sources are not supported in v1.
+
+An adapter may declare:
+
+- Adapter ID and schema version
+- Supported operating systems
+- Tool and executable probes
+- Discovery roots and recognized manifests
+- Inventory extraction and metadata mappings
+- Ownership and grouping rules
+- Hard-dependency declarations
+- Managed removal actions
+- Ephemeral package runner actions
+- Verification rules
+
+Commands are represented as an executable plus an argument array with optional operating-system variants. Shell command strings, pipes, redirection, and implicit shell interpolation are forbidden.
+
+### 8.2 Trust
+
+Built-in adapters are trusted as package content. A local adapter that can invoke commands requires approval for its exact content hash. A changed file requires renewed approval.
+
+Read-only adapters that only describe roots and parse files may be used without command-execution approval, subject to schema validation.
+
+### 8.3 Initial built-in adapters
+
+The first release supports:
+
+1. Generic Agent Skills directories and links
+2. Vercel `npx skills`
+3. Claude Code plugins
+4. Codex plugins
+5. Gemini CLI standalone skills and extensions
+
+The generic fallback remains available when no adapter claims ownership.
+
+## 9. Removal planning
+
+Every mutation starts with a Removal Plan built from a fresh inventory.
+
+The plan contains:
+
+- Selected targets and resolved ownership boundaries
+- Actions in dependency order
+- Files, links, manager records, and plugins affected
+- Hard dependencies and soft references
+- Git-protected and system-owned blocks
+- Whether an action may download an ephemeral package
+- Expected verification checks
+- Fallback availability
+
+Hard dependencies block removal by default. Soft references warn but do not block. An explicit force override may bypass dependency and ambiguity safeguards, but never Git protection, operating-system permissions, system-skill protection, or adapter package trust.
+
+### 9.1 Plugin boundaries
+
+A plugin-owned skill may be removed independently only when the owning plugin or adapter declares that its skills are independently selectable. Otherwise the skill is blocked as an individual target and the plan offers the containing Plugin as a separate target.
+
+Removing a Plugin must show all owned skills, agents, commands, hooks, configuration, and other known resources. Ordinary `--all` removal excludes plugins; including them requires an explicit `--include-plugins` choice.
+
+### 9.2 Project protection
+
+For every path inside a Git worktree, the planner asks Git whether the path is ignored. If Git does not classify it as ignored, the path is Git-protected and no cleaner action may mutate it. This invariant is not bypassed by force.
+
+## 10. Removal execution
+
+### 10.1 Managed removal
+
+If an Owner and its lifecycle operation are available, the cleaner uses Managed Removal. A manager executable already present on the machine may be invoked directly.
+
+An adapter may request ephemeral execution through an existing package runner when:
+
+- The adapter pins an exact package and version.
+- The plan discloses that the package may be downloaded into the runner's cache.
+- The user approves the package, version, runner, and adapter hash on first use.
+- No project manifest, lock file, or global tool installation is modified by acquiring the package.
+
+### 10.2 Failed managed removal
+
+If Managed Removal fails, the cleaner stops actions that depend on it, reports the failure, and rescans the affected target. Brute-force Removal may then be offered as a second, separately confirmed action. The cleaner must never silently fall back.
+
+### 10.3 Brute-force removal
+
+Brute-force Removal may clean removable files, links, and declaratively supported manager records even when the Owner cannot execute. The plan must identify any manager state it cannot reconcile.
+
+Filesystem artifacts are moved into Quarantine rather than permanently deleted. Brute-force behavior must remain inside known or explicitly supplied roots and must honor all Git and system protections.
+
+### 10.4 Batch behavior
+
+Execution follows dependency order. A failed action blocks its dependents but independent actions continue. The final result reports removed, unchanged, partially removed, blocked, and unresolved targets. A final rescan verifies outcomes.
+
+## 11. Quarantine and local state
+
+Read-only scans, TUI browsing, and dry runs create no files.
+
+Persistent state is created lazily only for:
+
+- Local adapter trust decisions
+- Ephemeral package trust decisions
+- Removal audit records
+- Quarantine manifests and content
+- Optional rebuildable search cache
+
+State follows operating-system conventions and supports an explicit directory override.
+
+Quarantine entries record original path, link information, content hash, ownership evidence, adapter, removal time, and restoration metadata. Entries are retained for 30 days by default and may be restored or purged explicitly. Automatic expiry may remove entries during a later mutating cleaner run, never during read-only use.
+
+Restoration must not overwrite an occupied destination without an explicit conflict decision. Managed uninstalls are logged but are not represented as automatically reversible unless the Owner itself supports restoration.
+
+## 12. Command-line interface
+
+The intended minimal command surface is:
+
+```console
+skill-cleaner                  # interactive fuzzy-search UI
+skill-cleaner scan             # print inventory
+skill-cleaner remove <target>  # plan and remove selected target(s)
+skill-cleaner restore <entry>  # restore quarantined artifacts
+skill-cleaner purge <entry>    # permanently delete quarantine entries
+```
+
+Shared automation options include:
+
+- `--json` for structured output
+- `--dry-run` for a complete non-mutating plan
+- `--yes` to accept ordinary confirmations
+- `--force` to override removable safety blocks such as dependencies or ambiguity
+- `--adapter <path>` to load a local adapter
+
+The exact target-selector syntax will be finalized with the core inventory model. Interactive and non-interactive paths must call the same planner and executor.
+
+## 13. Cross-platform requirements
+
+- Use platform path APIs; never construct paths with hard-coded separators.
+- Recognize directories, symbolic links, Windows junctions, and broken links.
+- Avoid shell-specific behavior in the core and adapters.
+- Resolve user configuration, state, and cache locations according to operating-system conventions.
+- Tests must use temporary homes and workspaces; they must not inspect or mutate the developer's real skill installations.
+- CI must exercise supported Node versions across macOS, Linux, and Windows.
+
+## 14. Privacy and network behavior
+
+The cleaner has no telemetry. Inventory, paths, skill metadata, and search queries remain local.
+
+Network access is not required for scanning, search, planning, quarantine, restoration, or local adapters. An explicitly approved ephemeral package runner may access the network as described in its plan.
+
+## 15. MVP acceptance criteria
+
+The v1 MVP is complete when:
+
+1. A user can run the package through `npx` on macOS, Linux, and Windows.
+2. A zero-footprint scan inventories generic, Vercel, Claude Code, Codex, and Gemini skill installations from isolated fixtures.
+3. The TUI can fuzzy-search metadata, show logical groups, and select logical or physical targets.
+4. The planner reports ownership, dependencies, plugin impact, Git protection, and exact actions.
+5. Supported managers/plugins are used for removal when available.
+6. Failed managed removal never silently triggers fallback.
+7. Brute-force removal quarantines artifacts and can restore them.
+8. Non-ignored Git worktree files and System Skills cannot be mutated, including with force.
+9. Local JSONC adapters can extend discovery and removal without changing application code.
+10. Non-interactive scan, dry-run, remove, restore, and purge workflows produce stable JSON.
+11. A final rescan verifies and reports the result of every removal.
+12. Tests demonstrate that unrelated installations, plugin resources, and project files remain untouched.
+
+## 16. Delivery sequence
+
+Implementation should proceed in dependency-ordered slices:
+
+1. Package and cross-platform test foundation
+2. Domain types, inventory, identity, and protection model
+3. Generic discovery and Git protection
+4. Adapter schema, loader, and trust
+5. Removal planner and dependency graph
+6. Quarantine, executor, and verification
+7. Built-in adapters developed in parallel
+8. Terminal UI and non-interactive CLI developed against the same application services
+9. Cross-platform hardening, documentation, and npm release readiness
+
+The GitHub issue tracker is the authoritative execution backlog.
+
+The implementation seams and parallel work boundaries are defined in [Module design](./module-design.md).
