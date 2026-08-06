@@ -48,7 +48,7 @@ export type DiscoveryRoot =
     });
 
 export interface ScanRequest {
-  readonly roots: readonly DiscoveryRoot[];
+  readonly roots?: readonly DiscoveryRoot[];
 }
 
 export interface InventoryScanner {
@@ -57,6 +57,27 @@ export interface InventoryScanner {
 
 export interface InventoryScannerOptions {
   readonly now: () => Date;
+  readonly environment: InventoryScanEnvironment;
+  readonly commandRunner: InventoryCommandRunner;
+}
+
+export interface InventoryScanEnvironment {
+  readonly homeDirectory: string;
+  readonly workspaceDirectory: string;
+}
+
+export interface InventoryCommand {
+  readonly executable: string;
+  readonly arguments: readonly string[];
+}
+
+export interface InventoryCommandResult {
+  readonly exitCode: number | null;
+  readonly stdout: string;
+}
+
+export interface InventoryCommandRunner {
+  run(command: InventoryCommand): Promise<InventoryCommandResult>;
 }
 
 export type InventoryScanErrorCode =

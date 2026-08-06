@@ -7,6 +7,7 @@ import {
   realpath,
   stat,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import {
   basename,
   dirname,
@@ -45,17 +46,19 @@ import {
   stableId,
 } from "./identity.js";
 import { readSkillMetadata, type ParsedSkillMetadata } from "./metadata.js";
-import { runCommand } from "./process.js";
+import { systemCommandRunner } from "./process.js";
 import { parseScanRequest } from "./request-schema.js";
 import {
   InventoryScanError,
   type DiscoveryRoot,
+  type InventoryCommandRunner,
   type InventoryScanner,
   type InventoryScannerOptions,
   type ScanRequest,
 } from "./types.js";
 
 const skillDefinitionName = "SKILL.md";
+const genericAgentId = "agent-skills";
 
 interface Candidate {
   readonly root: DiscoveryRoot;
@@ -65,8 +68,6 @@ interface Candidate {
   readonly broken: boolean;
   readonly skillFilePath: string | null;
 }
-
-const systemClock: InventoryScannerOptions = { now: () => new Date() };
 
 export function createInventoryScanner(
   options: InventoryScannerOptions,
@@ -78,15 +79,22 @@ export function createInventoryScanner(
   };
 }
 
-export async function scan(request: ScanRequest): Promise<Inventory> {
-  return scanWithOptions(request, systemClock);
+export async function scan(request: ScanRequest = {}): Promise<Inventory> {
+  return scanWithOptions(request, {
+    now: () => new Date(),
+    environment: {
+      homeDirectory: homedir(),
+      workspaceDirectory: process.cwd(),
+    },
+    commandRunner: systemCommandRunner,
+  });
 }
 
 async function scanWithOptions(
   request: ScanRequest,
   options: InventoryScannerOptions,
 ): Promise<Inventory> {
-  const roots = validateAndNormalizeRequest(request);
+  const roots = validateAndNormalizeRequest(request, options);
   if (typeof options?.now !== "function") {
     throw new InventoryScanError(
       "invalid-request",
@@ -104,13 +112,13 @@ async function scanWithOptions(
 
   const candidatesByPath = new Map<string, Candidate>();
   for (const root of roots) {
-    const candidates = await discoverRoot(root);
+    const candidates = await discoverRoot(root, options.commandRunner);
     for (const candidate of candidates) {
-      const key = pathComparisonKey(candidate.path);
+      const key = await candidateComparisonKey(candidate);
       const existing = candidatesByPath.get(key);
       if (
         existing !== undefined &&
-        stringifyModel(existing.root, 0) !== stringifyModel(candidate.root, 0)
+        !(await rootsDescribeSameBoundary(existing.root, candidate.root))
       ) {
         throw new InventoryScanError(
           "invalid-request",
@@ -118,14 +126,18 @@ async function scanWithOptions(
           candidate.path,
         );
       }
-      candidatesByPath.set(key, candidate);
+      if (existing === undefined) {
+        candidatesByPath.set(key, candidate);
+      }
     }
   }
 
   const records = await Promise.all(
     [...candidatesByPath.values()]
       .sort((left, right) => compareText(left.path, right.path))
-      .map(materializeCandidate),
+      .map((candidate) =>
+        materializeCandidate(candidate, options.commandRunner),
+      ),
   );
   const installations = records.filter(isInstallation).sort(compareRecordPath);
   const otherFindings = records.filter(isOtherFinding).sort(compareRecordPath);
@@ -161,6 +173,7 @@ async function scanWithOptions(
 
 function validateAndNormalizeRequest(
   request: ScanRequest,
+  options: InventoryScannerOptions,
 ): readonly DiscoveryRoot[] {
   let parsedRequest: ScanRequest;
   try {
@@ -172,8 +185,13 @@ function validateAndNormalizeRequest(
     );
   }
 
-  const seen = new Set<string>();
-  const roots = parsedRequest.roots.map((root) => {
+  validateEnvironment(options);
+  const declaredRoots = [
+    ...defaultDiscoveryRoots(options.environment),
+    ...(parsedRequest.roots ?? []),
+  ];
+  const seen = new Map<string, DiscoveryRoot>();
+  const roots = declaredRoots.flatMap((root) => {
     if (!isAbsolute(root.path)) {
       throw new InventoryScanError(
         "invalid-request",
@@ -199,15 +217,21 @@ function validateAndNormalizeRequest(
         ? normalizeWorkspaceRoot(root, path)
         : ({ ...root, path } satisfies DiscoveryRoot);
     const key = pathComparisonKey(path);
-    if (seen.has(key)) {
+    const existing = seen.get(key);
+    if (existing !== undefined) {
+      if (
+        rootClassificationKey(existing) === rootClassificationKey(normalized)
+      ) {
+        return [];
+      }
       throw new InventoryScanError(
         "invalid-request",
         `duplicate discovery root: ${path}`,
         path,
       );
     }
-    seen.add(key);
-    return normalized;
+    seen.set(key, normalized);
+    return [normalized];
   });
 
   return roots.sort((left, right) =>
@@ -216,6 +240,47 @@ function validateAndNormalizeRequest(
       `${pathComparisonKey(right.path)}\0${right.kind}`,
     ),
   );
+}
+
+function validateEnvironment(options: InventoryScannerOptions): void {
+  if (
+    options.environment === undefined ||
+    !isAbsolute(options.environment.homeDirectory) ||
+    !isAbsolute(options.environment.workspaceDirectory)
+  ) {
+    throw new InventoryScanError(
+      "invalid-request",
+      "inventory scanner requires absolute home and workspace directories",
+    );
+  }
+  if (typeof options.commandRunner?.run !== "function") {
+    throw new InventoryScanError(
+      "invalid-request",
+      "inventory scanner requires a command runner",
+    );
+  }
+}
+
+function defaultDiscoveryRoots(
+  environment: InventoryScannerOptions["environment"],
+): readonly DiscoveryRoot[] {
+  const userRoot: DiscoveryRoot = {
+    kind: "user",
+    path: join(environment.homeDirectory, ".agents", "skills"),
+    agentId: genericAgentId,
+    adapterId: null,
+  };
+  const workspaceRoot: DiscoveryRoot = {
+    kind: "workspace",
+    path: join(environment.workspaceDirectory, ".agents", "skills"),
+    workspacePath: environment.workspaceDirectory,
+    agentId: genericAgentId,
+    adapterId: null,
+  };
+  return pathComparisonKey(userRoot.path) ===
+    pathComparisonKey(workspaceRoot.path)
+    ? [workspaceRoot]
+    : [userRoot, workspaceRoot];
 }
 
 function normalizeWorkspaceRoot(
@@ -248,6 +313,7 @@ function normalizeWorkspaceRoot(
 
 async function discoverRoot(
   root: DiscoveryRoot,
+  commandRunner: InventoryCommandRunner,
 ): Promise<readonly Candidate[]> {
   const stats = await lstatIfAvailable(root.path);
   if (stats === null) {
@@ -255,25 +321,24 @@ async function discoverRoot(
   }
 
   if (stats.isSymbolicLink()) {
-    const linkedCandidate = await inspectLinkedCandidate(root.path, root);
-    if (linkedCandidate !== null) {
-      return [linkedCandidate];
-    }
-    const targetStats = await statIfAvailable(root.path);
-    return targetStats?.isDirectory() === true
-      ? walkDirectory(root.path, root)
-      : [];
+    const linkedCandidate = await inspectLinkedCandidate(
+      root.path,
+      root,
+      commandRunner,
+    );
+    return linkedCandidate === null ? [] : [linkedCandidate];
   }
 
   if (!stats.isDirectory()) {
     return [];
   }
-  return walkDirectory(root.path, root);
+  return walkDirectory(root.path, root, commandRunner);
 }
 
 async function walkDirectory(
   directoryPath: string,
   root: DiscoveryRoot,
+  commandRunner: InventoryCommandRunner,
 ): Promise<readonly Candidate[]> {
   const skillFilePath = await findSkillFile(directoryPath);
   if (skillFilePath !== null) {
@@ -300,12 +365,16 @@ async function walkDirectory(
     const entryPath = join(directoryPath, entry.name);
     const stats = await lstatWithContext(entryPath);
     if (stats.isSymbolicLink()) {
-      const candidate = await inspectLinkedCandidate(entryPath, root);
+      const candidate = await inspectLinkedCandidate(
+        entryPath,
+        root,
+        commandRunner,
+      );
       if (candidate !== null) {
         candidates.push(candidate);
       }
     } else if (stats.isDirectory()) {
-      candidates.push(...(await walkDirectory(entryPath, root)));
+      candidates.push(...(await walkDirectory(entryPath, root, commandRunner)));
     }
   }
   return candidates;
@@ -314,10 +383,15 @@ async function walkDirectory(
 async function inspectLinkedCandidate(
   linkPath: string,
   root: DiscoveryRoot,
+  commandRunner: InventoryCommandRunner,
 ): Promise<Candidate | null> {
   const target = await readlinkWithContext(linkPath);
   const targetStats = await statIfAvailable(linkPath);
-  const artifactType = await linkedArtifactType(target, linkPath);
+  const artifactType = await linkedArtifactType(
+    target,
+    linkPath,
+    commandRunner,
+  );
 
   if (targetStats === null) {
     return {
@@ -350,16 +424,16 @@ async function inspectLinkedCandidate(
 async function linkedArtifactType(
   target: string,
   linkPath: string,
+  commandRunner: InventoryCommandRunner,
 ): Promise<Omit<Extract<ArtifactType, { target: string }>, "broken">> {
   if (process.platform !== "win32") {
     return { kind: "symbolic-link", target };
   }
 
-  const result = await runCommand("fsutil", [
-    "reparsepoint",
-    "query",
-    linkPath,
-  ]);
+  const result = await commandRunner.run({
+    executable: "fsutil",
+    arguments: ["reparsepoint", "query", linkPath],
+  });
   const junction =
     result.stdout.toLowerCase().includes("0xa0000003") ||
     (result.exitCode !== 0 &&
@@ -373,6 +447,7 @@ async function linkedArtifactType(
 
 async function materializeCandidate(
   candidate: Candidate,
+  commandRunner: InventoryCommandRunner,
 ): Promise<Installation | NonInstallationFinding> {
   const metadata = await metadataForCandidate(candidate);
   const contentHash = candidate.broken
@@ -389,7 +464,11 @@ async function materializeCandidate(
     artifactType: candidate.artifactType,
   };
   const protection: ProtectionStatus = {
-    git: await inspectGitProtection(candidate.path),
+    git: await inspectGitProtection(
+      candidate.path,
+      candidate.artifactType.kind === "directory",
+      commandRunner,
+    ),
     system:
       candidate.root.kind === "system"
         ? { kind: "system-skill", agentId: candidate.root.agentId }
@@ -766,6 +845,43 @@ function isMissingPathError(error: unknown): boolean {
 function pathComparisonKey(path: string): string {
   const normalized = resolve(path);
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+async function candidateComparisonKey(candidate: Candidate): Promise<string> {
+  if (
+    candidate.artifactType.kind === "directory" &&
+    candidate.canonicalPath !== null
+  ) {
+    return `directory:${candidate.canonicalPath}`;
+  }
+
+  const stats = await lstatWithContext(candidate.path);
+  if (stats.ino !== 0) {
+    return `entry:${stats.dev}:${stats.ino}`;
+  }
+  return `entry-path:${pathComparisonKey(candidate.path)}`;
+}
+
+function rootClassificationKey(root: DiscoveryRoot): string {
+  return stringifyModel({ ...root, path: "<discovery-root>" }, 0);
+}
+
+async function rootsDescribeSameBoundary(
+  left: DiscoveryRoot,
+  right: DiscoveryRoot,
+): Promise<boolean> {
+  if (rootClassificationKey(left) !== rootClassificationKey(right)) {
+    return false;
+  }
+  if (pathComparisonKey(left.path) === pathComparisonKey(right.path)) {
+    return true;
+  }
+
+  const [leftCanonicalPath, rightCanonicalPath] = await Promise.all([
+    canonicalPath(left.path),
+    canonicalPath(right.path),
+  ]);
+  return leftCanonicalPath !== null && leftCanonicalPath === rightCanonicalPath;
 }
 
 function portableRelativePath(rootPath: string, artifactPath: string): string {

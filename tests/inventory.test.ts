@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import {
   access,
   mkdir,
@@ -9,7 +8,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -18,16 +16,81 @@ import {
   InventoryScanError,
   stringifyModel,
   type DiscoveryRoot,
+  type InventoryCommand,
+  type InventoryCommandRunner,
   type Installation,
+  type InventoryScanEnvironment,
 } from "../src/index.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
-const execFileAsync = promisify(execFile);
 const createTestEnvironment = createIsolatedTestEnvironmentFixture();
 const fixedTime = new Date("2026-02-03T04:05:06.000Z");
+const unavailableCommandRunner: InventoryCommandRunner = {
+  async run() {
+    return { exitCode: null, stdout: "" };
+  },
+};
 
-function createScanner() {
-  return createInventoryScanner({ now: () => fixedTime });
+function createScanner(
+  environment: InventoryScanEnvironment,
+  commandRunner: InventoryCommandRunner = unavailableCommandRunner,
+) {
+  return createInventoryScanner({
+    now: () => fixedTime,
+    environment,
+    commandRunner,
+  });
+}
+
+function unusedDefaultEnvironment(
+  environment: Awaited<ReturnType<typeof createTestEnvironment>>,
+): InventoryScanEnvironment {
+  return {
+    homeDirectory: join(environment.home, "unused-default-home"),
+    workspaceDirectory: join(environment.workspace, "unused-default-workspace"),
+  };
+}
+
+function createGitCommandRunner(
+  worktreeRoot: string,
+  ignoredPaths: readonly string[] = [],
+  observedCommands: InventoryCommand[] = [],
+): InventoryCommandRunner {
+  return {
+    async run(command) {
+      observedCommands.push(command);
+      if (
+        command.executable !== "git" ||
+        command.arguments[0] !== "-C" ||
+        command.arguments[1] === undefined
+      ) {
+        return { exitCode: null, stdout: "" };
+      }
+      if (
+        command.arguments.length === 4 &&
+        command.arguments[2] === "rev-parse" &&
+        command.arguments[3] === "--show-toplevel"
+      ) {
+        return { exitCode: 0, stdout: `${worktreeRoot}\n` };
+      }
+      if (
+        command.arguments.length !== 6 ||
+        command.arguments[2] !== "check-ignore" ||
+        command.arguments[3] !== "--quiet" ||
+        command.arguments[4] !== "--"
+      ) {
+        return { exitCode: null, stdout: "" };
+      }
+      const candidatePath = command.arguments.at(-1);
+      return {
+        exitCode:
+          candidatePath !== undefined && ignoredPaths.includes(candidatePath)
+            ? 0
+            : 1,
+        stdout: "",
+      };
+    },
+  };
 }
 
 async function createSkill(
@@ -182,7 +245,9 @@ describe("Inventory scan", () => {
       },
     ];
 
-    const inventory = await createScanner().scan({ roots });
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({ roots });
 
     expect(
       inventory.installations.map((item) => item.skill.name).sort(),
@@ -260,7 +325,9 @@ describe("Inventory scan", () => {
       body: "identical copy",
     });
 
-    const inventory = await createScanner().scan({
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
       roots: [
         { kind: "user", path: root, agentId: "fixture", adapterId: null },
       ],
@@ -317,25 +384,17 @@ describe("Inventory scan", () => {
   it("marks every non-ignored worktree skill as protected", async () => {
     const environment = await createTestEnvironment();
     const root = join(environment.workspace, ".agents", "skills");
-    await execFileAsync("git", ["init", "--quiet"], {
-      cwd: environment.workspace,
-    });
     await createSkill(join(root, "protected-skill"), {
       name: "protected-skill",
     });
     await createSkill(join(root, "ignored-skill"), { name: "ignored-skill" });
-    await writeFile(
-      join(environment.workspace, ".gitignore"),
-      ".agents/skills/ignored-skill/\n",
-      "utf8",
-    );
-    await execFileAsync(
-      "git",
-      ["add", ".gitignore", ".agents/skills/protected-skill/SKILL.md"],
-      { cwd: environment.workspace },
-    );
 
-    const inventory = await createScanner().scan({
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      createGitCommandRunner(environment.workspace, [
+        ".agents/skills/ignored-skill",
+      ]),
+    ).scan({
       roots: [
         {
           kind: "workspace",
@@ -357,6 +416,43 @@ describe("Inventory scan", () => {
     ).toEqual({ kind: "ignored", worktreeRoot: environment.workspace });
   });
 
+  it("protects a Skill directory that is itself a worktree root", async () => {
+    const environment = await createTestEnvironment();
+    const worktreeRoot = join(environment.workspace, "skill-worktree");
+    const observedCommands: InventoryCommand[] = [];
+    await createSkill(worktreeRoot, { name: "worktree-skill" });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      createGitCommandRunner(worktreeRoot, [], observedCommands),
+    ).scan({
+      roots: [
+        {
+          kind: "workspace",
+          path: worktreeRoot,
+          workspacePath: worktreeRoot,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations[0]?.protection.git).toEqual({
+      kind: "protected",
+      worktreeRoot,
+    });
+    expect(observedCommands).toEqual([
+      {
+        executable: "git",
+        arguments: ["-C", worktreeRoot, "rev-parse", "--show-toplevel"],
+      },
+      {
+        executable: "git",
+        arguments: ["-C", worktreeRoot, "check-ignore", "--quiet", "--", "."],
+      },
+    ]);
+  });
+
   it("keeps malformed skill metadata visible as unresolved", async () => {
     const environment = await createTestEnvironment();
     const root = join(environment.home, "invalid-skills");
@@ -368,7 +464,9 @@ describe("Inventory scan", () => {
       "utf8",
     );
 
-    const inventory = await createScanner().scan({
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
       roots: [
         { kind: "user", path: root, agentId: "fixture", adapterId: null },
       ],
@@ -380,6 +478,79 @@ describe("Inventory scan", () => {
       skill: { name: "fallback-name", description: null },
       metadata: { generic: { frontmatter: "invalid" } },
     });
+  });
+
+  it("resolves bounded generic user and current-workspace roots", async () => {
+    const environment = await createTestEnvironment();
+    await createSkill(
+      join(environment.home, ".agents", "skills", "user-default"),
+      { name: "user-default" },
+    );
+    await createSkill(
+      join(environment.workspace, ".agents", "skills", "workspace-default"),
+      { name: "workspace-default" },
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: environment.workspace,
+    }).scan({});
+
+    expect(
+      inventory.installations.map((installation) => [
+        installation.skill.name,
+        installation.classification,
+      ]),
+    ).toEqual([
+      ["user-default", "active-installation"],
+      ["workspace-default", "standalone-project-skill"],
+    ]);
+  });
+
+  it("does not traverse through a linked discovery root", async () => {
+    const environment = await createTestEnvironment();
+    const targetRoot = join(environment.home, "outside-linked-root");
+    const linkedRoot = join(environment.home, "linked-root");
+    await createSkill(join(targetRoot, "nested", "escaped"), {
+      name: "escaped",
+    });
+    await createDirectoryLink(targetRoot, linkedRoot);
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [
+        {
+          kind: "user",
+          path: linkedRoot,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations).toEqual([]);
+  });
+
+  it("deduplicates case aliases according to filesystem identity", async () => {
+    const environment = await createTestEnvironment();
+    const root = join(environment.home, "CaseSkills");
+    const alias = join(environment.home, "caseskills");
+    await createSkill(join(root, "only-once"), { name: "only-once" });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [root, alias].map((path) => ({
+        kind: "user" as const,
+        path,
+        agentId: "fixture",
+        adapterId: null,
+      })),
+    });
+
+    expect(inventory.installations).toHaveLength(1);
+    expect(inventory.installations[0]?.skill.name).toBe("only-once");
   });
 
   it("is deterministic, bounded to requested roots, and zero-footprint", async () => {
@@ -397,7 +568,7 @@ describe("Inventory scan", () => {
     const before = await Promise.all(
       protectedDirectories.map(snapshotDirectory),
     );
-    const scanner = createScanner();
+    const scanner = createScanner(unusedDefaultEnvironment(environment));
     const request = {
       roots: [
         {
@@ -427,7 +598,10 @@ describe("Inventory scan", () => {
 
   it("rejects ambiguous or unbounded root declarations", async () => {
     const environment = await createTestEnvironment();
-    const scanner = createScanner();
+    const scanner = createScanner(unusedDefaultEnvironment(environment));
+    const sourceRoot = join(environment.workspace, "source-root");
+    const nestedSourceRoot = join(sourceRoot, "nested-source");
+    await createSkill(nestedSourceRoot, { name: "nested-source" });
 
     await expect(
       scanner.scan({
@@ -457,9 +631,24 @@ describe("Inventory scan", () => {
     ).rejects.toThrow(/outside its workspace/);
 
     await expect(
-      createInventoryScanner({ now: () => new Date(Number.NaN) }).scan({
-        roots: [],
+      scanner.scan({
+        roots: [sourceRoot, nestedSourceRoot].map((path) => ({
+          kind: "source" as const,
+          path,
+          agentId: null,
+          scope: null,
+          source: { id: "same-source", url: null },
+          adapterId: null,
+        })),
       }),
+    ).rejects.toThrow(/overlapping discovery roots/);
+
+    await expect(
+      createInventoryScanner({
+        now: () => new Date(Number.NaN),
+        environment: unusedDefaultEnvironment(environment),
+        commandRunner: unavailableCommandRunner,
+      }).scan({ roots: [] }),
     ).rejects.toMatchObject({
       code: "invalid-request",
       message: "inventory scanner clock returned an invalid date",

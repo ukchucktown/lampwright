@@ -73,7 +73,9 @@ const discoveryRoot = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const scanRequest = z.strictObject({ roots: z.array(discoveryRoot) });
+const scanRequest = z.strictObject({
+  roots: z.array(discoveryRoot).optional().default([]),
+});
 
 export function parseScanRequest(input: unknown): ScanRequest {
   const result = scanRequest.safeParse(input);

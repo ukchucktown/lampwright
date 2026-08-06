@@ -3,6 +3,10 @@ export { InventoryScanError } from "./types.js";
 export type {
   DiscoveryRoot,
   InventoryScanErrorCode,
+  InventoryCommand,
+  InventoryCommandResult,
+  InventoryCommandRunner,
+  InventoryScanEnvironment,
   InventoryScanner,
   InventoryScannerOptions,
   ScanRequest,

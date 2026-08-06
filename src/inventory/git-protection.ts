@@ -2,13 +2,17 @@ import { lstat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { GitProtection } from "../model/types.js";
-import { runCommand } from "./process.js";
+import type { InventoryCommandRunner } from "./types.js";
 
 export async function inspectGitProtection(
   artifactPath: string,
+  artifactIsDirectory: boolean,
+  commandRunner: InventoryCommandRunner,
 ): Promise<GitProtection> {
-  const workingDirectory = dirname(artifactPath);
-  const worktree = await findWorktree(workingDirectory);
+  const worktree = await findWorktree(
+    artifactIsDirectory ? artifactPath : dirname(artifactPath),
+    commandRunner,
+  );
   if (worktree === null) {
     return { kind: "outside-worktree" };
   }
@@ -16,27 +20,31 @@ export async function inspectGitProtection(
   const relativeArtifactPath = relative(worktree, artifactPath)
     .split(sep)
     .join("/");
-  const result = await runCommand("git", [
-    "-C",
-    worktree,
-    "check-ignore",
-    "--quiet",
-    "--",
-    relativeArtifactPath.length === 0 ? "." : relativeArtifactPath,
-  ]);
+  const result = await commandRunner.run({
+    executable: "git",
+    arguments: [
+      "-C",
+      worktree,
+      "check-ignore",
+      "--quiet",
+      "--",
+      relativeArtifactPath.length === 0 ? "." : relativeArtifactPath,
+    ],
+  });
 
   return result.exitCode === 0
     ? { kind: "ignored", worktreeRoot: worktree }
     : { kind: "protected", worktreeRoot: worktree };
 }
 
-async function findWorktree(startPath: string): Promise<string | null> {
-  const result = await runCommand("git", [
-    "-C",
-    startPath,
-    "rev-parse",
-    "--show-toplevel",
-  ]);
+async function findWorktree(
+  startPath: string,
+  commandRunner: InventoryCommandRunner,
+): Promise<string | null> {
+  const result = await commandRunner.run({
+    executable: "git",
+    arguments: ["-C", startPath, "rev-parse", "--show-toplevel"],
+  });
   if (result.exitCode === 0) {
     const output = result.stdout.replace(/\r?\n$/, "");
     return output.length === 0
