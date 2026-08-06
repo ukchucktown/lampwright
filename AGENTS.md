@@ -48,7 +48,7 @@ As implementation begins, organize code around the deep modules described in `do
 7. Update documentation when behavior or an interface changes. Update `CONTEXT.md` only when the domain language changes.
 8. Report what changed, what was verified, and any unresolved risk. Do not close an issue until every acceptance criterion is met.
 
-For Codex-authored branches, use the `codex/` prefix and include the issue number when practical, for example `codex/issue-4-generic-discovery`.
+For Codex-authored branches, use the `feat/` prefix and include the issue number when practical, for example `feat/issue-4-generic-discovery`.
 
 ## Architectural rules
 
@@ -102,6 +102,7 @@ For Codex-authored branches, use the `codex/` prefix and include the issue numbe
 
 - Preserve unrelated user changes and keep commits scoped to the assigned issue.
 - Prefer small, reviewable commits with messages that explain the delivered outcome.
+- After completing and verifying a change, commit it and push its branch to the remote so it is available for review. Never push directly to `main`.
 - Do not rewrite shared history or use destructive Git commands.
 - The repository remains private until the user explicitly changes that decision.
 - Issue #15 prepares release readiness but does not authorize npm publication or public visibility.
