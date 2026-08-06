@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,7 +41,9 @@ function createSafeBaseEnvironment(): NodeJS.ProcessEnv {
 }
 
 export async function createIsolatedTestEnvironment(): Promise<IsolatedTestEnvironment> {
-  const root = await mkdtemp(join(tmpdir(), "skill-cleaner-test-"));
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "skill-cleaner-test-")),
+  );
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   const config = join(root, "config");

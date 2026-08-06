@@ -1,7 +1,8 @@
-import { access } from "node:fs/promises";
+import { access, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { isAbsolute, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -74,6 +75,36 @@ describe("createIsolatedTestEnvironment", () => {
 
     expect(first.root).not.toBe(second.root);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "canonicalizes a symlinked temporary root",
+    async () => {
+      const physicalTemporaryRoot = await mkdtemp(
+        join(tmpdir(), "skill-cleaner-physical-"),
+      );
+      const linkedTemporaryRoot = `${physicalTemporaryRoot}-link`;
+      const originalTemporaryRoot = process.env.TMPDIR;
+      await symlink(physicalTemporaryRoot, linkedTemporaryRoot, "dir");
+      process.env.TMPDIR = linkedTemporaryRoot;
+
+      try {
+        const environment = await createTestEnvironment();
+
+        await expect(realpath(environment.root)).resolves.toBe(
+          environment.root,
+        );
+      } finally {
+        if (originalTemporaryRoot === undefined) {
+          delete process.env.TMPDIR;
+        } else {
+          process.env.TMPDIR = originalTemporaryRoot;
+        }
+
+        await rm(linkedTemporaryRoot, { force: true });
+        await rm(physicalTemporaryRoot, { force: true, recursive: true });
+      }
+    },
+  );
 
   it("does not pass unrelated host variables to child processes", async () => {
     const sentinelName = "SKILL_CLEANER_HOST_PATH_SENTINEL";
