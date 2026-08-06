@@ -58,12 +58,17 @@ with filesystem ownership or a project skill outside workspace scope.
 ## Plans and reports
 
 `RemovalPlan` is a side-effect-free value. Actions are ordered; `dependsOn` may
-only refer to an earlier action. Quarantine always requires explicit
-brute-force confirmation. Managed removal and quarantine for one target cannot
-appear in the same plan, so managed failure never silently activates fallback.
+only refer to an earlier action. Quarantine and declarative record cleanup
+always require explicit brute-force confirmation. Managed removal and
+brute-force actions for one target cannot appear in the same plan, so managed
+failure never silently activates fallback.
 Non-overridable Git, System Skill, permission, and adapter-trust blocks cannot
 have actions. Overridable dependency and ambiguity blocks require the matching
 force approval.
+
+Ephemeral package execution accepts exact Semantic Version values, including
+prerelease and build metadata. Mutable tags and version ranges are rejected at
+the model boundary before package trust can be approved.
 
 `ExecutionReport` records action, target, and verification outcomes. Result IDs
 must be unique, completion timestamps cannot precede start timestamps, and the

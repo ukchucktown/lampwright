@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-const nonEmptyString = z.string().trim().min(1);
+const nonEmptyString = z
+  .string()
+  .refine((value) => value.trim().length > 0, "must not be blank");
+const exactPackageVersion = z
+  .string()
+  .regex(
+    /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][0-9A-Za-z-]*))(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    "must be an exact package version",
+  );
 const timestamp = z.iso.datetime({ offset: true });
 const modelId = nonEmptyString;
 const jsonObject = z.record(z.string(), z.json());
@@ -315,7 +323,7 @@ const approvalRequirementSchema = z.discriminatedUnion("kind", [
     kind: z.literal("package-trust"),
     runner: nonEmptyString,
     packageName: nonEmptyString,
-    packageVersion: nonEmptyString,
+    packageVersion: exactPackageVersion,
     adapterHash: nonEmptyString,
   }),
 ]);
@@ -331,7 +339,7 @@ const fallbackAvailabilitySchema = z.discriminatedUnion("kind", [
 const packageExecutionSchema = z.strictObject({
   runner: nonEmptyString,
   packageName: nonEmptyString,
-  packageVersion: nonEmptyString,
+  packageVersion: exactPackageVersion,
   adapterHash: nonEmptyString,
   mayDownload: z.literal(true),
 });

@@ -112,16 +112,30 @@ function referenceKey(reference: InventoryRecordReference): string {
     : `finding:${reference.findingId}`;
 }
 
-function evidenceKey(evidence: StrongIdentityEvidence): string {
-  switch (evidence.kind) {
+function hasSameStrongIdentity(
+  left: StrongIdentityEvidence,
+  right: StrongIdentityEvidence,
+): boolean {
+  switch (left.kind) {
     case "source":
-      return `source:${evidence.sourceId}:${evidence.skillPath}`;
+      return (
+        right.kind === "source" &&
+        left.sourceId === right.sourceId &&
+        left.skillPath === right.skillPath
+      );
     case "plugin":
-      return `plugin:${evidence.pluginId}:${evidence.skillId}`;
+      return (
+        right.kind === "plugin" &&
+        left.pluginId === right.pluginId &&
+        left.skillId === right.skillId
+      );
     case "canonical-target":
-      return `canonical-target:${evidence.canonicalPath}`;
+      return (
+        right.kind === "canonical-target" &&
+        left.canonicalPath === right.canonicalPath
+      );
     case "package":
-      return `package:${evidence.packageId}`;
+      return right.kind === "package" && left.packageId === right.packageId;
   }
 }
 
@@ -387,12 +401,13 @@ function validateLogicalSkills(
         }
         groupedInstallations.add(installationId);
 
-        const evidence = new Set(
-          installation.identity.strongEvidence.map(evidenceKey),
-        );
         logicalSkill.identity.strongEvidence.forEach(
           (sharedEvidence, evidenceIndex) => {
-            if (!evidence.has(evidenceKey(sharedEvidence))) {
+            if (
+              !installation.identity.strongEvidence.some((evidence) =>
+                hasSameStrongIdentity(evidence, sharedEvidence),
+              )
+            ) {
               addIssue(
                 issues,
                 [
@@ -509,6 +524,10 @@ function hasApproval(
   return approvals.some(predicate);
 }
 
+function isBruteForceAction(action: RemovalAction): boolean {
+  return action.kind === "quarantine" || action.kind === "record-cleanup";
+}
+
 function validateAction(
   action: RemovalAction,
   actionIndex: number,
@@ -539,7 +558,7 @@ function validateAction(
   });
 
   if (
-    action.kind === "quarantine" &&
+    isBruteForceAction(action) &&
     !hasApproval(
       action.approvals,
       (approval) => approval.kind === "brute-force-confirmation",
@@ -548,7 +567,7 @@ function validateAction(
     addIssue(
       issues,
       [...path, "approvals"],
-      "quarantine requires separate brute-force confirmation",
+      "brute-force removal requires separate brute-force confirmation",
     );
   }
 
@@ -594,6 +613,16 @@ function validateBlocks(
         issues,
         ["blocks", blockIndex, "target"],
         "block target is not a plan target",
+      );
+    }
+    if (
+      block.kind === "hard-dependency" &&
+      targetKey(block.dependency.target) !== key
+    ) {
+      addIssue(
+        issues,
+        ["blocks", blockIndex, "dependency", "target"],
+        "hard dependency target must match the block target",
       );
     }
     const targetActions = actionsByTarget.get(key) ?? [];
@@ -657,11 +686,13 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
   });
 
   for (const [key, actions] of actionsByTarget) {
-    const kinds = new Set(actions.map((action) => action.kind));
-    if (kinds.has("managed-removal") && kinds.has("quarantine")) {
+    if (
+      actions.some((action) => action.kind === "managed-removal") &&
+      actions.some(isBruteForceAction)
+    ) {
       const index = plan.actions.findIndex(
         (action) =>
-          targetKey(action.target) === key && action.kind === "quarantine",
+          targetKey(action.target) === key && isBruteForceAction(action),
       );
       addIssue(
         issues,

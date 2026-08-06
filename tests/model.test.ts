@@ -44,6 +44,24 @@ describe("core model boundary validation", () => {
     ).toThrow(ModelValidationError);
   });
 
+  it("preserves leading and trailing whitespace in filesystem paths", () => {
+    const path = " /tmp/skill ";
+    const installation = parseInstallation({
+      ...buildInstallation(),
+      location: {
+        path,
+        canonicalPath: path,
+        artifactType: { kind: "directory" },
+      },
+    });
+
+    expect(installation.location.path).toBe(path);
+    expect(installation.location.canonicalPath).toBe(path);
+    expect(() =>
+      parseInstallation({ ...buildInstallation(), id: "   " }),
+    ).toThrow(/must not be blank/);
+  });
+
   it("rejects invalid ownership and scope combinations", () => {
     expect(() =>
       parseInstallation({
@@ -153,6 +171,54 @@ describe("core model boundary validation", () => {
         logicalSkills: [
           buildLogicalSkill({
             installationIds: ["installation-1", "installation-2"],
+          }),
+        ],
+      }),
+    ).toThrow(/strong evidence is not present/);
+  });
+
+  it("compares structured identity evidence without delimiter collisions", () => {
+    const first = buildInstallation({
+      identity: {
+        strongEvidence: [
+          {
+            strength: "strong",
+            kind: "source",
+            sourceId: "source:a",
+            skillPath: "skill",
+          },
+        ],
+        weakEvidence: [],
+      },
+    });
+    const second = buildInstallation({
+      id: "installation-2",
+      identity: {
+        strongEvidence: [
+          {
+            strength: "strong",
+            kind: "source",
+            sourceId: "source",
+            skillPath: "a:skill",
+          },
+        ],
+        weakEvidence: [],
+      },
+      location: {
+        path: "/fixtures/skills/second-skill",
+        canonicalPath: "/fixtures/skills/second-skill",
+        artifactType: { kind: "directory" },
+      },
+    });
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [first, second],
+        logicalSkills: [
+          buildLogicalSkill({
+            identity: first.identity,
+            installationIds: [first.id, second.id],
           }),
         ],
       }),
@@ -365,6 +431,138 @@ describe("removal plan invariants", () => {
       }),
     ).toThrow(/matching package trust/);
   });
+
+  it.each(["latest", "^1.2.3"])(
+    "rejects non-exact ephemeral package version %s",
+    (packageVersion) => {
+      expect(() =>
+        parseRemovalPlan({
+          ...buildRemovalPlan(),
+          actions: [
+            {
+              id: "action-1",
+              kind: "managed-removal",
+              target,
+              dependsOn: [],
+              approvals: [
+                {
+                  kind: "package-trust",
+                  runner: "npx",
+                  packageName: "fixture-manager",
+                  packageVersion,
+                  adapterHash: "adapter-hash",
+                },
+              ],
+              owner: {
+                kind: "manager",
+                managerId: "fixture-manager",
+                confidence: "declared",
+              },
+              adapterId: "fixture-adapter",
+              operationId: "remove",
+              packageExecution: {
+                runner: "npx",
+                packageName: "fixture-manager",
+                packageVersion,
+                adapterHash: "adapter-hash",
+                mayDownload: true,
+              },
+              fallback: { kind: "unavailable", reason: "manager owns state" },
+            },
+          ],
+        }),
+      ).toThrow(/exact package version/);
+    },
+  );
+
+  it("requires a hard-dependency block to identify its dependency target", () => {
+    const otherTarget = {
+      kind: "installation" as const,
+      installationId: "installation-2",
+    };
+
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        targets: [target, otherTarget],
+        actions: [
+          {
+            id: "action-1",
+            kind: "quarantine",
+            target: otherTarget,
+            dependsOn: [],
+            approvals: [{ kind: "brute-force-confirmation" }],
+            location: buildInstallation().location,
+          },
+        ],
+        blocks: [
+          {
+            kind: "hard-dependency",
+            target,
+            dependency: {
+              kind: "hard",
+              dependentInstallationId: "dependent-installation",
+              target: otherTarget,
+              source: { kind: "adapter", adapterId: "fixture-adapter" },
+              reason: "required by another installation",
+            },
+            overridable: true,
+          },
+        ],
+      }),
+    ).toThrow(/dependency target/);
+  });
+
+  it("treats declarative record cleanup as separately confirmed brute force", () => {
+    const recordCleanup = {
+      id: "action-cleanup",
+      kind: "record-cleanup" as const,
+      target,
+      dependsOn: [],
+      approvals: [{ kind: "confirmation" as const }],
+      path: "/fixtures/manager/record.json",
+      adapterId: "fixture-adapter",
+    };
+
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [recordCleanup],
+      }),
+    ).toThrow(/brute-force confirmation/);
+
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-managed",
+            kind: "managed-removal",
+            target,
+            dependsOn: [],
+            approvals: [{ kind: "confirmation" }],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            packageExecution: null,
+            fallback: {
+              kind: "available",
+              requiresSeparateConfirmation: true,
+            },
+          },
+          {
+            ...recordCleanup,
+            dependsOn: ["action-managed"],
+            approvals: [{ kind: "brute-force-confirmation" }],
+          },
+        ],
+      }),
+    ).toThrow(/separate plans/);
+  });
 });
 
 describe("execution reports and deterministic JSON", () => {
@@ -458,5 +656,28 @@ describe("execution reports and deterministic JSON", () => {
     expect(() => stringifyModel({ value: undefined })).toThrow(
       /cannot serialize undefined/,
     );
+  });
+
+  it("preserves an own __proto__ JSON property without changing prototypes", () => {
+    const input: unknown = JSON.parse(
+      '{"safe":1,"__proto__":{"polluted":true}}',
+    );
+    const normalized = toDeterministicJson(input);
+
+    expect(stringifyModel(input, 0)).toBe(
+      '{"__proto__":{"polluted":true},"safe":1}',
+    );
+    expect(normalized).not.toBeNull();
+    expect(Array.isArray(normalized)).toBe(false);
+    if (
+      normalized === null ||
+      Array.isArray(normalized) ||
+      typeof normalized !== "object"
+    ) {
+      throw new Error("expected a normalized JSON object");
+    }
+    expect(Object.hasOwn(normalized, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(normalized)).toBeNull();
+    expect(Object.prototype).not.toHaveProperty("polluted");
   });
 });

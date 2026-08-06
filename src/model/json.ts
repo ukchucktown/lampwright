@@ -54,7 +54,7 @@ function normalizeJson(
     throw new ModelSerializationError(path, "only plain objects are supported");
   }
 
-  const result: Record<string, JsonValue> = {};
+  const result = Object.create(null) as Record<string, JsonValue>;
   for (const key of Object.keys(value as object).sort()) {
     result[key] = normalizeJson((value as Record<string, unknown>)[key], [
       ...path,
