@@ -7,6 +7,16 @@
   "bin": {
     "skill-cleaner": "dist/cli.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -38,5 +48,8 @@
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.38.0",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

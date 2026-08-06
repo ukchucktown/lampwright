@@ -7,6 +7,7 @@ The project is currently in specification and planning. See:
 - [Domain language](./CONTEXT.md)
 - [Product specification](./docs/spec.md)
 - [Module design](./docs/module-design.md)
+- [Core model](./docs/model.md)
 - [Implementation roadmap](./docs/roadmap.md)
 - [Architectural decisions](./docs/adr/)
 
