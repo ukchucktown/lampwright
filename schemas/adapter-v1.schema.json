@@ -1,0 +1,755 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ukchucktown/skill-cleaner/raw/main/schemas/adapter-v1.schema.json",
+  "title": "skill-cleaner adapter v1",
+  "description": "Declarative local adapter definition for skill-cleaner.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "platforms"],
+  "properties": {
+    "$schema": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "$ref": "#/$defs/nonBlankString" },
+    "platforms": { "$ref": "#/$defs/platforms" },
+    "probes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/probe" }
+    },
+    "roots": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/root" }
+    },
+    "manifests": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/manifest" }
+    },
+    "ownershipRules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ownershipRule" }
+    },
+    "groupingRules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/groupingRule" }
+    },
+    "hardDependencies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hardDependency" }
+    },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "verificationRules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/verification" }
+    }
+  },
+  "$defs": {
+    "nonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+    },
+    "platform": {
+      "enum": ["darwin", "linux", "win32"]
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/platform" }
+    },
+    "declarationPlatforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/platform" }
+    },
+    "pathBase": {
+      "enum": ["home", "workspace", "config", "state", "cache", "temporary"]
+    },
+    "pathTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "segments"],
+      "properties": {
+        "base": { "$ref": "#/$defs/pathBase" },
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonBlankString" }
+        }
+      }
+    },
+    "pathVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "default": { "$ref": "#/$defs/pathTemplate" },
+        "darwin": { "$ref": "#/$defs/pathTemplate" },
+        "linux": { "$ref": "#/$defs/pathTemplate" },
+        "win32": { "$ref": "#/$defs/pathTemplate" }
+      }
+    },
+    "stringVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "default": { "$ref": "#/$defs/nonBlankString" },
+        "darwin": { "$ref": "#/$defs/nonBlankString" },
+        "linux": { "$ref": "#/$defs/nonBlankString" },
+        "win32": { "$ref": "#/$defs/nonBlankString" }
+      }
+    },
+    "commandArgument": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "literal" },
+            "value": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "from"],
+          "properties": {
+            "kind": { "const": "value" },
+            "from": {
+              "enum": [
+                "installationPath",
+                "canonicalPath",
+                "skillName",
+                "sourceId",
+                "pluginId",
+                "managerId",
+                "externalId",
+                "manifestPath",
+                "scopePath"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "arguments"],
+      "properties": {
+        "executable": { "$ref": "#/$defs/nonBlankString" },
+        "arguments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/commandArgument" }
+        }
+      }
+    },
+    "commandVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "default": { "$ref": "#/$defs/command" },
+        "darwin": { "$ref": "#/$defs/command" },
+        "linux": { "$ref": "#/$defs/command" },
+        "win32": { "$ref": "#/$defs/command" }
+      }
+    },
+    "selector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "literal" },
+            "value": {
+              "oneOf": [
+                { "type": "boolean" },
+                { "type": "number" },
+                { "type": "string" },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pointer"],
+          "properties": {
+            "kind": { "const": "pointer" },
+            "pointer": {
+              "type": "string",
+              "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "record-key" } }
+        }
+      ]
+    },
+    "probe": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path", "pathType"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "path" },
+            "path": { "$ref": "#/$defs/pathVariant" },
+            "pathType": { "enum": ["file", "directory"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "executable"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "executable" },
+            "executable": { "$ref": "#/$defs/stringVariant" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "command", "successExitCodes"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "command" },
+            "command": { "$ref": "#/$defs/commandVariant" },
+            "successExitCodes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          }
+        }
+      ]
+    },
+    "scope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "user" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "workspace" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "agentId"],
+          "properties": {
+            "kind": { "const": "agent" },
+            "agentId": { "$ref": "#/$defs/nonBlankString" }
+          }
+        }
+      ]
+    },
+    "root": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path", "agentId"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "enum": ["user", "agent", "workspace"] },
+            "path": { "$ref": "#/$defs/pathVariant" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "agentId": { "$ref": "#/$defs/nonBlankString" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "path",
+            "agentId",
+            "scope",
+            "plugin",
+            "independentlySelectable"
+          ],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "plugin" },
+            "path": { "$ref": "#/$defs/pathVariant" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "agentId": { "$ref": "#/$defs/nonBlankString" },
+            "scope": { "$ref": "#/$defs/scope" },
+            "plugin": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "version"],
+              "properties": {
+                "id": { "$ref": "#/$defs/nonBlankString" },
+                "version": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/nonBlankString" },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            },
+            "independentlySelectable": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path", "agentId", "scope", "source"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "source" },
+            "path": { "$ref": "#/$defs/pathVariant" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "agentId": {
+              "oneOf": [
+                { "$ref": "#/$defs/nonBlankString" },
+                { "type": "null" }
+              ]
+            },
+            "scope": {
+              "oneOf": [{ "$ref": "#/$defs/scope" }, { "type": "null" }]
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "url"],
+              "properties": {
+                "id": { "$ref": "#/$defs/nonBlankString" },
+                "url": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path", "agentId", "scope"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "enum": ["cache-or-vendor", "unknown"] },
+            "path": { "$ref": "#/$defs/pathVariant" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "agentId": {
+              "oneOf": [
+                { "$ref": "#/$defs/nonBlankString" },
+                { "type": "null" }
+              ]
+            },
+            "scope": {
+              "oneOf": [{ "$ref": "#/$defs/scope" }, { "type": "null" }]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path", "agentId"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "system" },
+            "path": { "$ref": "#/$defs/pathVariant" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "agentId": { "$ref": "#/$defs/nonBlankString" }
+          }
+        }
+      ]
+    },
+    "idList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "manifestFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skillName": { "$ref": "#/$defs/selector" },
+        "description": { "$ref": "#/$defs/selector" },
+        "skillPath": { "$ref": "#/$defs/selector" },
+        "sourceId": { "$ref": "#/$defs/selector" },
+        "sourceUrl": { "$ref": "#/$defs/selector" },
+        "pluginId": { "$ref": "#/$defs/selector" },
+        "pluginVersion": { "$ref": "#/$defs/selector" },
+        "managerId": { "$ref": "#/$defs/selector" },
+        "agentId": { "$ref": "#/$defs/selector" },
+        "status": { "$ref": "#/$defs/selector" },
+        "tags": { "$ref": "#/$defs/selector" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "format", "records", "fields"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+        "path": { "$ref": "#/$defs/pathVariant" },
+        "format": { "enum": ["json", "jsonc", "yaml"] },
+        "requiresProbes": { "$ref": "#/$defs/idList" },
+        "records": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pointer", "collection"],
+          "properties": {
+            "pointer": {
+              "type": "string",
+              "pattern": "^(?:/(?:[^~/]|~[01])*)*$"
+            },
+            "collection": {
+              "enum": ["single", "array", "object-values", "object-entries"]
+            }
+          }
+        },
+        "fields": { "$ref": "#/$defs/manifestFields" },
+        "metadata": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["namespace", "key", "value"],
+            "properties": {
+              "namespace": { "$ref": "#/$defs/id" },
+              "key": { "$ref": "#/$defs/id" },
+              "value": { "$ref": "#/$defs/selector" }
+            }
+          }
+        }
+      }
+    },
+    "ruleSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "rootId"],
+          "properties": {
+            "kind": { "const": "root" },
+            "rootId": { "$ref": "#/$defs/id" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "manifestId"],
+          "properties": {
+            "kind": { "const": "manifest" },
+            "manifestId": { "$ref": "#/$defs/id" }
+          }
+        }
+      ]
+    },
+    "ownership": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "filesystem" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "managerId"],
+          "properties": {
+            "kind": { "const": "manager" },
+            "managerId": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pluginId", "independentlySelectable"],
+          "properties": {
+            "kind": { "const": "plugin" },
+            "pluginId": { "$ref": "#/$defs/selector" },
+            "independentlySelectable": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "agentId"],
+          "properties": {
+            "kind": { "const": "agent-runtime" },
+            "agentId": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "unknown" } }
+        }
+      ]
+    },
+    "ownershipRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "ownership", "confidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+        "source": { "$ref": "#/$defs/ruleSource" },
+        "ownership": { "$ref": "#/$defs/ownership" },
+        "confidence": { "enum": ["declared", "inferred"] }
+      }
+    },
+    "groupingEvidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "sourceId", "skillPath"],
+          "properties": {
+            "kind": { "const": "source" },
+            "sourceId": { "$ref": "#/$defs/selector" },
+            "skillPath": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pluginId", "skillId"],
+          "properties": {
+            "kind": { "const": "plugin" },
+            "pluginId": { "$ref": "#/$defs/selector" },
+            "skillId": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "canonicalPath"],
+          "properties": {
+            "kind": { "const": "canonical-target" },
+            "canonicalPath": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "packageId"],
+          "properties": {
+            "kind": { "const": "package" },
+            "packageId": { "$ref": "#/$defs/selector" }
+          }
+        }
+      ]
+    },
+    "groupingRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "manifestId", "evidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+        "manifestId": { "$ref": "#/$defs/id" },
+        "evidence": { "$ref": "#/$defs/groupingEvidence" }
+      }
+    },
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "installationId"],
+          "properties": {
+            "kind": { "const": "installation" },
+            "installationId": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "logicalSkillId"],
+          "properties": {
+            "kind": { "const": "logical-skill" },
+            "logicalSkillId": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pluginId"],
+          "properties": {
+            "kind": { "const": "plugin" },
+            "pluginId": { "$ref": "#/$defs/selector" }
+          }
+        }
+      ]
+    },
+    "hardDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "manifestId",
+        "dependentInstallationId",
+        "target",
+        "reason"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+        "manifestId": { "$ref": "#/$defs/id" },
+        "dependentInstallationId": { "$ref": "#/$defs/selector" },
+        "target": { "$ref": "#/$defs/target" },
+        "reason": { "$ref": "#/$defs/selector" }
+      }
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "ownerKind", "operationId", "command"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "managed" },
+            "ownerKind": { "enum": ["manager", "plugin"] },
+            "operationId": { "$ref": "#/$defs/id" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "verificationRules": { "$ref": "#/$defs/idList" },
+            "command": { "$ref": "#/$defs/commandVariant" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "ownerKind",
+            "operationId",
+            "runner",
+            "packageName",
+            "packageVersion",
+            "mayDownload",
+            "arguments"
+          ],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "ephemeral-package" },
+            "ownerKind": { "enum": ["manager", "plugin"] },
+            "operationId": { "$ref": "#/$defs/id" },
+            "requiresProbes": { "$ref": "#/$defs/idList" },
+            "verificationRules": { "$ref": "#/$defs/idList" },
+            "runner": { "$ref": "#/$defs/stringVariant" },
+            "packageName": { "$ref": "#/$defs/nonBlankString" },
+            "packageVersion": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|(?:[0-9]*[A-Za-z-][0-9A-Za-z-]*))(?:\\.(?:(?:0|[1-9][0-9]*)|(?:[0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+            },
+            "mayDownload": { "const": true },
+            "arguments": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/commandArgument" }
+            }
+          }
+        }
+      ]
+    },
+    "verification": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "path-absent" },
+            "path": { "$ref": "#/$defs/pathVariant" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "manifestId", "selector"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "manifest-record-absent" },
+            "manifestId": { "$ref": "#/$defs/id" },
+            "selector": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "ownerKind", "externalId"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "owner-state-absent" },
+            "ownerKind": { "enum": ["manager", "plugin"] },
+            "externalId": { "$ref": "#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "command", "successExitCodes"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+            "kind": { "const": "command" },
+            "command": { "$ref": "#/$defs/commandVariant" },
+            "successExitCodes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
