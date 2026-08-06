@@ -90,6 +90,10 @@ export function buildSystemSkillFinding(
     classification: "system-skill",
     skill: { name: "runtime-skill", description: null },
     identity: { strongEvidence: [], weakEvidence: [] },
+    source: null,
+    plugin: null,
+    manager: null,
+    adapterId: "fixture-adapter",
     agentId: "fixture-agent",
     scope: { kind: "agent", agentId: "fixture-agent" },
     location: {
@@ -97,6 +101,8 @@ export function buildSystemSkillFinding(
       canonicalPath: "/fixtures/runtime/runtime-skill",
       artifactType: { kind: "directory" },
     },
+    contentHash: null,
+    modifiedAt: "2026-01-01T00:00:00.000Z",
     ownership: {
       kind: "agent-runtime",
       agentId: "fixture-agent",
@@ -107,6 +113,7 @@ export function buildSystemSkillFinding(
       system: { kind: "system-skill", agentId: "fixture-agent" },
       filesystem: { kind: "read-only", reason: "supplied by runtime" },
     },
+    tags: [],
     metadata: {},
     ...overrides,
   });
@@ -125,6 +132,10 @@ export function buildNonInstallationFinding(
         { strength: "weak", kind: "name", normalizedName: "source-skill" },
       ],
     },
+    source: { id: "fixture-source", url: null },
+    plugin: null,
+    manager: null,
+    adapterId: "fixture-adapter",
     agentId: null,
     scope: null,
     location: {
@@ -132,12 +143,15 @@ export function buildNonInstallationFinding(
       canonicalPath: "/fixtures/source/source-skill",
       artifactType: { kind: "directory" },
     },
+    contentHash: null,
+    modifiedAt: "2026-01-01T00:00:00.000Z",
     ownership: { kind: "filesystem", confidence: "inferred" },
     protection: {
       git: { kind: "outside-worktree" },
       system: { kind: "none" },
       filesystem: { kind: "writable" },
     },
+    tags: [],
     metadata: {},
     ...overrides,
   });
@@ -176,6 +190,7 @@ export function buildInventory(
     installations: [buildInstallation()],
     otherFindings: [],
     logicalSkills: [],
+    identityHints: [],
     dependencies: [],
     ...overrides,
   });

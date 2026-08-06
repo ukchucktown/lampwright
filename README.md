@@ -8,6 +8,7 @@ The project is currently in specification and planning. See:
 - [Product specification](./docs/spec.md)
 - [Module design](./docs/module-design.md)
 - [Core model](./docs/model.md)
+- [Inventory scanning](./docs/inventory.md)
 - [Implementation roadmap](./docs/roadmap.md)
 - [Architectural decisions](./docs/adr/)
 

@@ -43,6 +43,8 @@ collections:
   removable installations.
 - `logicalSkills` groups installations only when every member shares the
   declared strong identity evidence.
+- `identityHints` records shared names or hashes for display without merging
+  Installation identities.
 - `dependencies` stores Inventory-level relationships so hard dependencies and
   soft references can originate from either installations or other findings.
 

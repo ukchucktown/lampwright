@@ -242,11 +242,18 @@ interface NonInstallationFindingBase {
   readonly id: FindingId;
   readonly skill: SkillDescriptor;
   readonly identity: SkillIdentity;
+  readonly source: SourceReference | null;
+  readonly plugin: PluginReference | null;
+  readonly manager: ManagerReference | null;
+  readonly adapterId: string | null;
   readonly agentId: string | null;
   readonly scope: Scope | null;
   readonly location: ArtifactLocation;
+  readonly contentHash: string | null;
+  readonly modifiedAt: string | null;
   readonly ownership: Ownership;
   readonly protection: ProtectionStatus;
+  readonly tags: readonly string[];
   readonly metadata: JsonObject;
 }
 
@@ -275,6 +282,15 @@ export interface LogicalSkill {
   readonly installationIds: readonly [InstallationId, ...InstallationId[]];
 }
 
+export interface WeakIdentityHint {
+  readonly evidence: WeakIdentityEvidence;
+  readonly installationIds: readonly [
+    InstallationId,
+    InstallationId,
+    ...InstallationId[],
+  ];
+}
+
 export interface Inventory {
   readonly schemaVersion: 1;
   readonly id: InventoryId;
@@ -282,6 +298,7 @@ export interface Inventory {
   readonly installations: readonly Installation[];
   readonly otherFindings: readonly NonInstallationFinding[];
   readonly logicalSkills: readonly LogicalSkill[];
+  readonly identityHints: readonly WeakIdentityHint[];
   readonly dependencies: readonly Dependency[];
 }
 

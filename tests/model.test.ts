@@ -292,6 +292,35 @@ describe("core model boundary validation", () => {
       },
     ]);
   });
+
+  it("requires weak-match hints to reference shared evidence", () => {
+    const first = buildInstallation();
+    const second = buildInstallation({
+      id: "installation-2",
+      location: {
+        path: "/fixtures/skills/second-skill",
+        canonicalPath: "/fixtures/skills/second-skill",
+        artifactType: { kind: "directory" },
+      },
+    });
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [first, second],
+        identityHints: [
+          {
+            evidence: {
+              strength: "weak",
+              kind: "name",
+              normalizedName: "not-shared",
+            },
+            installationIds: [first.id, second.id],
+          },
+        ],
+      }),
+    ).toThrow(/weak evidence is not present/);
+  });
 });
 
 describe("removal plan invariants", () => {
