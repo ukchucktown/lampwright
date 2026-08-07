@@ -162,3 +162,36 @@ lock-record and link topology. This parser remains package-owned because the
 v1 declarative format cannot safely express evolving lock records, sanitized
 name collisions, XDG-aware canonical paths, or the one-to-many set of copies
 and links covered by a single remove command.
+
+## Claude Code plugin adapter
+
+The `claude-code.plugins` built-in models Claude Code plugins as whole-bundle
+ownership boundaries. Child Skills are discoverable and searchable, but are
+not independently selectable because Claude Code exposes lifecycle operations
+for the containing Plugin rather than its individual components. Plugin plans
+therefore disclose the known Skills, commands, agents, hooks, settings, MCP and
+LSP configuration, output styles, workflows, monitors, executables, persistent
+data, registry state, and the complete installed Plugin root.
+
+Managed removal invokes the already-installed Claude executable directly with
+the qualified Plugin identifier:
+
+```text
+claude plugin uninstall <plugin>@<marketplace> --scope <user|project|local> --yes
+```
+
+Project and local operations run from the exact workspace recorded by Claude;
+user operations run from an isolated temporary directory. The qualified
+uninstall is enabled only when the detected Claude Code version is 2.1.212 or
+newer. The action verifies the installed-plugin registry, the applicable scope
+settings record, and the final live Inventory. Claude may retain versioned
+cache content after uninstall, so cache persistence is reported as an orphaned
+non-installation cache artifact rather than treated as a failed lifecycle
+action.
+
+If the executable is absent, too old, or a managed attempt fails, a separate
+Brute-force plan may quarantine the exact installed root and remove only the
+hash-pinned registry and settings records. That plan always requires explicit
+Brute-force confirmation. It is unavailable for administrator-managed scope,
+unsafe or ambiguous manifests/records, and cache paths shared by multiple
+installed scopes.

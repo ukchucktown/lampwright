@@ -50,6 +50,7 @@ import {
 import { readSkillMetadata, type ParsedSkillMetadata } from "./metadata.js";
 import { systemCommandRunner } from "./process.js";
 import { parseScanRequest } from "./request-schema.js";
+import { scanClaudeCodePlugins } from "./claude-code-plugins.js";
 import { scanVercelSkills } from "./vercel-skills.js";
 import {
   InventoryScanError,
@@ -169,6 +170,10 @@ async function scanWithOptions(
     options.environment,
     options.commandRunner,
   );
+  const claudeCode = await scanClaudeCodePlugins(
+    options.environment,
+    options.commandRunner,
+  );
   const reconciledGenericInstallations = genericInstallations.map(
     (installation) =>
       vercel.invalidCanonicalRoots.some((root) =>
@@ -178,12 +183,14 @@ async function scanWithOptions(
         : installation,
   );
   const claimedPaths = new Set(
-    vercel.installations.flatMap((installation) => [
-      pathComparisonKey(installation.location.path),
-      ...(installation.removal.supplementalArtifacts ?? []).map((artifact) =>
-        pathComparisonKey(artifact.location.path),
-      ),
-    ]),
+    [...vercel.installations, ...claudeCode.installations].flatMap(
+      (installation) => [
+        pathComparisonKey(installation.location.path),
+        ...(installation.removal.supplementalArtifacts ?? []).map((artifact) =>
+          pathComparisonKey(artifact.location.path),
+        ),
+      ],
+    ),
   );
   const installations = [
     ...reconciledGenericInstallations.filter(
@@ -191,17 +198,25 @@ async function scanWithOptions(
         !claimedPaths.has(pathComparisonKey(installation.location.path)),
     ),
     ...vercel.installations,
+    ...claudeCode.installations,
   ].sort(compareRecordPath);
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
-  const plugins = await createPluginBoundaries(
-    installations,
+  const genericPlugins = await createPluginBoundaries(
+    installations.filter(
+      (installation) => installation.adapterId !== "claude-code.plugins",
+    ),
     roots,
     options.commandRunner,
   );
+  const plugins = [...genericPlugins, ...claudeCode.plugins].sort(
+    (left, right) => compareText(left.id, right.id),
+  );
   const snapshot = {
     installations,
-    otherFindings,
+    otherFindings: [...otherFindings, ...claudeCode.otherFindings].sort(
+      compareRecordPath,
+    ),
     logicalSkills,
     identityHints,
     plugins,

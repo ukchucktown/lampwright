@@ -158,3 +158,43 @@ removal; its exact declarative fallback remains separately confirmable.
 Injected `configDirectory` and `agentHomeDirectories` keep XDG and supported
 manager environment overrides explicit and make tests independent of the
 developer's real paths.
+
+## Claude Code plugin reconciliation
+
+Inventory reads Claude Code's version 2 installed-plugin registry from
+`<claude-config>/plugins/installed_plugins.json`. The config root is
+`CLAUDE_CONFIG_DIR` when supplied to the normal scanner and otherwise
+`~/.claude`; injected scanners use the `claude-code` agent home override. User
+and administrator-managed records apply globally. Project and local records
+apply only when their absolute `projectPath` exactly identifies the scanned
+workspace, and their scope settings are read from `.claude/settings.json` or
+`.claude/settings.local.json` in that workspace.
+
+Each applicable registry record becomes its own physical Plugin boundary,
+even when another scope contains the same qualified Plugin ID. The boundary ID
+includes the declared installed root, scope, and workspace evidence. Installed
+roots must remain under the exact versioned cache location
+`plugins/cache/<marketplace>/<plugin>/...`; a mismatched or externally resolved
+root is visible only as blocked Plugin state and grants no fallback authority.
+
+The scanner reads `.claude-plugin/plugin.json`, the default component
+directories, and safe manifest-declared component paths. Every `SKILL.md`
+child is a `managed-plugin-resource` Installation with strong Plugin-plus-Skill
+identity evidence and `independentlySelectable: false`. Directory, symbolic
+link, junction, and broken-link locations remain distinct filesystem facts.
+The complete Plugin root is also retained as collateral so fallback moves the
+bundle entry without traversing link targets.
+
+Marketplace checkout metadata is bounded to
+`plugins/marketplaces/*/.claude-plugin/marketplace.json`. Relative Plugin
+sources declared there, Plugin trees in the current project, and unreferenced
+versioned cache entries are `otherFindings`, not Installations. Their Skills
+are therefore visible for diagnosis without becoming removal targets. The
+scanner does not crawl arbitrary marketplace repositories or follow manifest
+paths outside their declared root.
+
+Registry and settings mutation evidence is accepted only from stable regular
+JSON files with unique keys and a single hard link. Declarative cleanup records
+carry exact file and record hashes. Shared cache paths, duplicate scope records,
+invalid manifests/settings, and administrator-managed records remain blocked
+instead of widening the removal boundary.

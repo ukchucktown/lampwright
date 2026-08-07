@@ -86,6 +86,58 @@ export const VERCEL_SKILLS_GLOBAL_AGENT_IDS = [
   "universal",
 ] as const;
 
+export const CLAUDE_CODE_PLUGIN_ADAPTER_ID = "claude-code.plugins";
+export const CLAUDE_CODE_EXECUTABLE = "claude";
+
+export type ClaudeCodePluginScope = "user" | "project" | "local";
+
+function claudePluginUninstallArgumentTemplates(scope: ClaudeCodePluginScope) {
+  return [
+    { kind: "literal" as const, value: "plugin" },
+    { kind: "literal" as const, value: "uninstall" },
+    { kind: "value" as const, from: "externalId" as const },
+    { kind: "literal" as const, value: "--scope" },
+    { kind: "literal" as const, value: scope },
+    { kind: "literal" as const, value: "--yes" },
+  ];
+}
+
+export function claudeCodePluginUninstallArguments(
+  scope: ClaudeCodePluginScope,
+  externalId: string,
+): readonly string[] {
+  return claudePluginUninstallArgumentTemplates(scope).map((argument) =>
+    argument.kind === "literal" ? argument.value : externalId,
+  );
+}
+
+const claudeCodePlugins = {
+  schemaVersion: 1,
+  id: CLAUDE_CODE_PLUGIN_ADAPTER_ID,
+  name: "Claude Code plugins",
+  platforms: ["darwin", "linux", "win32"],
+  probes: [
+    {
+      id: "claude-executable",
+      kind: "executable",
+      executable: { default: CLAUDE_CODE_EXECUTABLE },
+    },
+  ],
+  actions: (["user", "project", "local"] as const).map((scope) => ({
+    id: `uninstall-${scope}-plugin`,
+    kind: "managed" as const,
+    ownerKind: "plugin" as const,
+    operationId: `uninstall-${scope}-plugin`,
+    requiresProbes: ["claude-executable"],
+    command: {
+      default: {
+        executable: CLAUDE_CODE_EXECUTABLE,
+        arguments: claudePluginUninstallArgumentTemplates(scope),
+      },
+    },
+  })),
+} as const;
+
 function removalArgumentTemplates(scope: "global" | "project") {
   return [
     { kind: "literal" as const, value: "remove" },
@@ -171,9 +223,18 @@ export const VERCEL_SKILLS_ADAPTER_HASH = createHash("sha256")
   .update(vercelSkillsContent)
   .digest("hex");
 
+const claudeCodePluginsContent = `${JSON.stringify(claudeCodePlugins, null, 2)}\n`;
+export const CLAUDE_CODE_PLUGIN_ADAPTER_HASH = createHash("sha256")
+  .update(claudeCodePluginsContent)
+  .digest("hex");
+
 // Keeping the source list outside the public Adapter module prevents callers
 // from marking arbitrary local content as package-trusted built-in content.
 export const builtInAdapterSources: readonly BuiltInAdapterSource[] = [
+  {
+    name: "claude-code-plugins.jsonc",
+    content: claudeCodePluginsContent,
+  },
   {
     name: "vercel-skills.jsonc",
     content: vercelSkillsContent,
