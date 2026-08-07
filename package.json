@@ -20,7 +20,11 @@
     "./cli-v1.schema.json": "./schemas/cli-v1.schema.json"
   },
   "files": [
+    "CONTEXT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "dist",
+    "docs",
     "schemas"
   ],
   "engines": {
@@ -28,9 +32,12 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
     "lint": "eslint . --max-warnings 0",
+    "pack:check": "npm run build && node scripts/verify-package.mjs",
+    "prepack": "npm run build",
+    "release:candidate": "npm run pack:check && node scripts/create-release-candidate.mjs",
     "test": "npm run build && vitest run",
     "typecheck": "tsc --project tsconfig.json"
   },
@@ -42,6 +49,10 @@
     "url": "https://github.com/ukchucktown/skill-cleaner/issues"
   },
   "homepage": "https://github.com/ukchucktown/skill-cleaner#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@types/node": "^24.1.0",
