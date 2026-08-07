@@ -88,6 +88,29 @@ it("removes Windows namespaces before asking Node to create a junction", () => {
   );
 });
 
+it("recreates the same junction target across supported Windows versions", async () => {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const environment = await createTestEnvironment();
+  const target = join(environment.workspace, "junction-target");
+  const original = join(environment.home, "original-junction");
+  const recreated = join(environment.home, "recreated-junction");
+  await mkdir(target, { recursive: true });
+  await symlink(target, original, "junction");
+  const originalLink = await nodeQuarantineFileSystem.readLink(original);
+
+  await nodeQuarantineFileSystem.symlink(
+    junctionTargetForCreation(originalLink.target),
+    recreated,
+    "junction",
+  );
+
+  await expect(nodeQuarantineFileSystem.readLink(recreated)).resolves.toEqual(
+    originalLink,
+  );
+});
+
 function createHarness(
   stateRoot: string,
   options: {
