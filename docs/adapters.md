@@ -77,9 +77,40 @@ their absolute values for isolated environments. Empty, absolute, separator,
 `.` and `..` segments are rejected, so a definition cannot escape or request a
 recursive scan of an entire base directory.
 
+Compilation retains each selected absolute base internally alongside compiled
+roots, manifests, and static managed effects. Inventory preserves lexical paths
+for discovery and command context, but only uses an existing declared path when
+its resolved canonical path remains inside that selected base; a symlink or
+junction parent escape is inert.
+
 Manifest selectors are literals, RFC 6901 pointers relative to a record, or
 the key of a record in an object-entry collection. They do not evaluate code
 or expressions.
+
+## Inventory materialization
+
+Inventory accepts an already-compiled `AdapterCatalog`; presentation callers
+never interpret adapter files. A manifest must name its bounded `rootId`.
+Each declared `skillPath` must be a relative path inside that root and match
+exactly one Installation found during the same scan. Missing, duplicate,
+escaping, malformed, or cross-record evidence is inert: the generic finding
+remains visible and retains its generic authority.
+
+An ownership rule, grouping rule, dependency, or action is evaluated only in
+that exact root/manifest record context. Competing ownership or action claims
+fail closed. Managed evidence requires a matching Owner kind, external ID,
+active probes, fully resolved structured arguments, at least one complete
+effect, and every requested verification. Static effects are confined to their
+selected compiled path base; contextual effects are limited to the exact
+Installation or manifest. Adapters never manufacture a filesystem fallback
+for managed ownership; generic filesystem findings retain their
+separately-confirmed Quarantine fallback.
+
+Executable probes use PATH presence checks and do not invoke the executable.
+Structured command probes are the only probes that run a command. Adapter roots
+replace an equivalent default generic root; incompatible adapter claims for a
+single root are rejected deterministically. Scanning and adapter materializing
+perform no writes.
 
 ## Commands and package execution
 

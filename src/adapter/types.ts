@@ -110,6 +110,8 @@ export interface AdapterManifestFields {
   readonly pluginId?: AdapterValueSelector;
   readonly pluginVersion?: AdapterValueSelector;
   readonly managerId?: AdapterValueSelector;
+  /** Stable owner selector used by a bound managed operation. */
+  readonly externalId?: AdapterValueSelector;
   readonly agentId?: AdapterValueSelector;
   readonly status?: AdapterValueSelector;
   readonly tags?: AdapterValueSelector;
@@ -122,6 +124,8 @@ export interface AdapterMetadataMapping {
 }
 
 export interface AdapterManifestDefinition extends AdapterDeclarationBase {
+  /** The bounded root containing every skill path declared by this manifest. */
+  readonly rootId: string;
   readonly path: PlatformVariant<AdapterPathTemplate>;
   readonly format: AdapterManifestFormat;
   readonly requiresProbes?: readonly string[];
@@ -204,10 +208,28 @@ export interface AdapterHardDependencyDefinition extends AdapterDeclarationBase 
 }
 
 interface AdapterRemovalActionBase extends AdapterDeclarationBase {
+  /** The root or manifest record which supplies this operation's values. */
+  readonly source?: AdapterRuleSource;
   readonly ownerKind: "manager" | "plugin";
   readonly operationId: string;
   readonly requiresProbes?: readonly string[];
   readonly verificationRules?: readonly string[];
+  readonly effects?: readonly AdapterManagedEffectDefinition[];
+}
+
+export type AdapterManagedEffectPath =
+  | {
+      readonly kind: "static";
+      readonly path: PlatformVariant<AdapterPathTemplate>;
+    }
+  | {
+      readonly kind: "value";
+      readonly from: "installationPath" | "manifestPath";
+    };
+
+export interface AdapterManagedEffectDefinition {
+  readonly kind: "remove-path" | "modify-path";
+  readonly path: AdapterManagedEffectPath;
 }
 
 export type AdapterRemovalActionDefinition =
@@ -308,6 +330,8 @@ export interface CompiledAdapterRoot extends Omit<
   "path" | "scope"
 > {
   readonly path: string;
+  /** Lexically selected template base; retained for runtime canonical checks. */
+  readonly pathBase: string;
   readonly scope?: CompiledAdapterScope | null;
   readonly workspacePath?: string;
 }
@@ -317,14 +341,34 @@ export interface CompiledAdapterManifest extends Omit<
   "path"
 > {
   readonly path: string;
+  /** Lexically selected template base; retained for runtime canonical checks. */
+  readonly pathBase: string;
 }
+
+export type CompiledAdapterManagedEffect =
+  | {
+      readonly kind: "remove-path" | "modify-path";
+      readonly path: string;
+      /** Lexically selected template base; retained for runtime canonical checks. */
+      readonly pathBase: string;
+    }
+  | {
+      readonly kind: "remove-path" | "modify-path";
+      readonly value: "installationPath" | "manifestPath";
+    };
 
 export type CompiledAdapterRemovalAction =
   | (Omit<
       Extract<AdapterRemovalActionDefinition, { kind: "managed" }>,
-      "command"
-    > & { readonly command: AdapterCommandTemplate })
-  | Extract<AdapterRemovalActionDefinition, { kind: "ephemeral-package" }>;
+      "command" | "effects"
+    > & {
+      readonly command: AdapterCommandTemplate;
+      readonly effects: readonly CompiledAdapterManagedEffect[];
+    })
+  | (Omit<
+      Extract<AdapterRemovalActionDefinition, { kind: "ephemeral-package" }>,
+      "effects"
+    > & { readonly effects: readonly CompiledAdapterManagedEffect[] });
 
 export type CompiledAdapterVerification =
   | (Omit<

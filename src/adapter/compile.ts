@@ -6,6 +6,7 @@ import type {
   AdapterDefinitionV1,
   AdapterHardDependencyDefinition,
   AdapterManifestDefinition,
+  AdapterRemovalActionDefinition,
   AdapterOwnershipRule,
   AdapterPathBases,
   AdapterPathTemplate,
@@ -71,7 +72,9 @@ export function compileAdapter(
   const actions: CompiledAdapterRemovalAction[] = active(
     definition.actions,
     platform,
-  ).map((action) => compileAction(action, platform, sourcePath(source)));
+  ).map((action) =>
+    compileAction(action, platform, pathBases, sourcePath(source)),
+  );
   const verificationRules = active(definition.verificationRules, platform).map(
     (verification) =>
       compileVerification(
@@ -182,10 +185,11 @@ function compileProbe(
 function compileAction(
   action: NonNullable<AdapterDefinitionV1["actions"]>[number],
   platform: AdapterPlatform,
+  bases: AdapterPathBases,
   sourcePath_: string | null,
 ): CompiledAdapterRemovalAction {
   if (action.kind === "managed") {
-    const { command, ...base } = action;
+    const { command, effects = [], ...base } = action;
     return {
       ...normalizeDeclaration(base),
       command: selectVariant(
@@ -194,9 +198,41 @@ function compileAction(
         sourcePath_,
         `action ${action.id}`,
       ),
+      effects: compileEffects(effects, action.id, platform, bases, sourcePath_),
     };
   }
-  return normalizeDeclaration(action);
+  const { effects = [], ...base } = action;
+  return {
+    ...normalizeDeclaration(base),
+    effects: compileEffects(effects, action.id, platform, bases, sourcePath_),
+  };
+}
+
+function compileEffects(
+  effects: readonly NonNullable<
+    AdapterRemovalActionDefinition["effects"]
+  >[number][],
+  actionId: string,
+  platform: AdapterPlatform,
+  bases: AdapterPathBases,
+  sourcePath_: string | null,
+) {
+  return effects.map((effect) => ({
+    kind: effect.kind,
+    ...(effect.path.kind === "static"
+      ? compileCompiledPath(
+          selectVariant(
+            effect.path.path,
+            platform,
+            sourcePath_,
+            `action ${actionId} effect`,
+          ),
+          platform,
+          bases,
+          sourcePath_,
+        )
+      : { value: effect.path.from }),
+  }));
 }
 
 function compileRoot(
@@ -206,7 +242,7 @@ function compileRoot(
   sourcePath_: string | null,
 ): CompiledAdapterRoot {
   const { path: pathVariant, scope, ...base } = root;
-  const path = compilePath(
+  const compiledPath = compileCompiledPath(
     selectVariant(pathVariant, platform, sourcePath_, `root ${root.id}`),
     platform,
     bases,
@@ -220,13 +256,23 @@ function compileRoot(
   if (root.kind === "workspace") {
     return {
       ...normalized,
-      path,
+      path: compiledPath.path,
+      pathBase: compiledPath.pathBase,
       workspacePath: absoluteBase("workspace", platform, bases, sourcePath_),
     };
   }
   return compiledScope === undefined
-    ? { ...normalized, path }
-    : { ...normalized, path, scope: compiledScope };
+    ? {
+        ...normalized,
+        path: compiledPath.path,
+        pathBase: compiledPath.pathBase,
+      }
+    : {
+        ...normalized,
+        path: compiledPath.path,
+        pathBase: compiledPath.pathBase,
+        scope: compiledScope,
+      };
 }
 
 function compileScope(
@@ -251,7 +297,7 @@ function compileManifest(
 ): CompiledAdapterManifest {
   return {
     ...normalizeDeclaration(manifest),
-    path: compilePath(
+    ...compileCompiledPath(
       selectVariant(
         manifest.path,
         platform,
@@ -322,6 +368,15 @@ function compilePath(
   bases: AdapterPathBases,
   sourcePath_: string | null,
 ): string {
+  return compileCompiledPath(template, platform, bases, sourcePath_).path;
+}
+
+function compileCompiledPath(
+  template: AdapterPathTemplate,
+  platform: AdapterPlatform,
+  bases: AdapterPathBases,
+  sourcePath_: string | null,
+): { readonly path: string; readonly pathBase: string } {
   validatePathTemplate(template, sourcePath_);
   const pathImplementation = platform === "win32" ? win32 : posix;
   const base = absoluteBase(template.base, platform, bases, sourcePath_);
@@ -338,7 +393,7 @@ function compilePath(
       sourcePath_,
     );
   }
-  return result;
+  return { path: result, pathBase: base };
 }
 
 function absoluteBase(
@@ -415,6 +470,11 @@ function validateDefinitionSemantics(
   for (const action of definition.actions ?? []) {
     if (action.kind === "managed") {
       validateVariants(action.command, action, definition, sourcePath_);
+    }
+    for (const effect of action.effects ?? []) {
+      if (effect.path.kind === "static") {
+        validatePathVariants(effect.path.path, action, definition, sourcePath_);
+      }
     }
   }
   for (const verification of definition.verificationRules ?? []) {
@@ -546,10 +606,29 @@ function validateAllReferences(
       requireReference(probes, probeId, "probe", declaration.id, sourcePath_);
     }
   }
+  for (const manifest of definition.manifests ?? []) {
+    if (manifest.rootId === undefined) {
+      throw new AdapterLoadError(
+        "invalid-reference",
+        `manifest ${manifest.id} requires rootId`,
+        sourcePath_,
+      );
+    }
+    requireReference(roots, manifest.rootId, "root", manifest.id, sourcePath_);
+  }
   for (const rule of definition.ownershipRules ?? []) {
     validateRuleSource(rule.source, roots, manifests, rule.id, sourcePath_);
   }
   for (const action of definition.actions ?? []) {
+    if (action.source !== undefined) {
+      validateRuleSource(
+        action.source,
+        roots,
+        manifests,
+        action.id,
+        sourcePath_,
+      );
+    }
     for (const verificationId of action.verificationRules ?? []) {
       requireReference(
         verifications,
@@ -626,10 +705,35 @@ function validateActiveReferences(
       );
     }
   }
+  for (const manifest of values.manifests) {
+    if (manifest.rootId === undefined) {
+      throw new AdapterLoadError(
+        "invalid-reference",
+        `active manifest ${manifest.id} requires rootId`,
+        sourcePath_,
+      );
+    }
+    requireReference(
+      roots,
+      manifest.rootId,
+      "active root",
+      manifest.id,
+      sourcePath_,
+    );
+  }
   for (const rule of values.ownershipRules) {
     validateRuleSource(rule.source, roots, manifests, rule.id, sourcePath_);
   }
   for (const action of values.actions) {
+    if (action.source !== undefined) {
+      validateRuleSource(
+        action.source,
+        roots,
+        manifests,
+        action.id,
+        sourcePath_,
+      );
+    }
     for (const verificationId of action.verificationRules ?? []) {
       requireReference(
         verifications,
