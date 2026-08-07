@@ -8,7 +8,11 @@ export function physicalPathKey(location: ArtifactLocation): string {
 }
 
 export function artifactPathKey(location: ArtifactLocation): string {
-  return normalizedPathKey(location.path);
+  return mutationPathKey(location.path);
+}
+
+export function mutationPathKey(path: string): string {
+  return normalizedPathKey(path);
 }
 
 export function locationContains(

@@ -64,6 +64,10 @@ export interface InventoryScannerOptions {
 export interface InventoryScanEnvironment {
   readonly homeDirectory: string;
   readonly workspaceDirectory: string;
+  readonly configDirectory?: string;
+  readonly stateDirectory?: string | null;
+  readonly nodeVersion?: string;
+  readonly agentHomeDirectories?: Readonly<Record<string, string>>;
 }
 
 export interface InventoryCommand {

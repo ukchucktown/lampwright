@@ -50,6 +50,7 @@ import {
 import { readSkillMetadata, type ParsedSkillMetadata } from "./metadata.js";
 import { systemCommandRunner } from "./process.js";
 import { parseScanRequest } from "./request-schema.js";
+import { scanVercelSkills } from "./vercel-skills.js";
 import {
   InventoryScanError,
   type DiscoveryRoot,
@@ -82,11 +83,30 @@ export function createInventoryScanner(
 }
 
 export async function scan(request: ScanRequest = {}): Promise<Inventory> {
+  const homeDirectory = homedir();
   return scanWithOptions(request, {
     now: () => new Date(),
     environment: {
-      homeDirectory: homedir(),
+      homeDirectory,
       workspaceDirectory: process.cwd(),
+      configDirectory:
+        process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
+      stateDirectory: process.env.XDG_STATE_HOME || null,
+      nodeVersion: process.versions.node,
+      agentHomeDirectories: Object.fromEntries(
+        [
+          ["autohand-code", process.env.AUTOHAND_HOME],
+          ["claude-code", process.env.CLAUDE_CONFIG_DIR],
+          ["codex", process.env.CODEX_HOME],
+          ["grok", process.env.GROK_HOME],
+          ["hermes-agent", process.env.HERMES_HOME],
+          ["mistral-vibe", process.env.VIBE_HOME],
+        ].flatMap(([agentId, path]) =>
+          typeof path === "string" && path.trim().length > 0
+            ? [[agentId, path.trim()]]
+            : [],
+        ),
+      ),
     },
     commandRunner: systemCommandRunner,
   });
@@ -141,8 +161,37 @@ async function scanWithOptions(
         materializeCandidate(candidate, options.commandRunner),
       ),
   );
-  const installations = records.filter(isInstallation).sort(compareRecordPath);
+  const genericInstallations = records
+    .filter(isInstallation)
+    .sort(compareRecordPath);
   const otherFindings = records.filter(isOtherFinding).sort(compareRecordPath);
+  const vercel = await scanVercelSkills(
+    options.environment,
+    options.commandRunner,
+  );
+  const reconciledGenericInstallations = genericInstallations.map(
+    (installation) =>
+      vercel.invalidCanonicalRoots.some((root) =>
+        pathIsWithin(root, installation.location.path),
+      )
+        ? blockForInvalidVercelLock(installation)
+        : installation,
+  );
+  const claimedPaths = new Set(
+    vercel.installations.flatMap((installation) => [
+      pathComparisonKey(installation.location.path),
+      ...(installation.removal.supplementalArtifacts ?? []).map((artifact) =>
+        pathComparisonKey(artifact.location.path),
+      ),
+    ]),
+  );
+  const installations = [
+    ...reconciledGenericInstallations.filter(
+      (installation) =>
+        !claimedPaths.has(pathComparisonKey(installation.location.path)),
+    ),
+    ...vercel.installations,
+  ].sort(compareRecordPath);
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
   const plugins = await createPluginBoundaries(
@@ -169,6 +218,41 @@ async function scanWithOptions(
     scannedAt,
     ...snapshot,
   });
+}
+
+function blockForInvalidVercelLock(installation: Installation): Installation {
+  return {
+    ...installation,
+    status: "unresolved",
+    manager: null,
+    plugin: null,
+    adapterId: null,
+    pluginBoundaryId: null,
+    ownership: { kind: "unknown", confidence: "unknown" },
+    removal: {
+      managed: null,
+      fallback: {
+        kind: "unavailable",
+        reason: "the Vercel skills lock is invalid or unsafe to read",
+      },
+      supplementalArtifacts: [],
+      recordCleanups: [],
+    },
+    metadata: {
+      ...installation.metadata,
+      "vercel-skills": { lockState: "invalid" },
+    },
+  };
+}
+
+function pathIsWithin(rootPath: string, candidatePath: string): boolean {
+  const relativePath = relative(rootPath, candidatePath);
+  return (
+    relativePath.length === 0 ||
+    (relativePath !== ".." &&
+      !relativePath.startsWith(`..${sep}`) &&
+      !isAbsolute(relativePath))
+  );
 }
 
 function validateAndNormalizeRequest(
@@ -246,11 +330,19 @@ function validateEnvironment(options: InventoryScannerOptions): void {
   if (
     options.environment === undefined ||
     !isAbsolute(options.environment.homeDirectory) ||
-    !isAbsolute(options.environment.workspaceDirectory)
+    !isAbsolute(options.environment.workspaceDirectory) ||
+    (options.environment.configDirectory !== undefined &&
+      !isAbsolute(options.environment.configDirectory)) ||
+    (options.environment.stateDirectory !== undefined &&
+      options.environment.stateDirectory !== null &&
+      !isAbsolute(options.environment.stateDirectory)) ||
+    Object.values(options.environment.agentHomeDirectories ?? {}).some(
+      (path) => !isAbsolute(path),
+    )
   ) {
     throw new InventoryScanError(
       "invalid-request",
-      "inventory scanner requires absolute home and workspace directories",
+      "inventory scanner requires absolute configured environment directories",
     );
   }
   if (typeof options.commandRunner?.run !== "function") {
@@ -549,6 +641,7 @@ function createInstallation(
         kind: "available",
         requiresSeparateConfirmation: true,
       },
+      supplementalArtifacts: [],
       recordCleanups: [],
     },
     tags: metadata.tags,
@@ -626,6 +719,7 @@ async function createPluginBoundaries(
           kind: "available",
           requiresSeparateConfirmation: true,
         },
+        supplementalArtifacts: [],
         recordCleanups: [],
       },
     });

@@ -32,11 +32,11 @@ adapter can point an editor at the installed copy:
       "path": {
         "default": {
           "base": "home",
-          "segments": [".example-agent", "skills"]
-        }
-      }
-    }
-  ]
+          "segments": [".example-agent", "skills"],
+        },
+      },
+    },
+  ],
 }
 ```
 
@@ -131,5 +131,34 @@ metadata by namespace and key. Command argument order is preserved. Equivalent
 request order therefore produces the same immutable catalog.
 
 The package's private built-in source list enters the same JSONC parse, schema,
-safety, reference, variant, and compilation pipeline as local content. The
-ecosystem definitions themselves are intentionally left to issues #9–#12.
+safety, reference, variant, and compilation pipeline as local content.
+
+## Vercel `skills` adapter
+
+The `vercel.skills` built-in pins the native fallback package to
+`skills@1.5.22`. An installed `skills` executable is preferred. When it is
+missing, only global removal may use the pinned `npx` envelope, and only on the
+Node.js versions supported by that package. Project removal requires the
+installed executable because the manager derives project scope from its
+working directory; running the package from the cleaner's isolated ephemeral
+directory would target the wrong scope.
+
+Global commands pass the pinned set of agents that support global installation
+instead of relying on the manager's default all-agent expansion. In
+`skills@1.5.22`, that default also visits project-only Eve and PromptScript
+paths relative to the command's current directory. Excluding those agents
+keeps a global action from mutating an unrelated workspace while retaining all
+declared global paths. The command and path registries are checked together so
+they cannot drift silently.
+
+Installed global commands run from a fresh temporary directory. This prevents
+the manager's current-directory PromptScript detection from treating an
+unselected project-only agent as a remaining user of the global universal
+canonical directory. Project commands instead pin the scanned workspace as
+their exact working directory.
+
+Inventory supplements the compiled command definition with the manager's
+lock-record and link topology. This parser remains package-owned because the
+v1 declarative format cannot safely express evolving lock records, sanitized
+name collisions, XDG-aware canonical paths, or the one-to-many set of copies
+and links covered by a single remove command.

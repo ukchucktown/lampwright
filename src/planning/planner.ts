@@ -488,12 +488,22 @@ function addBoundaryAmbiguityAndProtectionBlocks(
           state.safeguards.add("ambiguity");
         }
       }
-      addProtectionBlocks(
-        state,
-        target,
-        installation.location.path,
-        installation.protection,
-      );
+      if (installation.removal.primaryArtifactPresent !== false) {
+        addProtectionBlocks(
+          state,
+          target,
+          installation.location.path,
+          installation.protection,
+        );
+      }
+      for (const artifact of installation.removal.supplementalArtifacts ?? []) {
+        addProtectionBlocks(
+          state,
+          target,
+          artifact.location.path,
+          artifact.protection,
+        );
+      }
     }
 
     for (const resource of state.resolved.plugin?.resources ?? []) {
@@ -1297,7 +1307,12 @@ function createQuarantineEntries(
     entries.set(key, entry);
   };
   for (const installation of unit.installations) {
-    addEntry(installation.location, [installation.id]);
+    if (installation.removal.primaryArtifactPresent !== false) {
+      addEntry(installation.location, [installation.id]);
+    }
+    for (const artifact of installation.removal.supplementalArtifacts ?? []) {
+      addEntry(artifact.location, [installation.id]);
+    }
   }
   for (const resource of unit.state.resolved.plugin?.resources ?? []) {
     if (resource.location !== null) {

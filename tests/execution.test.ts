@@ -195,7 +195,21 @@ describe("Execution", () => {
     const target = installationTarget("installation-1");
     const removalPlan = planWithActions(
       [target],
-      [managedAction("action-1", target)],
+      [
+        managedAction("action-1", target, {
+          invocation: {
+            kind: "direct",
+            command: {
+              executable: "fixture-manager",
+              arguments: ["remove", "action-1"],
+            },
+            workingDirectory: {
+              kind: "exact",
+              path: "/fixtures/project",
+            },
+          },
+        }),
+      ],
     );
     const run = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const options = harness({
@@ -212,6 +226,7 @@ describe("Execution", () => {
         executable: "fixture-manager",
         arguments: ["remove", "action-1"],
       },
+      cwd: "/fixtures/project",
       environment: {
         DISABLE_TELEMETRY: "1",
         DO_NOT_TRACK: "1",

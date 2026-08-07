@@ -1,3 +1,5 @@
+import { posix, win32 } from "node:path";
+
 import { z } from "zod";
 
 import {
@@ -8,6 +10,10 @@ import {
 const nonEmptyString = z
   .string()
   .refine((value) => value.trim().length > 0, "must not be blank");
+const absoluteFilesystemPath = nonEmptyString.refine(
+  (value) => posix.isAbsolute(value) || win32.isAbsolute(value),
+  "must be an absolute filesystem path",
+);
 const exactPackageVersion = z
   .string()
   .regex(
@@ -278,6 +284,16 @@ const managedRemovalInvocationSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("direct"),
     command: executableCommandSchema,
+    workingDirectory: z
+      .discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("exact"),
+          path: absoluteFilesystemPath,
+        }),
+        z.strictObject({ kind: z.literal("isolated-temporary") }),
+      ])
+      .nullable()
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal("ephemeral-package"),
@@ -365,6 +381,15 @@ const declarativeRecordCleanupSchema = z.strictObject({
 const removalEvidenceSchema = z.strictObject({
   managed: managedRemovalEvidenceSchema.nullable(),
   fallback: fallbackAvailabilitySchema,
+  primaryArtifactPresent: z.boolean().optional(),
+  supplementalArtifacts: z
+    .array(
+      z.strictObject({
+        location: artifactLocationSchema,
+        protection: protectionStatusSchema,
+      }),
+    )
+    .default([]),
   recordCleanups: z.array(declarativeRecordCleanupSchema),
 });
 

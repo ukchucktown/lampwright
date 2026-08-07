@@ -23,6 +23,9 @@ const scanner = createInventoryScanner({
   environment: {
     homeDirectory: fixture.home,
     workspaceDirectory: fixture.workspace,
+    configDirectory: fixture.config,
+    stateDirectory: fixture.state,
+    nodeVersion: "22.20.0",
   },
   commandRunner: fakeCommandRunner,
 });
@@ -102,3 +105,56 @@ or content hashes create `identityHints` only; they never merge Installations.
 
 Scanning performs reads and structured Git queries only. It creates no config,
 state, cache, quarantine, or temporary files.
+
+## Vercel `skills` reconciliation
+
+When either `<workspace>/skills-lock.json` or the global Vercel lock exists,
+Inventory reads the regular JSON file and reconciles every lock key against
+the bounded path registry pinned to `skills@1.5.22`. The global lock is
+`$XDG_STATE_HOME/skills/.skill-lock.json` when a state directory is supplied,
+and `~/.agents/.skill-lock.json` otherwise. Global and project canonical
+installations are respectively under `~/.agents/skills` and
+`<workspace>/.agents/skills`. Known agent-native copies, links, legacy
+universal paths, and bounded Eve subagent directories are inspected without
+crawling the home or workspace.
+
+One manager-owned Installation represents one lock key in one scope. Its
+primary location is the canonical directory when present, otherwise the first
+exact copy; every other exact link or copy is retained as supplemental removal
+collateral. A lock-only record remains visible with `broken` status, marks its
+expected primary artifact absent, and can use record-only declarative fallback.
+Namespaced
+`vercel-skills` metadata records the exact lock key, sanitized name, lock
+format/version, source type, source/plugin fields, agents, install mode, ref,
+and stale state. Only a present `(source, skillPath)` pair becomes strong
+identity evidence. A source or plugin name alone remains searchable metadata
+and never merges unrelated Skills.
+
+Manager ownership is limited to paths produced by the pinned registry for the
+exact sanitized lock key. A link is accepted only when it targets that entry's
+canonical path. Current project copies must match the lock's `computedHash`
+using the manager's own hashing algorithm; a changed copy remains visible but
+native and declarative removal are unavailable. Legacy copy records without a
+hash retain the lock's declared ownership evidence.
+
+The same namespace exposes deterministic `sourceGroupId` and `pluginGroupId`
+selection hints. Source groups bind scope plus source; plugin-name groups bind
+scope, source, and plugin name so equal labels from unrelated sources cannot
+collide. Selecting one of these hints expands to the group's exact Installation
+targets in a normal multi-target intent. These are batch-selection groups, not
+Logical Skill identity evidence, and they never merge their member Skills.
+
+The parser accepts numeric lock versions while ignoring unknown fields. Native
+removal is available only for versions understood by `skills@1.5.22` (global
+version 3 or newer and project version 1 or newer); older records retain exact
+declarative fallback. It rejects malformed documents, duplicate keys, non-object
+records, symlinked or hard-linked lock files, and sanitized lock-key collisions
+for mutation. A canonical Skill underneath an invalid lock remains visible as
+unresolved but exposes no cleanup authority. Collision entries likewise expose
+neither native nor declarative fallback, because the manager's sanitized
+selector could otherwise remove the wrong artifact. A lock key that the
+manager would parse as a command option or unsafe argument disables only native
+removal; its exact declarative fallback remains separately confirmable.
+Injected `configDirectory` and `agentHomeDirectories` keep XDG and supported
+manager environment overrides explicit and make tests independent of the
+developer's real paths.

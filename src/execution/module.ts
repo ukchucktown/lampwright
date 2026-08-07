@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import { stringifyModel } from "../model/json.js";
+import { mutationPathKey } from "../model/paths.js";
 import type {
   ActionResult,
   ApprovalRequirement,
@@ -31,7 +32,10 @@ import {
   prepareRecordCleanup,
   verifyRecordAbsent,
 } from "./records.js";
-import { prepareEphemeralExecutionState } from "./state.js";
+import {
+  prepareEphemeralExecutionState,
+  prepareIsolatedExecutionWorkingDirectory,
+} from "./state.js";
 import type {
   Approvals,
   ExecutionModule,
@@ -192,13 +196,12 @@ async function executeActions(
   const concurrency = options.maxConcurrency ?? 4;
 
   while (remaining.size > 0) {
-    const ready = plan.actions
-      .filter(
-        (action) =>
-          remaining.has(action.id) &&
-          action.dependsOn.every((dependency) => results.has(dependency)),
-      )
-      .slice(0, concurrency);
+    const ready = selectReadyActions(
+      plan.actions,
+      remaining,
+      results,
+      concurrency,
+    );
     if (ready.length === 0) {
       throw new ExecutionModuleError(
         "invalid-options",
@@ -216,6 +219,40 @@ async function executeActions(
     });
   }
   return plan.actions.map((action) => results.get(action.id)!);
+}
+
+function selectReadyActions(
+  actions: readonly RemovalAction[],
+  remaining: ReadonlySet<string>,
+  results: ReadonlyMap<string, ActionResult>,
+  concurrency: number,
+): RemovalAction[] {
+  const selected: RemovalAction[] = [];
+  const claimedMutationPaths = new Set<string>();
+  for (const action of actions) {
+    if (
+      selected.length >= concurrency ||
+      !remaining.has(action.id) ||
+      !action.dependsOn.every((dependency) => results.has(dependency))
+    ) {
+      continue;
+    }
+    const mutationPaths = managedMutationPaths(action);
+    if (mutationPaths.some((path) => claimedMutationPaths.has(path))) {
+      continue;
+    }
+    selected.push(action);
+    mutationPaths.forEach((path) => claimedMutationPaths.add(path));
+  }
+  return selected;
+}
+
+function managedMutationPaths(action: RemovalAction): readonly string[] {
+  return action.kind === "managed-removal"
+    ? action.effects
+        .filter((effect) => effect.kind === "modify-path")
+        .map((effect) => mutationPathKey(effect.path))
+    : [];
 }
 
 async function runAction(
@@ -361,12 +398,34 @@ async function executeManagedRemoval(
   }
 
   if (action.invocation.kind === "direct") {
-    const result = await options.processRunner.run({
-      command: action.invocation.command,
-      environment: ownerPrivacyEnvironment,
-    });
+    const isolated =
+      action.invocation.workingDirectory?.kind === "isolated-temporary"
+        ? await prepareIsolatedExecutionWorkingDirectory()
+        : null;
+    let temporaryCleanupSucceeded: boolean | null = null;
+    let result: ExecutionProcessResult;
+    try {
+      result = await options.processRunner.run({
+        command: action.invocation.command,
+        environment: ownerPrivacyEnvironment,
+        ...(isolated !== null
+          ? { cwd: isolated.cwd }
+          : action.invocation.workingDirectory?.kind === "exact"
+            ? { cwd: action.invocation.workingDirectory.path }
+            : {}),
+      });
+    } finally {
+      if (isolated !== null) {
+        temporaryCleanupSucceeded = true;
+        try {
+          await isolated.cleanup();
+        } catch {
+          temporaryCleanupSucceeded = false;
+        }
+      }
+    }
     requireSuccessfulOwnerExit(result.exitCode);
-    return ownerSuccess(action, result.exitCode, null);
+    return ownerSuccess(action, result.exitCode, temporaryCleanupSucceeded);
   }
 
   const packageExecution = action.invocation.packageExecution;
