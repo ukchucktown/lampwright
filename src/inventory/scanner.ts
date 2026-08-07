@@ -121,7 +121,8 @@ async function scanWithOptions(
   request: ScanRequest,
   options: InventoryScannerOptions,
 ): Promise<Inventory> {
-  const requestRoots = validateAndNormalizeRequest(request, options);
+  const { roots: requestRoots, explicitRootKeys } =
+    await validateAndNormalizeRequest(request, options);
   if (
     options.adapterCatalog?.adapters.some((adapter) =>
       requestRoots.some((root) => root.adapterId === adapter.id),
@@ -162,11 +163,22 @@ async function scanWithOptions(
         existing !== undefined &&
         !(await rootsDescribeSameBoundary(existing.root, candidate.root))
       ) {
-        throw new InventoryScanError(
-          "invalid-request",
-          `overlapping discovery roots classify ${candidate.path} differently`,
-          candidate.path,
+        const preferred = moreSpecificRoot(
+          existing.root,
+          candidate.root,
+          explicitRootKeys,
         );
+        if (preferred === null) {
+          throw new InventoryScanError(
+            "invalid-request",
+            `overlapping discovery roots classify ${candidate.path} differently`,
+            candidate.path,
+          );
+        }
+        if (preferred === candidate.root) {
+          candidatesByPath.set(key, candidate);
+        }
+        continue;
       }
       if (existing === undefined) {
         candidatesByPath.set(key, candidate);
@@ -326,6 +338,52 @@ function blockForInvalidVercelLock(installation: Installation): Installation {
   };
 }
 
+/**
+ * Resolves two roots that classify one path differently.
+ *
+ * A root declared strictly inside another describes a narrower boundary and
+ * wins, which is how a marked runtime subtree overrides the ordinary agent root
+ * containing it. Roots that do not contain one another remain a contradiction
+ * the caller must fix, so the overlap check keeps its meaning.
+ */
+function moreSpecificRoot(
+  left: DiscoveryRoot,
+  right: DiscoveryRoot,
+  explicitRootKeys: ReadonlySet<string>,
+): DiscoveryRoot | null {
+  if (pathComparisonKey(left.path) === pathComparisonKey(right.path)) {
+    return null;
+  }
+  const [outer, inner] = pathIsWithin(left.path, right.path)
+    ? ([left, right] as const)
+    : pathIsWithin(right.path, left.path)
+      ? ([right, left] as const)
+      : ([null, null] as const);
+  if (outer === null || inner === null) {
+    return null;
+  }
+  // A declared root may narrow only toward protection. Widening what is
+  // removable requires a root the caller supplied for this invocation.
+  if (
+    !explicitRootKeys.has(pathComparisonKey(inner.path)) &&
+    rootWithholdsRemoval(outer) &&
+    !rootWithholdsRemoval(inner)
+  ) {
+    return null;
+  }
+  return inner;
+}
+
+/** Whether a root's findings are kept outside ordinary removal candidates. */
+function rootWithholdsRemoval(root: DiscoveryRoot): boolean {
+  return (
+    root.kind === "source" ||
+    root.kind === "cache-or-vendor" ||
+    root.kind === "system" ||
+    root.kind === "unknown"
+  );
+}
+
 function pathIsWithin(rootPath: string, candidatePath: string): boolean {
   const relativePath = relative(rootPath, candidatePath);
   return (
@@ -336,10 +394,16 @@ function pathIsWithin(rootPath: string, candidatePath: string): boolean {
   );
 }
 
-function validateAndNormalizeRequest(
+interface NormalizedRequestRoots {
+  readonly roots: readonly DiscoveryRoot[];
+  /** Paths the caller supplied for this invocation, not declared evidence. */
+  readonly explicitRootKeys: ReadonlySet<string>;
+}
+
+async function validateAndNormalizeRequest(
   request: ScanRequest,
   options: InventoryScannerOptions,
-): readonly DiscoveryRoot[] {
+): Promise<NormalizedRequestRoots> {
   let parsedRequest: ScanRequest;
   try {
     parsedRequest = parseScanRequest(request);
@@ -352,7 +416,7 @@ function validateAndNormalizeRequest(
 
   validateEnvironment(options);
   const declaredRoots = [
-    ...defaultDiscoveryRoots(options.environment),
+    ...(await defaultDiscoveryRoots(options.environment)),
     ...(parsedRequest.roots ?? []),
   ];
   const seen = new Map<string, DiscoveryRoot>();
@@ -399,12 +463,17 @@ function validateAndNormalizeRequest(
     return [normalized];
   });
 
-  return roots.sort((left, right) =>
-    compareText(
-      `${pathComparisonKey(left.path)}\0${left.kind}`,
-      `${pathComparisonKey(right.path)}\0${right.kind}`,
+  return {
+    roots: roots.sort((left, right) =>
+      compareText(
+        `${pathComparisonKey(left.path)}\0${left.kind}`,
+        `${pathComparisonKey(right.path)}\0${right.kind}`,
+      ),
     ),
-  );
+    explicitRootKeys: new Set(
+      (parsedRequest.roots ?? []).map((root) => pathComparisonKey(root.path)),
+    ),
+  };
 }
 
 function validateEnvironment(options: InventoryScannerOptions): void {
@@ -434,9 +503,20 @@ function validateEnvironment(options: InventoryScannerOptions): void {
   }
 }
 
-function defaultDiscoveryRoots(
+/**
+ * Skills that Codex ships with its own runtime.
+ *
+ * Codex marks the subtree itself, so the boundary is declared by the runtime
+ * rather than inferred from a directory name. Without the marker the subtree
+ * stays an ordinary part of the agent root: a missing marker must never hide a
+ * user's own Skills.
+ */
+const codexSystemSkillsDirectoryName = ".system";
+const codexSystemSkillsMarkerName = ".codex-system-skills.marker";
+
+async function defaultDiscoveryRoots(
   environment: InventoryScannerOptions["environment"],
-): readonly DiscoveryRoot[] {
+): Promise<readonly DiscoveryRoot[]> {
   const userRoot: DiscoveryRoot = {
     kind: "user",
     path: join(environment.homeDirectory, ".agents", "skills"),
@@ -460,11 +540,36 @@ function defaultDiscoveryRoots(
     agentId: "codex",
     adapterId: null,
   };
+  const codexSystemPath = join(codexRoot.path, codexSystemSkillsDirectoryName);
+  const codexSystemRoots: readonly DiscoveryRoot[] = (await isRegularFile(
+    join(codexSystemPath, codexSystemSkillsMarkerName),
+  ))
+    ? [
+        {
+          kind: "system",
+          path: codexSystemPath,
+          agentId: "codex",
+          adapterId: null,
+        },
+      ]
+    : [];
   const genericRoots =
     pathComparisonKey(userRoot.path) === pathComparisonKey(workspaceRoot.path)
       ? [workspaceRoot]
       : [userRoot, workspaceRoot];
-  return [...genericRoots, codexRoot];
+  return [...genericRoots, codexRoot, ...codexSystemRoots];
+}
+
+/**
+ * A marker must be a regular file, never a link, so a planted link cannot make
+ * the scanner treat a user's Skills as inseparable runtime content.
+ */
+async function isRegularFile(path: string): Promise<boolean> {
+  const stats = await lstat(path).catch((error: unknown) => {
+    if (isMissingPathError(error)) return null;
+    throw error;
+  });
+  return stats !== null && stats.isFile();
 }
 
 async function adapterDiscoveryRoots(

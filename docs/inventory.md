@@ -60,6 +60,23 @@ known agent locations commonly do not exist. Duplicate equivalent roots are
 deduplicated by filesystem identity; contradictory declarations are rejected
 with `InventoryScanError`.
 
+When two roots claim one path and classify it differently, the root declared
+strictly inside the other describes the narrower boundary and wins. Roots that
+do not contain one another remain a contradiction and are rejected. A declared
+root — a default or one an Adapter supplies — may only narrow toward
+protection, so a nested Adapter root can never widen what is removable inside a
+`source`, `cache-or-vendor`, `system`, or `unknown` root. A root the caller
+supplied for the current invocation may narrow in either direction, because the
+caller named that absolute path deliberately.
+
+Codex marks the Skills shipped with its own runtime. When
+`<CODEX_HOME>/skills/.system/.codex-system-skills.marker` is a regular file,
+that subtree is a `system` root and its Skills become protected System Skill
+findings, while the rest of `<CODEX_HOME>/skills` stays an ordinary agent root.
+The marker must be a regular file, never a link, so a planted link cannot make
+the scanner treat a user's own Skills as inseparable runtime content. Without
+the marker the subtree stays ordinary: a missing marker never hides Skills.
+
 `Inventory.id` is a deterministic fingerprint of the complete normalized
 snapshot, excluding `scannedAt`. Repeating an unchanged scan at another time
 therefore retains the ID, while changed ownership, protection, removal,
