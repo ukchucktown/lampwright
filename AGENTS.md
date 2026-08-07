@@ -50,6 +50,13 @@ As implementation begins, organize code around the deep modules described in `do
 
 For Codex-authored branches, use the `feat/` prefix and include the issue number when practical, for example `feat/issue-4-generic-discovery`.
 
+### Agent delegation budget
+
+- Avoid duplicate research agents. By default, the primary agent or the single implementation handoff performs the issue's research, and completed research is reused rather than repeated.
+- Use at most one implementation subagent handoff per issue. The primary agent remains responsible for integrating the handoff and verifying the resulting worktree.
+- After implementation, use at most two tightly scoped, read-only final reviewers: one for repository Standards and one for the issue and product Spec.
+- Do not add further subagents unless the user explicitly expands this budget.
+
 ## Architectural rules
 
 - Inventory is live, immutable, disposable state. Do not introduce an installation database.
