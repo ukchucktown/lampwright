@@ -1,4 +1,4 @@
-import type { JsonPrimitive } from "../model/types.js";
+import type { JsonPrimitive, PackageRunner } from "../model/types.js";
 
 export type AdapterPlatform = "darwin" | "linux" | "win32";
 
@@ -217,7 +217,7 @@ export type AdapterRemovalActionDefinition =
     })
   | (AdapterRemovalActionBase & {
       readonly kind: "ephemeral-package";
-      readonly runner: PlatformVariant<string>;
+      readonly runner: PackageRunner;
       readonly packageName: string;
       readonly packageVersion: string;
       readonly mayDownload: true;
@@ -324,15 +324,7 @@ export type CompiledAdapterRemovalAction =
       Extract<AdapterRemovalActionDefinition, { kind: "managed" }>,
       "command"
     > & { readonly command: AdapterCommandTemplate })
-  | (Omit<
-      Extract<
-        AdapterRemovalActionDefinition,
-        {
-          kind: "ephemeral-package";
-        }
-      >,
-      "runner"
-    > & { readonly runner: string });
+  | Extract<AdapterRemovalActionDefinition, { kind: "ephemeral-package" }>;
 
 export type CompiledAdapterVerification =
   | (Omit<

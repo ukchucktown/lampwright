@@ -10,6 +10,7 @@ The project is currently in specification and planning. See:
 - [Core model](./docs/model.md)
 - [Inventory scanning](./docs/inventory.md)
 - [Adapter runtime](./docs/adapters.md)
+- [Removal planning](./docs/planning.md)
 - [Implementation roadmap](./docs/roadmap.md)
 - [Architectural decisions](./docs/adr/)
 

@@ -532,7 +532,11 @@ describe("Adapter loading", () => {
   it("rejects mutable ephemeral package versions and accepts exact Semantic Versions", async () => {
     const environment = await createTestEnvironment();
     const adapterPath = join(environment.temporary, "ephemeral.jsonc");
-    const ephemeralDefinition = (packageVersion: string) => ({
+    const ephemeralDefinition = (
+      packageVersion: string,
+      packageName = "fixture-manager",
+      runner = "npx",
+    ) => ({
       ...readOnlyDefinition(),
       id: "fixture.ephemeral",
       actions: [
@@ -541,8 +545,8 @@ describe("Adapter loading", () => {
           kind: "ephemeral-package",
           ownerKind: "manager",
           operationId: "remove",
-          runner: { default: "npx" },
-          packageName: "fixture-manager",
+          runner,
+          packageName,
           packageVersion,
           mayDownload: true,
           arguments: [{ kind: "value", from: "installationPath" }],
@@ -550,6 +554,30 @@ describe("Adapter loading", () => {
       ],
     });
     await writeAdapter(adapterPath, ephemeralDefinition("^1.2.3"));
+    await expect(
+      loadAdapters({
+        localAdapterPaths: [adapterPath],
+        platform: supportedPlatform(),
+        pathBases: fixturePathBases(environment),
+      }),
+    ).rejects.toMatchObject({ code: "schema-invalid" });
+
+    await writeAdapter(
+      adapterPath,
+      ephemeralDefinition("1.2.3", "fixture-manager", "pnpm"),
+    );
+    await expect(
+      loadAdapters({
+        localAdapterPaths: [adapterPath],
+        platform: supportedPlatform(),
+        pathBases: fixturePathBases(environment),
+      }),
+    ).rejects.toMatchObject({ code: "schema-invalid" });
+
+    await writeAdapter(
+      adapterPath,
+      ephemeralDefinition("1.2.3", "fixture-manager@latest"),
+    );
     await expect(
       loadAdapters({
         localAdapterPaths: [adapterPath],

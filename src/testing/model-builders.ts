@@ -14,6 +14,7 @@ import type {
   LogicalSkill,
   ModelId,
   NonInstallationFinding,
+  PluginBoundary,
   RemovalPlan,
 } from "../model/types.js";
 
@@ -34,6 +35,7 @@ export type InstallationFixtureOverrides = FixtureOverrides<Installation>;
 export type FindingFixtureOverrides = FixtureOverrides<NonInstallationFinding>;
 export type LogicalSkillFixtureOverrides = FixtureOverrides<LogicalSkill>;
 export type InventoryFixtureOverrides = FixtureOverrides<Inventory>;
+export type PluginBoundaryFixtureOverrides = FixtureOverrides<PluginBoundary>;
 export type RemovalPlanFixtureOverrides = FixtureOverrides<RemovalPlan>;
 export type ExecutionReportFixtureOverrides = FixtureOverrides<ExecutionReport>;
 
@@ -61,6 +63,7 @@ export function buildInstallation(
     plugin: null,
     manager: null,
     adapterId: "fixture-adapter",
+    pluginBoundaryId: null,
     agentId: "fixture-agent",
     scope: { kind: "user" },
     location: {
@@ -75,6 +78,14 @@ export function buildInstallation(
       git: { kind: "outside-worktree" },
       system: { kind: "none" },
       filesystem: { kind: "writable" },
+    },
+    removal: {
+      managed: null,
+      fallback: {
+        kind: "available",
+        requiresSeparateConfirmation: true,
+      },
+      recordCleanups: [],
     },
     tags: [],
     metadata: {},
@@ -180,6 +191,61 @@ export function buildLogicalSkill(
   });
 }
 
+export function buildPluginBoundary(
+  overrides: PluginBoundaryFixtureOverrides = {},
+): PluginBoundary {
+  return parseInventory({
+    schemaVersion: 1,
+    id: "plugin-boundary-fixture-inventory",
+    scannedAt: "2026-01-01T00:00:00.000Z",
+    installations: [],
+    otherFindings: [],
+    logicalSkills: [],
+    identityHints: [],
+    plugins: [
+      {
+        id: "fixture-plugin",
+        pluginId: "fixture-plugin",
+        version: "1.0.0",
+        adapterId: "fixture-adapter",
+        ownership: {
+          kind: "plugin",
+          pluginId: "fixture-plugin",
+          independentlySelectable: false,
+          confidence: "declared",
+        },
+        installationIds: [],
+        resources: [],
+        removal: {
+          managed: {
+            adapterId: "fixture-adapter",
+            operationId: "remove-plugin",
+            availability: { kind: "available" },
+            trust: { kind: "trusted" },
+            externalId: "fixture-plugin",
+            invocation: {
+              kind: "direct",
+              command: {
+                executable: "fixture-manager",
+                arguments: ["remove", "fixture-plugin"],
+              },
+            },
+            effects: [],
+            verifications: [],
+          },
+          fallback: {
+            kind: "unavailable",
+            reason: "plugin collateral requires managed removal",
+          },
+          recordCleanups: [],
+        },
+        ...overrides,
+      },
+    ],
+    dependencies: [],
+  }).plugins[0] as PluginBoundary;
+}
+
 export function buildInventory(
   overrides: InventoryFixtureOverrides = {},
 ): Inventory {
@@ -191,6 +257,7 @@ export function buildInventory(
     otherFindings: [],
     logicalSkills: [],
     identityHints: [],
+    plugins: [],
     dependencies: [],
     ...overrides,
   });
@@ -199,12 +266,23 @@ export function buildInventory(
 export function buildRemovalPlan(
   overrides: RemovalPlanFixtureOverrides = {},
 ): RemovalPlan {
+  const targets = overrides.targets ?? [
+    { kind: "installation" as const, installationId: "installation-1" },
+  ];
   return parseRemovalPlan({
     schemaVersion: 1,
     id: "removal-plan-1",
     inventoryId: "inventory-1",
     createdAt: "2026-01-01T00:01:00.000Z",
-    targets: [{ kind: "installation", installationId: "installation-1" }],
+    intent:
+      overrides.intent ??
+      ({
+        kind: "targets",
+        targets,
+        force: false,
+        mode: "managed-first",
+      } as const),
+    targets,
     actions: [],
     blocks: [],
     warnings: [],

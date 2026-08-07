@@ -8,6 +8,8 @@ import {
   nonInstallationFindingSchema,
   removalPlanSchema,
 } from "./schemas.js";
+import { stringifyModel } from "./json.js";
+import { physicalPathKey } from "./paths.js";
 import type {
   ApprovalRequirement,
   ExecutionReport,
@@ -16,7 +18,9 @@ import type {
   InventoryRecordReference,
   JsonValue,
   LogicalSkill,
+  ManagedOwnership,
   NonInstallationFinding,
+  RemovalEvidence,
   RemovalAction,
   RemovalPlan,
   RemovalTarget,
@@ -103,7 +107,7 @@ function targetKey(target: RemovalTarget): string {
     case "logical-skill":
       return `logical-skill:${target.logicalSkillId}`;
     case "plugin":
-      return `plugin:${target.pluginId}`;
+      return `plugin:${target.pluginBoundaryId}`;
   }
 }
 
@@ -217,11 +221,24 @@ function validateInstallation(
         "plugin reference must match plugin ownership",
       );
     }
+    if (installation.pluginBoundaryId === null) {
+      addIssue(
+        issues,
+        [...path, "pluginBoundaryId"],
+        "plugin ownership requires a plugin boundary id",
+      );
+    }
   } else if (installation.plugin !== null) {
     addIssue(
       issues,
       [...path, "plugin"],
       "plugin reference requires plugin ownership",
+    );
+  } else if (installation.pluginBoundaryId !== null) {
+    addIssue(
+      issues,
+      [...path, "pluginBoundaryId"],
+      "plugin boundary id requires plugin ownership",
     );
   }
 
@@ -255,6 +272,390 @@ function validateInstallation(
       [...path, "protection", "system"],
       "a system skill cannot be represented as an installation",
     );
+  }
+
+  validateRemovalEvidence(
+    installation.removal,
+    ownership,
+    installation.adapterId,
+    [...path, "removal"],
+    issues,
+  );
+}
+
+function validateRemovalEvidence(
+  removal: RemovalEvidence,
+  ownership: ManagedOwnership | Installation["ownership"],
+  adapterId: string | null,
+  path: readonly (number | string)[],
+  issues: MutableIssue[],
+): void {
+  const managed = removal.managed;
+  if (managed !== null) {
+    if (ownership.kind !== "manager" && ownership.kind !== "plugin") {
+      addIssue(
+        issues,
+        [...path, "managed"],
+        "managed removal evidence requires manager or plugin ownership",
+      );
+    }
+    if (managed.adapterId !== adapterId) {
+      addIssue(
+        issues,
+        [...path, "managed", "adapterId"],
+        "managed removal adapter must match the inventory record adapter",
+      );
+    }
+    if (
+      managed.trust.kind === "blocked" &&
+      managed.trust.adapterId !== managed.adapterId
+    ) {
+      addIssue(
+        issues,
+        [...path, "managed", "trust", "adapterId"],
+        "blocked trust must identify the managed removal adapter",
+      );
+    }
+    duplicateIndexes(managed.effects, (effect) => effect.path).forEach(
+      (index) => {
+        addIssue(
+          issues,
+          [...path, "managed", "effects", index, "path"],
+          "duplicate managed removal effect path",
+        );
+      },
+    );
+    duplicateIndexes(managed.verifications, (verification) =>
+      stringifyModel(verification, 0),
+    ).forEach((index) => {
+      addIssue(
+        issues,
+        [...path, "managed", "verifications", index],
+        "duplicate managed verification",
+      );
+    });
+    managed.verifications.forEach((verification, index) => {
+      if (
+        verification.kind === "command-succeeds" &&
+        new Set(verification.successExitCodes).size !==
+          verification.successExitCodes.length
+      ) {
+        addIssue(
+          issues,
+          [...path, "managed", "verifications", index, "successExitCodes"],
+          "success exit codes must be unique",
+        );
+      }
+    });
+  }
+
+  duplicateIndexes(removal.recordCleanups, (cleanup) => cleanup.id).forEach(
+    (index) => {
+      addIssue(
+        issues,
+        [...path, "recordCleanups", index, "id"],
+        "duplicate declarative record cleanup id",
+      );
+    },
+  );
+  duplicateIndexes(
+    removal.recordCleanups,
+    (cleanup) =>
+      `${physicalPathKey(cleanup.location)}\0${cleanup.recordPointer}`,
+  ).forEach((index) => {
+    addIssue(
+      issues,
+      [...path, "recordCleanups", index, "recordPointer"],
+      "duplicate declarative record cleanup",
+    );
+  });
+  removal.recordCleanups.forEach((cleanup, index) => {
+    if (cleanup.location.artifactType.kind !== "file") {
+      addIssue(
+        issues,
+        [...path, "recordCleanups", index, "location", "artifactType"],
+        "record cleanup location must be a file",
+      );
+    }
+    if (adapterId === null || cleanup.adapterId !== adapterId) {
+      addIssue(
+        issues,
+        [...path, "recordCleanups", index, "adapterId"],
+        "record cleanup adapter must match a non-null inventory record adapter",
+      );
+    }
+    const firstForPath = removal.recordCleanups.find(
+      (candidate) =>
+        physicalPathKey(candidate.location) ===
+        physicalPathKey(cleanup.location),
+    );
+    if (
+      firstForPath !== undefined &&
+      (firstForPath.adapterId !== cleanup.adapterId ||
+        firstForPath.format !== cleanup.format ||
+        stringifyModel(firstForPath.expectedFileHash, 0) !==
+          stringifyModel(cleanup.expectedFileHash, 0) ||
+        stringifyModel(firstForPath.protection, 0) !==
+          stringifyModel(cleanup.protection, 0))
+    ) {
+      addIssue(
+        issues,
+        [...path, "recordCleanups", index],
+        "record cleanups for one document require consistent file evidence",
+      );
+    }
+  });
+}
+
+function validatePluginBoundaries(
+  inventory: Inventory,
+  installationsById: ReadonlyMap<string, Installation>,
+  issues: MutableIssue[],
+): void {
+  const claimedInstallations = new Set<string>();
+
+  inventory.plugins.forEach((plugin, pluginIndex) => {
+    const path = ["plugins", pluginIndex];
+    if (plugin.ownership.pluginId !== plugin.pluginId) {
+      addIssue(
+        issues,
+        [...path, "ownership", "pluginId"],
+        "plugin ownership must match the external plugin id",
+      );
+    }
+    validateRemovalEvidence(
+      plugin.removal,
+      plugin.ownership,
+      plugin.adapterId,
+      [...path, "removal"],
+      issues,
+    );
+    const cleanupIds = new Set(
+      plugin.removal.recordCleanups.map((cleanup) => cleanup.id),
+    );
+
+    duplicateIndexes(plugin.installationIds, String).forEach((index) => {
+      addIssue(
+        issues,
+        [...path, "installationIds", index],
+        "installation appears more than once in the plugin boundary",
+      );
+    });
+    plugin.installationIds.forEach((installationId, installationIndex) => {
+      const installation = installationsById.get(installationId);
+      const installationPath = [...path, "installationIds", installationIndex];
+      if (installation === undefined) {
+        addIssue(issues, installationPath, "installation does not exist");
+        return;
+      }
+      if (
+        installation.ownership.kind !== "plugin" ||
+        installation.ownership.pluginId !== plugin.pluginId ||
+        installation.pluginBoundaryId !== plugin.id
+      ) {
+        addIssue(
+          issues,
+          installationPath,
+          "installation is not owned by the plugin boundary",
+        );
+      } else if (
+        installation.ownership.independentlySelectable !==
+        plugin.ownership.independentlySelectable
+      ) {
+        addIssue(
+          issues,
+          installationPath,
+          "plugin child selection must match the plugin boundary",
+        );
+      }
+      if (installation.plugin?.version !== plugin.version) {
+        addIssue(
+          issues,
+          installationPath,
+          "plugin child version must match the plugin boundary",
+        );
+      }
+      if (installation.adapterId !== plugin.adapterId) {
+        addIssue(
+          issues,
+          installationPath,
+          "plugin child adapter must match the plugin boundary",
+        );
+      }
+      if (claimedInstallations.has(installationId)) {
+        addIssue(
+          issues,
+          installationPath,
+          "installation already belongs to another plugin boundary",
+        );
+      }
+      claimedInstallations.add(installationId);
+    });
+
+    duplicateIndexes(
+      plugin.resources,
+      (resource) => `${resource.kind}:${resource.id}`,
+    ).forEach((index) => {
+      addIssue(
+        issues,
+        [...path, "resources", index],
+        "duplicate plugin resource",
+      );
+    });
+    plugin.resources.forEach((resource, resourceIndex) => {
+      if ((resource.location === null) !== (resource.protection === null)) {
+        addIssue(
+          issues,
+          [...path, "resources", resourceIndex],
+          "plugin resource location and protection must be provided together",
+        );
+      }
+      if (resource.cleanupId !== null && !cleanupIds.has(resource.cleanupId)) {
+        addIssue(
+          issues,
+          [...path, "resources", resourceIndex, "cleanupId"],
+          "plugin resource cleanup does not exist in the plugin boundary",
+        );
+      }
+    });
+  });
+
+  inventory.installations.forEach((installation, installationIndex) => {
+    if (
+      installation.ownership.kind === "plugin" &&
+      !claimedInstallations.has(installation.id)
+    ) {
+      addIssue(
+        issues,
+        ["installations", installationIndex, "ownership"],
+        "plugin-owned installation requires a plugin boundary",
+      );
+    }
+  });
+}
+
+function validateGlobalRecordCleanupEvidence(
+  inventory: Inventory,
+  issues: MutableIssue[],
+): void {
+  const entries = [
+    ...inventory.installations.flatMap((installation, installationIndex) =>
+      installation.removal.recordCleanups.map((cleanup, cleanupIndex) => ({
+        cleanup,
+        claimant: {
+          kind: "installation" as const,
+          installationId: installation.id,
+          pluginBoundaryId: installation.pluginBoundaryId,
+          independentlySelectable:
+            installation.ownership.kind === "plugin" &&
+            installation.ownership.independentlySelectable,
+          ownedByBoundary:
+            installation.pluginBoundaryId !== null &&
+            inventory.plugins.some(
+              (plugin) =>
+                plugin.id === installation.pluginBoundaryId &&
+                plugin.installationIds.includes(installation.id),
+            ),
+        },
+        path: [
+          "installations",
+          installationIndex,
+          "removal",
+          "recordCleanups",
+          cleanupIndex,
+        ] as const,
+      })),
+    ),
+    ...inventory.plugins.flatMap((plugin, pluginIndex) =>
+      plugin.removal.recordCleanups.map((cleanup, cleanupIndex) => ({
+        cleanup,
+        claimant: {
+          kind: "plugin-boundary" as const,
+          pluginBoundaryId: plugin.id,
+        },
+        path: [
+          "plugins",
+          pluginIndex,
+          "removal",
+          "recordCleanups",
+          cleanupIndex,
+        ] as const,
+      })),
+    ),
+  ];
+  const firstByDocument = new Map<string, (typeof entries)[number]>();
+  const claimsByRecord = new Map<string, (typeof entries)[number][]>();
+  for (const entry of entries) {
+    const documentKey = physicalPathKey(entry.cleanup.location);
+    const firstDocument = firstByDocument.get(documentKey);
+    if (firstDocument === undefined) {
+      firstByDocument.set(documentKey, entry);
+    } else if (
+      firstDocument.cleanup.adapterId !== entry.cleanup.adapterId ||
+      firstDocument.cleanup.format !== entry.cleanup.format ||
+      stringifyModel(firstDocument.cleanup.expectedFileHash, 0) !==
+        stringifyModel(entry.cleanup.expectedFileHash, 0) ||
+      stringifyModel(firstDocument.cleanup.protection, 0) !==
+        stringifyModel(entry.cleanup.protection, 0)
+    ) {
+      addIssue(
+        issues,
+        entry.path,
+        "record cleanups for one physical document require consistent file evidence",
+      );
+    }
+
+    const recordKey = `${documentKey}\0${entry.cleanup.recordPointer}`;
+    claimsByRecord.set(recordKey, [
+      ...(claimsByRecord.get(recordKey) ?? []),
+      entry,
+    ]);
+  }
+
+  for (const claims of claimsByRecord.values()) {
+    if (claims.length <= 1) {
+      continue;
+    }
+    const boundaryClaims = claims.filter(
+      (claim) => claim.claimant.kind === "plugin-boundary",
+    );
+    const childClaims = claims.filter(
+      (claim) => claim.claimant.kind === "installation",
+    );
+    const boundary = boundaryClaims[0];
+    const child = childClaims[0];
+    const isExactAlternatePair =
+      claims.length === 2 &&
+      boundaryClaims.length === 1 &&
+      childClaims.length === 1 &&
+      boundary?.claimant.kind === "plugin-boundary" &&
+      child?.claimant.kind === "installation" &&
+      child.claimant.pluginBoundaryId === boundary.claimant.pluginBoundaryId &&
+      child.claimant.independentlySelectable &&
+      child.claimant.ownedByBoundary;
+    if (!isExactAlternatePair) {
+      claims
+        .slice(1)
+        .forEach((claim) =>
+          addIssue(
+            issues,
+            [...claim.path, "recordPointer"],
+            "one physical cleanup selector is claimed by multiple removal owners",
+          ),
+        );
+      continue;
+    }
+
+    const firstHash = stringifyModel(claims[0]!.cleanup.expectedRecordHash, 0);
+    claims.slice(1).forEach((claim) => {
+      if (stringifyModel(claim.cleanup.expectedRecordHash, 0) !== firstHash) {
+        addIssue(
+          issues,
+          [...claim.path, "expectedRecordHash"],
+          "alternate Plugin cleanup claims require consistent record evidence",
+        );
+      }
+    });
   }
 }
 
@@ -311,7 +712,7 @@ function validateTargetExists(
       ? installationIds.has(target.installationId)
       : target.kind === "logical-skill"
         ? logicalSkillIds.has(target.logicalSkillId)
-        : pluginIds.has(target.pluginId);
+        : pluginIds.has(target.pluginBoundaryId);
 
   if (!exists) {
     addIssue(issues, path, `target ${targetKey(target)} does not exist`);
@@ -535,6 +936,11 @@ export function parseInventory(input: unknown): Inventory {
       );
     },
   );
+  duplicateIndexes(inventory.plugins, (plugin) => plugin.id).forEach(
+    (index) => {
+      addIssue(issues, ["plugins", index, "id"], "duplicate plugin id");
+    },
+  );
 
   inventory.installations.forEach((installation, index) => {
     validateInstallation(installation, ["installations", index], issues);
@@ -556,14 +962,12 @@ export function parseInventory(input: unknown): Inventory {
   const logicalSkillIds = new Set(
     inventory.logicalSkills.map((logicalSkill) => logicalSkill.id),
   );
-  const pluginIds = new Set(
-    inventory.installations.flatMap((installation) =>
-      installation.plugin === null ? [] : [installation.plugin.id],
-    ),
-  );
+  const pluginIds = new Set(inventory.plugins.map((plugin) => plugin.id));
 
   validateLogicalSkills(inventory, installationsById, issues);
   validateWeakIdentityHints(inventory, installationsById, issues);
+  validatePluginBoundaries(inventory, installationsById, issues);
+  validateGlobalRecordCleanupEvidence(inventory, issues);
   validateInventoryDependencies(
     inventory,
     installationIds,
@@ -587,6 +991,12 @@ function isBruteForceAction(action: RemovalAction): boolean {
   return action.kind === "quarantine" || action.kind === "record-cleanup";
 }
 
+function actionTargets(action: RemovalAction): readonly RemovalTarget[] {
+  return action.kind === "record-cleanup"
+    ? action.affectedTargets
+    : [action.target];
+}
+
 function validateAction(
   action: RemovalAction,
   actionIndex: number,
@@ -595,15 +1005,40 @@ function validateAction(
   issues: MutableIssue[],
 ): void {
   const path = ["actions", actionIndex];
-  if (!targetKeys.has(targetKey(action.target))) {
-    addIssue(issues, [...path, "target"], "action target is not a plan target");
-  }
+  const targets = actionTargets(action);
+  duplicateIndexes(targets, targetKey).forEach((index) => {
+    addIssue(
+      issues,
+      action.kind === "record-cleanup"
+        ? [...path, "affectedTargets", index]
+        : [...path, "target"],
+      "duplicate action target",
+    );
+  });
+  targets.forEach((target, index) => {
+    if (!targetKeys.has(targetKey(target))) {
+      addIssue(
+        issues,
+        action.kind === "record-cleanup"
+          ? [...path, "affectedTargets", index]
+          : [...path, "target"],
+        "action target is not a plan target",
+      );
+    }
+  });
 
   duplicateIndexes(action.dependsOn, String).forEach((index) => {
     addIssue(
       issues,
       [...path, "dependsOn", index],
       "dependency appears more than once",
+    );
+  });
+  duplicateIndexes(action.affectedInstallationIds, String).forEach((index) => {
+    addIssue(
+      issues,
+      [...path, "affectedInstallationIds", index],
+      "affected installation appears more than once",
     );
   });
   action.dependsOn.forEach((dependency, dependencyIndex) => {
@@ -638,8 +1073,8 @@ function validateAction(
       addIssue(issues, [...path, "owner"], "managed removal requires an owner");
     }
 
-    if (action.packageExecution !== null) {
-      const packageExecution = action.packageExecution;
+    if (action.invocation.kind === "ephemeral-package") {
+      const packageExecution = action.invocation.packageExecution;
       const approved = hasApproval(action.approvals, (approval) =>
         approval.kind === "package-trust"
           ? approval.runner === packageExecution.runner &&
@@ -656,6 +1091,59 @@ function validateAction(
         );
       }
     }
+    duplicateIndexes(action.effects, (effect) => effect.path).forEach(
+      (index) => {
+        addIssue(
+          issues,
+          [...path, "effects", index, "path"],
+          "duplicate managed removal effect path",
+        );
+      },
+    );
+    action.effects.forEach((effect, index) => {
+      if (
+        effect.protection.git.kind === "protected" ||
+        effect.protection.system.kind === "system-skill" ||
+        effect.protection.filesystem.kind === "read-only"
+      ) {
+        addIssue(
+          issues,
+          [...path, "effects", index],
+          "managed removal cannot mutate a protected expected effect",
+        );
+      }
+    });
+  }
+
+  if (
+    action.kind === "record-cleanup" &&
+    (action.protection.git.kind === "protected" ||
+      action.protection.system.kind === "system-skill" ||
+      action.protection.filesystem.kind === "read-only")
+  ) {
+    addIssue(
+      issues,
+      [...path, "protection"],
+      "record cleanup cannot mutate a protected document",
+    );
+  }
+  if (action.kind === "record-cleanup") {
+    if (action.location.artifactType.kind !== "file") {
+      addIssue(
+        issues,
+        [...path, "location", "artifactType"],
+        "record cleanup location must be a file",
+      );
+    }
+    duplicateIndexes(action.records, (record) => record.recordPointer).forEach(
+      (index) => {
+        addIssue(
+          issues,
+          [...path, "records", index, "recordPointer"],
+          "duplicate record cleanup pointer",
+        );
+      },
+    );
   }
 }
 
@@ -721,6 +1209,28 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
   duplicateIndexes(plan.targets, targetKey).forEach((index) => {
     addIssue(issues, ["targets", index], "duplicate removal target");
   });
+  if (plan.intent.kind === "targets") {
+    duplicateIndexes(plan.intent.targets, targetKey).forEach((index) => {
+      addIssue(
+        issues,
+        ["intent", "targets", index],
+        "duplicate removal target",
+      );
+    });
+    if (
+      plan.intent.targets.length !== plan.targets.length ||
+      plan.intent.targets.some(
+        (target, index) =>
+          targetKey(target) !== targetKey(plan.targets[index]!),
+      )
+    ) {
+      addIssue(
+        issues,
+        ["intent", "targets"],
+        "normalized target intent must match plan targets",
+      );
+    }
+  }
   duplicateIndexes(plan.actions, (action) => action.id).forEach((index) => {
     addIssue(issues, ["actions", index, "id"], "duplicate removal action id");
   });
@@ -740,26 +1250,31 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
   plan.actions.forEach((action, index) => {
     validateAction(action, index, priorActionIds, targetKeys, issues);
     priorActionIds.add(action.id);
-    const key = targetKey(action.target);
-    actionsByTarget.set(key, [...(actionsByTarget.get(key) ?? []), action]);
+    for (const target of actionTargets(action)) {
+      const key = targetKey(target);
+      actionsByTarget.set(key, [...(actionsByTarget.get(key) ?? []), action]);
+    }
   });
 
-  for (const [key, actions] of actionsByTarget) {
+  const managedInstallationIds = new Set(
+    plan.actions.flatMap((action) =>
+      action.kind === "managed-removal" ? action.affectedInstallationIds : [],
+    ),
+  );
+  plan.actions.forEach((action, index) => {
     if (
-      actions.some((action) => action.kind === "managed-removal") &&
-      actions.some(isBruteForceAction)
+      isBruteForceAction(action) &&
+      action.affectedInstallationIds.some((installationId) =>
+        managedInstallationIds.has(installationId),
+      )
     ) {
-      const index = plan.actions.findIndex(
-        (action) =>
-          targetKey(action.target) === key && isBruteForceAction(action),
-      );
       addIssue(
         issues,
         ["actions", index],
-        "managed and brute-force removal require separate plans",
+        "managed and brute-force removal for one installation require separate plans",
       );
     }
-  }
+  });
 
   validateBlocks(plan, actionsByTarget, targetKeys, issues);
 
@@ -781,6 +1296,16 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
         issues,
         ["verificationChecks", index, "target"],
         "verification target is not a plan target",
+      );
+    }
+    if (
+      check.kind === "command-succeeds" &&
+      new Set(check.successExitCodes).size !== check.successExitCodes.length
+    ) {
+      addIssue(
+        issues,
+        ["verificationChecks", index, "successExitCodes"],
+        "success exit codes must be unique",
       );
     }
   });

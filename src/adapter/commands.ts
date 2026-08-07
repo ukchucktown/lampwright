@@ -1,5 +1,7 @@
-import { posix, win32 } from "node:path";
-
+import {
+  executableSafetyIssue,
+  literalArgumentSafetyIssue,
+} from "../model/command-safety.js";
 import type {
   AdapterCommandArgument,
   AdapterCommandTemplate,
@@ -7,74 +9,6 @@ import type {
   PlatformVariant,
 } from "./types.js";
 import { AdapterLoadError } from "./types.js";
-
-const shells = new Set([
-  "bash",
-  "bash.exe",
-  "cmd",
-  "cmd.exe",
-  "csh",
-  "csh.exe",
-  "dash",
-  "dash.exe",
-  "fish",
-  "fish.exe",
-  "ksh",
-  "ksh.exe",
-  "powershell",
-  "powershell.exe",
-  "pwsh",
-  "pwsh.exe",
-  "sh",
-  "sh.exe",
-  "tcsh",
-  "tcsh.exe",
-  "zsh",
-  "zsh.exe",
-]);
-
-const commandDispatchers = new Set([
-  "busybox",
-  "busybox.exe",
-  "chroot",
-  "chroot.exe",
-  "doas",
-  "doas.exe",
-  "env",
-  "env.exe",
-  "nice",
-  "nice.exe",
-  "nohup",
-  "nohup.exe",
-  "runuser",
-  "runuser.exe",
-  "setsid",
-  "setsid.exe",
-  "sudo",
-  "sudo.exe",
-  "timeout",
-  "timeout.exe",
-  "xargs",
-  "xargs.exe",
-]);
-
-const shellControlTokens = new Set([
-  "&",
-  "&&",
-  "&>",
-  ";",
-  "<",
-  "<<",
-  "|",
-  "||",
-  ">",
-  ">>",
-  "2>",
-  "2>>",
-]);
-
-const interpolationPattern =
-  /`|\$\(|\$\{|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|![A-Za-z_][A-Za-z0-9_]*!/;
 
 export function validateCommandSafety(
   definition: AdapterDefinitionV1,
@@ -89,9 +23,7 @@ export function validateCommandSafety(
     if (action.kind === "managed") {
       validateCommandVariant(action.command, sourcePath, `action ${action.id}`);
     } else {
-      for (const runner of variantValues(action.runner)) {
-        validateExecutable(runner, sourcePath, `action ${action.id}`);
-      }
+      validateExecutable(action.runner, sourcePath, `action ${action.id}`);
       validateArguments(action.arguments, sourcePath, `action ${action.id}`);
     }
   }
@@ -132,36 +64,9 @@ function validateExecutable(
   sourcePath: string | null,
   context: string,
 ): void {
-  if (containsUnsafeCharacters(executable)) {
-    unsafe(sourcePath, `${context} executable contains shell interpolation`);
-  }
-  if (
-    !posix.isAbsolute(executable) &&
-    !win32.isAbsolute(executable) &&
-    /\s/.test(executable)
-  ) {
-    unsafe(sourcePath, `${context} executable is a shell command string`);
-  }
-  if (
-    executable
-      .split(/\s+/)
-      .some((token) => shellControlTokens.has(token.trim()))
-  ) {
-    unsafe(sourcePath, `${context} executable contains a shell control token`);
-  }
-
-  const executableName = executable.replaceAll("\\", "/").split("/").at(-1);
-  if (
-    executableName !== undefined &&
-    shells.has(executableName.toLowerCase())
-  ) {
-    unsafe(sourcePath, `${context} cannot invoke a shell executable`);
-  }
-  if (
-    executableName !== undefined &&
-    commandDispatchers.has(executableName.toLowerCase())
-  ) {
-    unsafe(sourcePath, `${context} cannot invoke a command dispatcher`);
+  const issue = executableSafetyIssue(executable);
+  if (issue !== null) {
+    unsafe(sourcePath, `${context} ${issue}`);
   }
 }
 
@@ -174,21 +79,11 @@ function validateArguments(
     if (argument.kind !== "literal") {
       continue;
     }
-    if (containsUnsafeCharacters(argument.value)) {
-      unsafe(sourcePath, `${context} argument contains shell interpolation`);
-    }
-    if (shellControlTokens.has(argument.value.trim())) {
-      unsafe(sourcePath, `${context} argument is a shell control token`);
+    const issue = literalArgumentSafetyIssue(argument.value);
+    if (issue !== null) {
+      unsafe(sourcePath, `${context} ${issue}`);
     }
   }
-}
-
-function containsUnsafeCharacters(value: string): boolean {
-  return (
-    value.includes("\0") ||
-    /[\r\n]/.test(value) ||
-    interpolationPattern.test(value)
-  );
 }
 
 function variantValues<Value>(variant: PlatformVariant<Value>): Value[] {
