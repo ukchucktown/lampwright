@@ -16,6 +16,16 @@ import {
   variants,
 } from "./model.mjs";
 
+const realMode = process.argv.includes("--real");
+let inventoryLabel = "Synthetic Inventory · read-only";
+if (realMode) {
+  process.stdout.write("Scanning bounded skill roots for live Inventory…\n");
+  const { loadRealGroups } = await import("./real-inventory.mjs");
+  const realGroups = await loadRealGroups();
+  groups.splice(0, groups.length, ...realGroups);
+  inventoryLabel = `${groups.flatMap((group) => group.skills).length} live Installations · read-only scan`;
+}
+
 const ansi = {
   reset: "\u001B[0m",
   bold: "\u001B[1m",
@@ -116,7 +126,7 @@ function renderHeader(current) {
   );
   return [
     `${ansi.bold}${ansi.cyan}skill-cleaner navigation prototype${ansi.reset}  ${ansi.yellow}${variant.key} — ${variant.name}${ansi.reset}`,
-    `${ansi.dim}Synthetic Inventory · read-only${ansi.reset}`,
+    `${ansi.dim}${inventoryLabel}${ansi.reset}`,
     `${ansi.dim}Variants: [1] three-pane  [2] fzf-first  [3] tree${ansi.reset}`,
     rule(),
   ].join("\n");
