@@ -11,6 +11,7 @@ The project is currently in specification and planning. See:
 - [Inventory scanning](./docs/inventory.md)
 - [Adapter runtime](./docs/adapters.md)
 - [Removal planning](./docs/planning.md)
+- [Non-interactive CLI](./docs/cli.md)
 - [Implementation roadmap](./docs/roadmap.md)
 - [Architectural decisions](./docs/adr/)
 

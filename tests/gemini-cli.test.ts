@@ -322,7 +322,9 @@ describe("Gemini CLI adapter", () => {
       list: vi.fn(async () => []),
       quarantine: vi.fn(),
       restore: vi.fn(),
+      previewRestore: vi.fn(),
       purge: vi.fn(),
+      previewPurge: vi.fn(),
     };
     const report = await createExecutionModule({
       scan: () => scanner.scan({}),
@@ -392,7 +394,9 @@ describe("Gemini CLI adapter", () => {
       list: vi.fn(async () => []),
       quarantine: vi.fn(),
       restore: vi.fn(),
+      previewRestore: vi.fn(),
       purge: vi.fn(),
+      previewPurge: vi.fn(),
     };
     const processRunner = {
       run: vi.fn(async () => ({ exitCode: 1, stdout: "", stderr: "failed" })),

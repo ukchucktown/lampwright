@@ -121,6 +121,21 @@ export type RestoreResult =
       readonly path: string;
     };
 
+export type RestorePreview =
+  | {
+      readonly schemaVersion: 1;
+      readonly status: "would-restore";
+      readonly entryId: QuarantineEntryId;
+      readonly destination: string;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly status: "blocked";
+      readonly entryId: QuarantineEntryId;
+      readonly reason: RestoreBlockReason;
+      readonly path: string;
+    };
+
 export type QuarantineSelection =
   | {
       readonly kind: "entries";
@@ -149,6 +164,23 @@ export interface PurgeResult {
   readonly entries: readonly PurgeEntryResult[];
 }
 
+export interface PurgePreview {
+  readonly schemaVersion: 1;
+  readonly entries: readonly (
+    | { readonly entryId: QuarantineEntryId; readonly status: "would-purge" }
+    | {
+        readonly entryId: QuarantineEntryId;
+        readonly status: "unchanged";
+        readonly reason: "entry-not-found";
+      }
+    | {
+        readonly entryId: QuarantineEntryId;
+        readonly status: "blocked";
+        readonly reason: "integrity-failed";
+      }
+  )[];
+}
+
 export interface QuarantineModule {
   list(): Promise<readonly QuarantineEntry[]>;
   quarantine(request: QuarantineRequest): Promise<QuarantineResult>;
@@ -156,7 +188,12 @@ export interface QuarantineModule {
     entry: QuarantineEntry,
     resolution?: RestoreResolution,
   ): Promise<RestoreResult>;
+  previewRestore(
+    entry: QuarantineEntry,
+    resolution?: RestoreResolution,
+  ): Promise<RestorePreview>;
   purge(selection: QuarantineSelection): Promise<PurgeResult>;
+  previewPurge(selection: QuarantineSelection): Promise<PurgePreview>;
 }
 
 export interface QuarantineModuleOptions {

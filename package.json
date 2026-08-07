@@ -16,7 +16,8 @@
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
     },
-    "./adapter-v1.schema.json": "./schemas/adapter-v1.schema.json"
+    "./adapter-v1.schema.json": "./schemas/adapter-v1.schema.json",
+    "./cli-v1.schema.json": "./schemas/cli-v1.schema.json"
   },
   "files": [
     "dist",

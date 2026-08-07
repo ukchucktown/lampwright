@@ -44,8 +44,18 @@ function quarantineFixture(): QuarantineModule {
       reason: "entry-not-found" as const,
       path: entry.originalLocation.path,
     })),
+    previewRestore: vi.fn(async (entry) => ({
+      schemaVersion: 1 as const,
+      status: "would-restore" as const,
+      entryId: entry.id,
+      destination: entry.originalLocation.path,
+    })),
     purge: vi.fn(async () => ({
       purgedAt: "2026-01-01T00:00:00.000Z",
+      entries: [],
+    })),
+    previewPurge: vi.fn(async () => ({
+      schemaVersion: 1 as const,
       entries: [],
     })),
   };

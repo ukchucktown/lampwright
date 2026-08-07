@@ -1,0 +1,369 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ukchucktown/skill-cleaner/raw/main/schemas/cli-v1.schema.json",
+  "title": "skill-cleaner CLI v1 output",
+  "oneOf": [
+    { "$ref": "#/$defs/inventory" },
+    { "$ref": "#/$defs/removalPlanEnvelope" },
+    { "$ref": "#/$defs/confirmationEnvelope" },
+    { "$ref": "#/$defs/executionReportEnvelope" },
+    { "$ref": "#/$defs/quarantinePlan" },
+    { "$ref": "#/$defs/restoreResultEnvelope" },
+    { "$ref": "#/$defs/purgeResultEnvelope" },
+    { "$ref": "#/$defs/trustRequiredEnvelope" },
+    { "$ref": "#/$defs/errorEnvelope" }
+  ],
+  "$defs": {
+    "inventory": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "id",
+        "scannedAt",
+        "installations",
+        "otherFindings",
+        "logicalSkills",
+        "identityHints",
+        "plugins",
+        "dependencies"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "scannedAt": { "type": "string", "minLength": 1 },
+        "installations": { "type": "array", "items": { "type": "object" } },
+        "otherFindings": { "type": "array", "items": { "type": "object" } },
+        "logicalSkills": { "type": "array", "items": { "type": "object" } },
+        "identityHints": { "type": "array", "items": { "type": "object" } },
+        "plugins": { "type": "array", "items": { "type": "object" } },
+        "dependencies": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": false
+    },
+    "removalPlan": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "id",
+        "inventoryId",
+        "createdAt",
+        "intent",
+        "targets",
+        "actions",
+        "blocks",
+        "warnings",
+        "verificationChecks"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "minLength": 1 },
+        "intent": { "type": "object" },
+        "targets": { "type": "array", "items": { "type": "object" } },
+        "actions": { "type": "array", "items": { "type": "object" } },
+        "blocks": { "type": "array", "items": { "type": "object" } },
+        "warnings": { "type": "array", "items": { "type": "object" } },
+        "verificationChecks": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "executionReport": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "planId",
+        "inventoryId",
+        "finalInventoryId",
+        "rescanError",
+        "startedAt",
+        "completedAt",
+        "status",
+        "actionResults",
+        "targetResults",
+        "verificationResults",
+        "fallbackPlans"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "planId": { "type": "string", "minLength": 1 },
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "finalInventoryId": { "type": ["string", "null"] },
+        "rescanError": { "type": ["object", "null"] },
+        "startedAt": { "type": "string", "minLength": 1 },
+        "completedAt": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["succeeded", "partial", "failed", "blocked"]
+        },
+        "actionResults": { "type": "array", "items": { "type": "object" } },
+        "targetResults": { "type": "array", "items": { "type": "object" } },
+        "verificationResults": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "fallbackPlans": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/removalPlan" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "removalPlanEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "removal-plan" },
+        "plan": { "$ref": "#/$defs/removalPlan" }
+      },
+      "additionalProperties": false
+    },
+    "confirmationEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "operation", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "confirmation-required" },
+        "operation": { "enum": ["remove", "restore", "purge"] },
+        "plan": {
+          "oneOf": [
+            { "$ref": "#/$defs/removalPlan" },
+            { "$ref": "#/$defs/quarantinePlan" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "executionReportEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "report"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "execution-report" },
+        "report": { "$ref": "#/$defs/executionReport" }
+      },
+      "additionalProperties": false
+    },
+    "quarantinePlan": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "kind",
+        "command",
+        "entries",
+        "missingEntryIds",
+        "preview"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "quarantine-plan" },
+        "command": { "enum": ["restore", "purge"] },
+        "entries": { "type": "array", "items": { "type": "object" } },
+        "missingEntryIds": { "type": "array", "items": { "type": "string" } },
+        "preview": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/restorePreview" },
+            { "$ref": "#/$defs/purgePreview" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "restorePreview": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["schemaVersion", "status", "entryId", "destination"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "status": { "const": "would-restore" },
+            "entryId": { "type": "string", "minLength": 1 },
+            "destination": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["schemaVersion", "status", "entryId", "reason", "path"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "status": { "const": "blocked" },
+            "entryId": { "type": "string", "minLength": 1 },
+            "reason": {
+              "enum": [
+                "destination-occupied",
+                "destination-changed",
+                "git-protected",
+                "entry-not-found",
+                "integrity-failed"
+              ]
+            },
+            "path": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "purgePreviewEntry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["entryId", "status"],
+          "properties": {
+            "entryId": { "type": "string", "minLength": 1 },
+            "status": { "const": "would-purge" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["entryId", "status", "reason"],
+          "properties": {
+            "entryId": { "type": "string", "minLength": 1 },
+            "status": { "const": "unchanged" },
+            "reason": { "const": "entry-not-found" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["entryId", "status", "reason"],
+          "properties": {
+            "entryId": { "type": "string", "minLength": 1 },
+            "status": { "const": "blocked" },
+            "reason": { "const": "integrity-failed" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "purgePreview": {
+      "type": "object",
+      "required": ["schemaVersion", "entries"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/purgePreviewEntry" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "restoreResultEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "result"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "restore-result" },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["status", "entryId", "destination", "restoredAt"],
+              "properties": {
+                "status": { "const": "restored" },
+                "entryId": { "type": "string", "minLength": 1 },
+                "destination": { "type": "string", "minLength": 1 },
+                "restoredAt": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["status", "entryId", "reason", "path"],
+              "properties": {
+                "status": { "const": "blocked" },
+                "entryId": { "type": "string", "minLength": 1 },
+                "reason": {
+                  "enum": [
+                    "destination-occupied",
+                    "destination-changed",
+                    "git-protected",
+                    "entry-not-found",
+                    "integrity-failed"
+                  ]
+                },
+                "path": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "purgeResultEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "result"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "purge-result" },
+        "result": {
+          "type": "object",
+          "required": ["purgedAt", "entries"],
+          "properties": {
+            "purgedAt": { "type": "string", "minLength": 1 },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["entryId", "status"],
+                "properties": {
+                  "entryId": { "type": "string", "minLength": 1 },
+                  "status": { "enum": ["purged", "unchanged", "blocked"] },
+                  "reason": {
+                    "enum": ["entry-not-found", "integrity-failed"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "trustRequiredEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "requirements"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "trust-required" },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["adapterId", "contentHash", "path"],
+            "properties": {
+              "adapterId": { "type": "string", "minLength": 1 },
+              "contentHash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "path": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "errorEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "code", "message"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "error" },
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
