@@ -31,6 +31,7 @@ import {
   type Sha256Digest,
 } from "../src/index.js";
 import { syncRegularFile } from "../src/quarantine/filesystem.js";
+import { junctionTargetForCreation } from "../src/quarantine/integrity.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
 const createTestEnvironment = createIsolatedTestEnvironmentFixture();
@@ -61,6 +62,30 @@ it("opens regular files with write access before syncing for Windows", async () 
   expect(openedWith).toBe("r+");
   expect(synced).toBe(true);
   expect(closed).toBe(true);
+});
+
+it("removes Windows namespaces before asking Node to create a junction", () => {
+  expect(junctionTargetForCreation("\\\\?\\C:\\skills\\target")).toBe(
+    "C:\\skills\\target",
+  );
+  expect(junctionTargetForCreation("\\\\?\\UNC\\server\\share\\target")).toBe(
+    "\\\\server\\share\\target",
+  );
+  expect(junctionTargetForCreation("\\??\\C:\\skills\\target")).toBe(
+    "C:\\skills\\target",
+  );
+  expect(junctionTargetForCreation("\\??\\UNC\\server\\share\\target")).toBe(
+    "\\\\server\\share\\target",
+  );
+  expect(junctionTargetForCreation("C:\\skills\\target")).toBe(
+    "C:\\skills\\target",
+  );
+  expect(junctionTargetForCreation("\\\\?\\Volume{guid}\\skills\\target")).toBe(
+    "\\\\?\\Volume{guid}\\skills\\target",
+  );
+  expect(junctionTargetForCreation("\\??\\Volume{guid}\\skills\\target")).toBe(
+    "\\\\?\\Volume{guid}\\skills\\target",
+  );
 });
 
 function createHarness(

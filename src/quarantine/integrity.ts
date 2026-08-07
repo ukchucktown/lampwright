@@ -10,6 +10,27 @@ import type {
 } from "./types.js";
 import { QuarantineError } from "./types.js";
 
+export function junctionTargetForCreation(target: string): string {
+  const extendedPrefix = "\\\\?\\";
+  const nativePrefix = "\\??\\";
+  for (const prefix of [extendedPrefix, nativePrefix] as const) {
+    if (!target.startsWith(prefix)) {
+      continue;
+    }
+    const unprefixed = target.slice(prefix.length);
+    if (/^[A-Za-z]:[\\/]/u.test(unprefixed)) {
+      return unprefixed;
+    }
+    if (unprefixed.slice(0, 4).toLowerCase() === "unc\\") {
+      return `\\\\${unprefixed.slice(4)}`;
+    }
+    if (prefix === nativePrefix) {
+      return `${extendedPrefix}${unprefixed}`;
+    }
+  }
+  return target;
+}
+
 export interface InspectedArtifact {
   readonly integrity: Sha256Digest;
   readonly stats: QuarantineFileStats;
@@ -345,7 +366,11 @@ async function createLink(
       : process.platform === "win32"
         ? "dir"
         : undefined;
-  await fileSystem.symlink(link.target, path, kind);
+  await fileSystem.symlink(
+    kind === "junction" ? junctionTargetForCreation(link.target) : link.target,
+    path,
+    kind,
+  );
 }
 
 async function assertExpectedType(
