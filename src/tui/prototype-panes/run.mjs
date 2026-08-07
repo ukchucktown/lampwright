@@ -1,34 +1,17 @@
 // PROTOTYPE — throwaway terminal shell. Drives the pure model in model.mjs.
 // Read-only: it scans, it renders, it selects. It cannot plan or remove.
 //
-// The frame is a fixed grid. Panes scroll under stationary borders so the
-// detail area never moves.
+// The frame is a fixed grid. Every line is clipped one column short of the
+// terminal width: writing into the last cell makes an auto-margin terminal wrap,
+// which silently adds a row and shifts everything below it.
 
 import process from "node:process";
 
 import { loadSections } from "./inventory.mjs";
-import {
-  createState,
-  currentSection,
-  currentSkill,
-  layout,
-  panes,
-  reduce,
-  selectionSummary,
-} from "./model.mjs";
+import { render, PANE_TOP } from "./frame.mjs";
+import { createState, layout, panes, reduce } from "./model.mjs";
 
 const ESC = String.fromCharCode(27);
-const ANSI = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
-const B = (s) => `${ESC}[1m${s}${ESC}[0m`;
-const D = (s) => `${ESC}[2m${s}${ESC}[0m`;
-const INV = (s) => `${ESC}[7m${s}${ESC}[0m`;
-
-const strip = (s) => s.replace(ANSI, "");
-const len = (s) => [...strip(s)].length;
-const pad = (s, n) =>
-  len(s) > n
-    ? [...strip(s)].slice(0, n - 1).join("") + "…"
-    : s + " ".repeat(n - len(s));
 
 function viewport() {
   return {
@@ -37,106 +20,65 @@ function viewport() {
   };
 }
 
-function scrollbar(offset, height, total, index) {
-  if (total <= height) return " ";
-  const at = Math.round((index / Math.max(1, total - 1)) * (height - 1));
-  return offset >= 0 ? (at === index - offset ? "█" : "│") : "│";
-}
-
-function render(state) {
-  const { columns, paneRows, detailRows, leftWidth, rightWidth } =
-    layout(state);
-  const view = panes(state);
-  const section = currentSection(state);
-  const skill = currentSkill(state);
-  const lines = [];
-
-  lines.push(
-    `${B("skill-cleaner")} ${D("prototype — panes")}  ${
-      state.selected.length > 0
-        ? B(`${state.selected.length} selected`)
-        : D("nothing selected")
-    }`,
-  );
-  lines.push(
-    state.query === ""
-      ? D("search: (type to filter)")
-      : `search: ${B(state.query)} ${D(`${view.skills.total} here`)}`,
-  );
-  lines.push("─".repeat(leftWidth) + "┬" + "─".repeat(columns - leftWidth - 1));
-
-  for (let row = 0; row < paneRows; row += 1) {
-    const s = view.sections.items[row];
-    let left = "";
-    if (s) {
-      const index = view.sections.offset + row;
-      const focused = index === state.sectionIndex;
-      const marker = focused && state.focus === "sections" ? "▸" : " ";
-      const text = `${marker} ${pad(s.label, leftWidth - 8)}${String(s.skills.length).padStart(4)}${s.selectable ? " " : "⃠"}`;
-      left = focused ? INV(pad(strip(text), leftWidth)) : pad(text, leftWidth);
-    } else {
-      left = " ".repeat(leftWidth);
-    }
-
-    let right = "";
-    if (row === 0 && section) {
-      right = `${B(pad(section.label, 30))}${D(section.detail)}`;
-    } else if (row > 0 && view.skills.items[row - 1]) {
-      const k = view.skills.items[row - 1];
-      const index = view.skills.offset + row - 1;
-      const focused = index === state.skillIndex && state.focus === "skills";
-      const box = state.selected.includes(k.key) ? "▣" : "▢";
-      const text = `${box} ${pad(k.name, 28)} ${pad(k.exposedTo.join(" "), 22)}${k.paths.length > 1 ? `${k.paths.length} paths` : ""}`;
-      right = focused ? INV(pad(strip(text), rightWidth)) : text;
-    }
-    lines.push(
-      `${left}│${pad(right, rightWidth)}${scrollbar(
-        view.skills.offset,
-        paneRows,
-        view.skills.total,
-        state.skillIndex,
-      )}`,
-    );
-  }
-
-  lines.push("─".repeat(leftWidth) + "┴" + "─".repeat(columns - leftWidth - 1));
-
-  const detail = [];
-  if (state.reviewOpen) {
-    detail.push(B("REVIEW — would request a Removal Plan for:"));
-    for (const { label, count } of selectionSummary(state))
-      detail.push(`  ${String(count).padStart(3)}  ${label}`);
-    detail.push(D("  prototype stops here; it cannot plan or execute"));
-  } else if (skill) {
-    detail.push(
-      `${B(skill.name)}  ${D(`${skill.owner} · ${skill.bundle}${skill.spansGroups ? " · SPANS GROUPS" : ""}`)}`,
-    );
-    detail.push(D(`  ${skill.description}`));
-    for (const p of skill.paths) detail.push(`  ${p}`);
-  }
-  for (let row = 0; row < detailRows; row += 1)
-    lines.push(pad(detail[row] ?? "", columns));
-
-  lines.push(
-    D(
-      "↑↓ move  ←→ pane  PgUp/PgDn page  space select  S section  ^a clear  enter review  esc back  ^c quit",
-    ),
-  );
-  lines.push(
-    state.notice
-      ? B(`! ${state.notice}`)
-      : D(
-          `shift-←→ width ${String(state.leftPercent)}%  shift-↑↓ detail ${String(detailRows)}  focus=${state.focus} sec=${state.sectionIndex}/${view.sections.total} skill=${state.skillIndex}/${view.skills.total} sel=${state.selected.length}`,
-        ),
-  );
-  return lines.join("\n");
-}
-
 const sections = await loadSections();
 let state = createState(sections, viewport());
 
 function draw() {
-  process.stdout.write(`${ESC}[2J${ESC}[H${render(state)}`);
+  process.stdout.write(`${ESC}[H${ESC}[2J${render(state)}`);
+}
+
+// ── mouse ──────────────────────────────────────────────────────────────────
+
+const MOUSE_ON = `${ESC}[?1000h${ESC}[?1002h${ESC}[?1006h`;
+const MOUSE_OFF = `${ESC}[?1006l${ESC}[?1002l${ESC}[?1000l`;
+const SGR = new RegExp(`${ESC}\\[<(\\d+);(\\d+);(\\d+)([Mm])`);
+
+let dragging = false;
+
+function onMouse(button, column, row, pressed) {
+  const { paneRows, leftWidth, columns } = layout(state);
+  const view = panes(state);
+
+  if (button === 64 || button === 65) {
+    state = reduce(state, {
+      type: "scroll",
+      pane: column <= leftWidth ? "sections" : "skills",
+      delta: button === 64 ? -3 : 3,
+    });
+    return;
+  }
+
+  if (!pressed) {
+    dragging = false;
+    return;
+  }
+
+  const onDivider = Math.abs(column - (leftWidth + 1)) <= 1;
+  if (dragging || (onDivider && button < 32)) {
+    dragging = true;
+    state = reduce(state, {
+      type: "set-left-percent",
+      percent: Math.round((column / columns) * 100),
+    });
+    return;
+  }
+
+  const paneRow = row - PANE_TOP - 1;
+  if (paneRow < 0 || paneRow >= paneRows) return;
+
+  if (column <= leftWidth) {
+    const index = view.sections.offset + paneRow;
+    if (index < view.sections.total)
+      state = reduce(state, { type: "point-section", index });
+    return;
+  }
+
+  if (paneRow === 0) return; // section header row
+  const index = view.skills.offset + paneRow - 1;
+  if (index >= view.skills.total) return;
+  state = reduce(state, { type: "point-skill", index });
+  if (column >= leftWidth + 2 && column <= leftWidth + 4)
+    state = reduce(state, { type: "toggle-select" });
 }
 
 const KEYS = new Map([
@@ -160,20 +102,37 @@ const KEYS = new Map([
   ["", { type: "clear-selection" }],
 ]);
 
+function quit() {
+  process.stdout.write(`${MOUSE_OFF}${ESC}[?25h${ESC}[H${ESC}[2J`);
+  process.exit(0);
+}
+
 process.stdin.setRawMode?.(true);
 process.stdin.resume();
 process.stdin.setEncoding("utf8");
+process.stdout.write(`${MOUSE_ON}${ESC}[?25l`);
+process.on("exit", () => process.stdout.write(`${MOUSE_OFF}${ESC}[?25h`));
 draw();
 
-process.stdin.on("data", (key) => {
-  if (key === "") {
-    process.stdout.write(`${ESC}[2J${ESC}[H`);
-    process.exit(0);
+process.stdin.on("data", (chunk) => {
+  if (chunk === "") quit();
+
+  const mouse = SGR.exec(chunk);
+  if (mouse) {
+    onMouse(
+      Number(mouse[1]),
+      Number(mouse[2]),
+      Number(mouse[3]),
+      mouse[4] === "M",
+    );
+    draw();
+    return;
   }
+
   const action =
-    KEYS.get(key) ??
-    (key.length === 1 && key >= " " && key <= "~"
-      ? { type: "type", value: key }
+    KEYS.get(chunk) ??
+    (chunk.length === 1 && chunk >= " " && chunk <= "~"
+      ? { type: "type", value: chunk }
       : null);
   if (action) state = reduce(state, action);
   draw();

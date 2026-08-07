@@ -18,7 +18,10 @@ export const SECTION_KINDS = {
   system: "system",
 };
 
-const CHROME_ROWS = 6; // header, search, rules, hints, state line
+// Six drawn rows — title, filter, two rules, hints, status — plus one row left
+// unused. A frame that fills the terminal exactly scrolls it by one on the
+// final newline, which is what made the panes appear to drift.
+const CHROME_ROWS = 7;
 const MIN_PANE_ROWS = 3;
 const SCROLL_MARGIN = 1;
 
@@ -81,19 +84,33 @@ function scrollFor(offset, index, height, length) {
 
 // ── derived ────────────────────────────────────────────────────────────────
 
+/**
+ * Name-first matching.
+ *
+ * Descriptions are deliberately excluded: they are ordinary English, so a
+ * two-letter query matched almost every Skill through words like "can" and
+ * "because", which made search feel broken. A term matches a Skill's name as a
+ * subsequence, or its bundle, agents, or paths as a substring.
+ */
 export function matches(skill, query) {
   const q = query.trim().toLowerCase();
   if (q === "") return true;
-  const hay = [
-    skill.name,
-    skill.description,
-    skill.bundle,
-    ...skill.exposedTo,
-    ...skill.paths,
-  ]
+  const name = skill.name.toLowerCase();
+  const rest = [skill.bundle, ...skill.exposedTo, ...skill.paths]
     .join(" ")
     .toLowerCase();
-  return q.split(/\s+/).every((term) => hay.includes(term));
+  return q
+    .split(/\s+/)
+    .every((term) => subsequence(term, name) || rest.includes(term));
+}
+
+function subsequence(needle, haystack) {
+  let index = 0;
+  for (const character of haystack) {
+    if (character === needle[index]) index += 1;
+    if (index === needle.length) return true;
+  }
+  return needle.length === 0;
 }
 
 /** Sections keep their identity while searching; only their contents shrink. */
@@ -131,6 +148,22 @@ export function selectionSummary(state) {
     }
   }
   return [...bySection.entries()].map(([label, count]) => ({ label, count }));
+}
+
+/**
+ * The exposure every Skill in a section shares, or null when they differ.
+ *
+ * A bundle installed by one Manager exposes every member to the same agents, so
+ * repeating that on each row is noise. Shown once on the header instead, and per
+ * row only where a Skill departs from it.
+ */
+export function sharedExposure(section) {
+  const first = section.skills[0];
+  if (first === undefined) return null;
+  const key = first.exposedTo.join(" ");
+  return section.skills.every((skill) => skill.exposedTo.join(" ") === key)
+    ? key
+    : null;
 }
 
 /** The right pane spends its first row on the section header. */
@@ -190,6 +223,48 @@ export function reduce(state, action) {
     }
     case "move":
       return settle(move(next, action.delta));
+    case "point-section":
+      return settle({
+        ...next,
+        focus: "sections",
+        sectionIndex: action.index,
+        skillIndex: 0,
+        skillScroll: 0,
+        reviewOpen: false,
+      });
+    case "point-skill":
+      return settle({
+        ...next,
+        focus: "skills",
+        skillIndex: action.index,
+        reviewOpen: false,
+      });
+    case "scroll": {
+      const rows =
+        action.pane === "sections" ? layout(next).paneRows : skillRows(next);
+      const total =
+        action.pane === "sections"
+          ? visibleSections(next).length
+          : currentSkills(next).length;
+      const key = action.pane === "sections" ? "sectionScroll" : "skillScroll";
+      const offset = Math.min(
+        Math.max(0, next[key] + action.delta),
+        Math.max(0, total - rows),
+      );
+      const indexKey =
+        action.pane === "sections" ? "sectionIndex" : "skillIndex";
+      const index = Math.min(
+        Math.max(next[indexKey], offset),
+        Math.max(offset, offset + rows - 1),
+      );
+      return {
+        ...next,
+        [key]: offset,
+        [indexKey]: Math.min(index, Math.max(0, total - 1)),
+      };
+    }
+    case "set-left-percent":
+      return settle({ ...next, leftPercent: action.percent });
     case "page":
       return settle(
         move(

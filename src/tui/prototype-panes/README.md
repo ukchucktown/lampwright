@@ -46,16 +46,21 @@ the pane scrolls.
 The bottom line prints the complete interaction state after every keystroke, so
 assumptions about focus, indices, and selection are visible while you drive.
 
+## Mouse
+
+Click a section or a skill to focus it, click the `[ ]` box to toggle it, use
+the wheel over either pane to scroll it, and drag the divider to resize the
+split.
+
 ## Known rough edges — look for these
 
-- **A two-character query still matches almost everything.** The haystack
-  includes descriptions, so `ca` matches 40 of 43 skills through ordinary
-  English. Search may need to be name-first, or weighted.
 - **Typing does not move you to the matches.** Filter while focused on a
   section with few or no hits and you stay there, watching an empty pane, with
   the matches elsewhere in the list.
 - **`S` on a section you have not entered** takes every skill in it. There is
   no confirmation and no undo beyond `ctrl-a`.
+- **Selection is invisible once you leave a section.** The left pane shows
+  `taken/total`, but nothing lists what is selected until you press enter.
 
 ## What survives
 
