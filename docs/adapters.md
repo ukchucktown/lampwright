@@ -195,3 +195,47 @@ hash-pinned registry and settings records. That plan always requires explicit
 Brute-force confirmation. It is unavailable for administrator-managed scope,
 unsafe or ambiguous manifests/records, and cache paths shared by multiple
 installed scopes.
+
+## Codex plugin adapter
+
+The `codex.plugins` built-in treats the supported local
+`codex plugin list --json` result as the authority for installed state. It does
+not infer an installed Plugin from `config.toml` or from cache content. The
+query runs without a shell and receives the resolved `CODEX_HOME`, privacy
+flags, and `TMPDIR`, `TMP`, and `TEMP` overrides that keep the read-only scan
+from creating helper-alias temporary state. Cache-only trees remain
+non-installation evidence if Codex is absent, the output is invalid, or the
+configuration and cache no longer agree.
+
+Each installed Plugin is one user-scope ownership boundary. Its Skills are
+searchable `managed-plugin-resource` Installations with strong Plugin identity,
+but are not independently selectable. An explicit Plugin plan discloses the
+complete `<CODEX_HOME>/plugins/cache/<marketplace>/<plugin>` boundary (including
+stale versions), the active version and supported manifest, default and custom
+Skills, commands, hooks, MCP configuration, apps, migrated command Skills,
+interface assets, and retained legacy
+`plugins/data/<plugin>-<marketplace>` or Agent Plugins v1
+`plugins/data/agent-plugins/<sha256(marketplace + NUL + plugin)[:32]>` data.
+An Agent Plugins v1 manifest is a regular root `plugin.json` with the exact
+published schema URL; an unrelated root file falls back to Codex's legacy
+manifest precedence. The retained data directory is impact evidence only;
+Codex does not remove it during uninstall.
+
+Managed removal invokes the installed executable directly from an isolated
+temporary working directory:
+
+```text
+codex plugin remove <plugin>@<marketplace> --json
+```
+
+The declared effects are removal of every cached version below the qualified
+Plugin cache boundary and Codex's update to `<CODEX_HOME>/config.toml`.
+Inventory enables that operation only when the JSON identity and version are
+safe, the derived cache hierarchy is made of canonically contained ordinary
+directories, the selected manifest and custom paths are safe, and `config.toml`
+is either absent or a stable ordinary single-link file. Verification requires
+both the cache boundary and the supported Codex owner state to be absent.
+
+Brute-force fallback is unavailable: v1 declarative record cleanup cannot
+safely edit TOML. A failed Codex lifecycle operation therefore cannot silently
+quarantine cache files while leaving configuration stale.

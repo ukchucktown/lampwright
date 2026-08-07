@@ -73,6 +73,7 @@ export interface InventoryScanEnvironment {
 export interface InventoryCommand {
   readonly executable: string;
   readonly arguments: readonly string[];
+  readonly environment?: Readonly<Record<string, string>>;
 }
 
 export interface InventoryCommandResult {

@@ -12,6 +12,9 @@ export const systemCommandRunner: InventoryCommandRunner = {
         shell: false,
         stdio: ["ignore", "pipe", "ignore"],
         windowsHide: true,
+        ...(command.environment === undefined
+          ? {}
+          : { env: { ...process.env, ...command.environment } }),
       });
       let stdout = "";
       let settled = false;

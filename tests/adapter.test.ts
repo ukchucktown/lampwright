@@ -197,7 +197,7 @@ describe("Adapter loading", () => {
     const second = await loadAdapters(request);
 
     expect(first).toEqual(second);
-    expect(first.adapters).toHaveLength(3);
+    expect(first.adapters).toHaveLength(4);
     const fixtureAdapter = first.adapters.find(
       (adapter) => adapter.id === "fixture.read-only",
     );
@@ -206,6 +206,9 @@ describe("Adapter loading", () => {
     );
     const claudePluginAdapter = first.adapters.find(
       (adapter) => adapter.id === "claude-code.plugins",
+    );
+    const codexPluginAdapter = first.adapters.find(
+      (adapter) => adapter.id === "codex.plugins",
     );
     expect(fixtureAdapter).toMatchObject({
       id: "fixture.read-only",
@@ -225,6 +228,23 @@ describe("Adapter loading", () => {
       id: "claude-code.plugins",
       trust: { kind: "built-in" },
       commandCapable: true,
+    });
+    expect(codexPluginAdapter).toMatchObject({
+      id: "codex.plugins",
+      trust: { kind: "built-in" },
+      commandCapable: true,
+    });
+    expect(codexPluginAdapter?.actions[0]).toMatchObject({
+      id: "remove-user-plugin",
+      command: {
+        executable: "codex",
+        arguments: [
+          { kind: "literal", value: "plugin" },
+          { kind: "literal", value: "remove" },
+          { kind: "value", from: "externalId" },
+          { kind: "literal", value: "--json" },
+        ],
+      },
     });
     expect(
       claudePluginAdapter?.actions.find(
