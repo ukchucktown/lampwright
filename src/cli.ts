@@ -2,7 +2,7 @@
 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { AdapterTrustRequiredError, loadAdapters } from "./adapter/index.js";
@@ -856,4 +856,16 @@ function isInventory(
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-if (process.argv[1] === fileURLToPath(import.meta.url)) void main();
+if (isMainModule(import.meta.url, process.argv[1])) void main();
+
+function isMainModule(
+  moduleUrl: string,
+  entryPath: string | undefined,
+): boolean {
+  if (entryPath === undefined) return false;
+  try {
+    return realpathSync(entryPath) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}

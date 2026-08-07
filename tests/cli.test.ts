@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -642,4 +642,26 @@ describe("the built skill-cleaner executable", () => {
       `${packageMetadata.version}\n`,
     );
   });
+
+  it.skipIf(process.platform === "win32")(
+    "runs through the symlink created for a package executable",
+    async () => {
+      const environment = await createTestEnvironment();
+      const packageExecutable = join(
+        environment.temporary,
+        "skill-cleaner-package-bin",
+      );
+      await symlink(executablePath, packageExecutable, "file");
+      const { stdout, stderr } = await execFileAsync(process.execPath, [
+        packageExecutable,
+        "--version",
+      ]);
+      const packageMetadata = JSON.parse(
+        await readFile(join(repositoryRoot, "package.json"), "utf8"),
+      ) as PackageMetadata;
+
+      expect(stderr).toBe("");
+      expect(stdout).toBe(`${packageMetadata.version}\n`);
+    },
+  );
 });

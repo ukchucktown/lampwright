@@ -1,52 +1,87 @@
 # skill-cleaner
 
-`skill-cleaner` is a cross-platform terminal tool for finding and safely removing AI agent skills regardless of how they were installed.
+`skill-cleaner` is a cross-platform terminal application for discovering and
+safely removing AI agent Skills whether they were installed as standalone
+files, by a Manager, or through a Plugin system.
 
-The project is currently in specification and planning. See:
-
-- [Domain language](./CONTEXT.md)
-- [Product specification](./docs/spec.md)
-- [Module design](./docs/module-design.md)
-- [Core model](./docs/model.md)
-- [Inventory scanning](./docs/inventory.md)
-- [Adapter runtime](./docs/adapters.md)
-- [Removal planning](./docs/planning.md)
-- [Terminal UI](./docs/tui.md)
-- [Non-interactive CLI](./docs/cli.md)
-- [Implementation roadmap](./docs/roadmap.md)
-- [Architectural decisions](./docs/adr/)
-
-The intended interface is:
+The primary interface is an interactive fuzzy-search inventory:
 
 ```console
 npx skill-cleaner
 ```
 
-## Status
+No npm version has been published yet. Until the first explicitly approved
+release, build and run the executable from a trusted checkout.
 
-No implementation has been released. Work is tracked in the repository's GitHub issues.
+## Safety model
+
+Inventory is rebuilt from live, bounded evidence on every run. The cleaner
+attributes ownership before Planning, prefers the Owner's supported Managed
+Removal, and never silently substitutes a filesystem fallback. A separately
+confirmed Brute-force Removal moves artifacts into Quarantine.
+
+Non-ignored Git worktree content and System Skills cannot be mutated, including
+with force. Matching names and hashes do not merge Skill identities. Ordinary
+remove-all excludes Plugins. Read-only scans, TUI browsing, and dry runs create
+no persistent state. The application has no telemetry and does not transmit
+paths, Inventory, metadata, or search queries.
+
+## Interfaces
+
+```console
+skill-cleaner                  # interactive fuzzy-search UI
+skill-cleaner scan             # print the live Inventory
+skill-cleaner remove <target>  # review and remove selected target(s)
+skill-cleaner restore <entry>  # restore a Quarantine entry
+skill-cleaner purge <entry>    # permanently delete Quarantine entries
+```
+
+Use `skill-cleaner --help` for selectors, approvals, JSON output, dry-run, and
+stable exit statuses. See the [terminal UI](./docs/tui.md) and
+[non-interactive CLI](./docs/cli.md) guides for the complete behavior.
+
+## Documentation
+
+- [Product specification](./docs/spec.md)
+- [Domain language](./CONTEXT.md)
+- [Module design](./docs/module-design.md)
+- [Core model](./docs/model.md)
+- [Inventory scanning](./docs/inventory.md)
+- [Adapter runtime](./docs/adapters.md)
+- [Removal planning](./docs/planning.md)
+- [Execution and fallback](./docs/execution.md)
+- [Terminal UI](./docs/tui.md)
+- [Non-interactive CLI](./docs/cli.md)
+- [Release readiness](./docs/release.md)
+- [Architectural decisions](./docs/adr/)
+- [Contributing](./CONTRIBUTING.md) and [security policy](./SECURITY.md)
 
 ## Development
 
-The project requires Node.js 20 or newer. Install dependencies with `npm install`, then
-run the local quality gates:
+Node.js 20 or newer is required.
 
 ```console
+npm ci
 npm run format:check
 npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run pack:check
 ```
 
-After building, open the interactive inventory or inspect the automation
-interface with:
+After building:
 
 ```console
 node dist/cli.js
 node dist/cli.js --help
 node dist/cli.js --version
 ```
+
+CI runs the complete gate and package audit on Node 20, 22, and 24 across
+macOS, Linux, and Windows. Release preparation never authorizes npm publication
+or a repository visibility change; follow the manual checklist in
+[`docs/release.md`](./docs/release.md).
 
 ## License
 
