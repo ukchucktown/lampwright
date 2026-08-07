@@ -15,18 +15,20 @@
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
-    }
+    },
+    "./adapter-v1.schema.json": "./schemas/adapter-v1.schema.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \".github/**/*.yml\" \"*.{json,js}\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \".github/**/*.yml\" \"*.{json,js}\"",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
     "lint": "eslint . --max-warnings 0",
     "test": "npm run build && vitest run",
     "typecheck": "tsc --project tsconfig.json"
@@ -50,6 +52,8 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
+    "jsonc-parser": "^3.3.1",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }
