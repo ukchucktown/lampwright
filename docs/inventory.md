@@ -160,6 +160,30 @@ Injected `configDirectory` and `agentHomeDirectories` keep XDG and supported
 manager environment overrides explicit and make tests independent of the
 developer's real paths.
 
+## Gemini CLI reconciliation
+
+Gemini discovery is bounded to extension Skills, user
+`~/.gemini/skills`, user `~/.agents/skills`, workspace `.gemini/skills`, and
+workspace `.agents/skills`, in that low-to-high precedence order. Every
+physical Installation is retained; `gemini-cli` metadata records its source,
+precedence, exact-case effective winner, case-insensitive disabled state, and
+copy/link or junction form. Disabled state is searchable evidence only.
+
+Native `.gemini/skills` copies and links are Gemini lifecycle targets. The
+`.agents/skills` locations are discovery aliases and remain filesystem-owned.
+Vercel-owned canonical or link-equivalent paths take precedence during
+reconciliation, so one physical occurrence never gains competing removal
+authority.
+
+Extensions are bounded to immediate management entries under
+`~/.gemini/extensions`. Stable install metadata and manifests establish the
+management root, effective root (a linked source for `type: link`), context,
+commands, hooks, agents, policies, `.env`, Skills, and manifest configuration
+impact. Extension Skills are plugin-owned, non-independently-selectable
+children. Enablement rules and disabled extensions remain inventory evidence;
+unsafe, malformed, escaping, linked-management, or ambiguous state fails
+closed. Linked sources are never declared as removal effects.
+
 ## Claude Code plugin reconciliation
 
 Inventory reads Claude Code's version 2 installed-plugin registry from

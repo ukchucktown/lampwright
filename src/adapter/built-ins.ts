@@ -91,6 +91,21 @@ export const CLAUDE_CODE_EXECUTABLE = "claude";
 
 export const CODEX_PLUGIN_ADAPTER_ID = "codex.plugins";
 export const CODEX_EXECUTABLE = "codex";
+export const GEMINI_CLI_ADAPTER_ID = "gemini-cli";
+export const GEMINI_CLI_EXECUTABLE = "gemini";
+
+export function geminiSkillUninstallArguments(
+  scope: "user" | "workspace",
+  name: string,
+): readonly string[] {
+  return ["skills", "uninstall", name, "--scope", scope];
+}
+
+export function geminiExtensionUninstallArguments(
+  name: string,
+): readonly string[] {
+  return ["extensions", "uninstall", name];
+}
 
 function codexPluginRemoveArgumentTemplates() {
   return [
@@ -282,6 +297,81 @@ export const CODEX_PLUGIN_ADAPTER_HASH = createHash("sha256")
   .update(codexPluginsContent)
   .digest("hex");
 
+const geminiCli = {
+  schemaVersion: 1,
+  id: GEMINI_CLI_ADAPTER_ID,
+  name: "Gemini CLI skills and extensions",
+  platforms: ["darwin", "linux", "win32"],
+  probes: [
+    {
+      id: "gemini-executable",
+      kind: "executable",
+      executable: { default: GEMINI_CLI_EXECUTABLE },
+    },
+  ],
+  actions: [
+    {
+      id: "uninstall-user-skill",
+      kind: "managed",
+      ownerKind: "manager",
+      operationId: "uninstall-user-skill",
+      requiresProbes: ["gemini-executable"],
+      command: {
+        default: {
+          executable: GEMINI_CLI_EXECUTABLE,
+          arguments: [
+            { kind: "literal", value: "skills" },
+            { kind: "literal", value: "uninstall" },
+            { kind: "value", from: "externalId" },
+            { kind: "literal", value: "--scope" },
+            { kind: "literal", value: "user" },
+          ],
+        },
+      },
+    },
+    {
+      id: "uninstall-workspace-skill",
+      kind: "managed",
+      ownerKind: "manager",
+      operationId: "uninstall-workspace-skill",
+      requiresProbes: ["gemini-executable"],
+      command: {
+        default: {
+          executable: GEMINI_CLI_EXECUTABLE,
+          arguments: [
+            { kind: "literal", value: "skills" },
+            { kind: "literal", value: "uninstall" },
+            { kind: "value", from: "externalId" },
+            { kind: "literal", value: "--scope" },
+            { kind: "literal", value: "workspace" },
+          ],
+        },
+      },
+    },
+    {
+      id: "uninstall-extension",
+      kind: "managed",
+      ownerKind: "plugin",
+      operationId: "uninstall-extension",
+      requiresProbes: ["gemini-executable"],
+      command: {
+        default: {
+          executable: GEMINI_CLI_EXECUTABLE,
+          arguments: [
+            { kind: "literal", value: "extensions" },
+            { kind: "literal", value: "uninstall" },
+            { kind: "value", from: "externalId" },
+          ],
+        },
+      },
+    },
+  ],
+} as const;
+const geminiCliContent = `${JSON.stringify(geminiCli, null, 2)}\n`;
+export const GEMINI_CLI_ADAPTER_HASH = createHash("sha256")
+  .update(geminiCliContent)
+  .digest("hex");
+
 // Keeping the source list outside the public Adapter module prevents callers
 // from marking arbitrary local content as package-trusted built-in content.
 export const builtInAdapterSources: readonly BuiltInAdapterSource[] = [
@@ -297,4 +387,5 @@ export const builtInAdapterSources: readonly BuiltInAdapterSource[] = [
     name: "vercel-skills.jsonc",
     content: vercelSkillsContent,
   },
+  { name: "gemini-cli.jsonc", content: geminiCliContent },
 ];

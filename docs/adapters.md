@@ -163,6 +163,29 @@ v1 declarative format cannot safely express evolving lock records, sanitized
 name collisions, XDG-aware canonical paths, or the one-to-many set of copies
 and links covered by a single remove command.
 
+## Gemini CLI adapter
+
+The `gemini-cli` built-in uses only structured direct commands:
+
+```text
+gemini skills uninstall <name> --scope user|workspace
+gemini extensions uninstall <name>
+```
+
+Workspace Skill removal runs from the selected workspace; user and extension
+operations use an isolated temporary directory. Inventory declares exact
+remove and configuration-modification effects plus path verification. A native
+Skill command affects only its selected copy or link; an extension command is
+a whole-plugin operation and is available only through explicit plugin
+inclusion, with all known collateral shown in the plan.
+
+Linked extension sources are preserved. Missing managers and failed managed
+operations never trigger cleanup implicitly: a separately confirmed
+Brute-force plan may quarantine only declared, safe filesystem artifacts.
+Malformed records, unsafe links or paths, duplicate native names in one scope,
+and duplicate extension manifest names fail closed rather than issuing an
+ambiguous name-based command.
+
 ## Claude Code plugin adapter
 
 The `claude-code.plugins` built-in models Claude Code plugins as whole-bundle

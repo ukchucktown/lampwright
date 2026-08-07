@@ -197,7 +197,7 @@ describe("Adapter loading", () => {
     const second = await loadAdapters(request);
 
     expect(first).toEqual(second);
-    expect(first.adapters).toHaveLength(4);
+    expect(first.adapters).toHaveLength(5);
     const fixtureAdapter = first.adapters.find(
       (adapter) => adapter.id === "fixture.read-only",
     );

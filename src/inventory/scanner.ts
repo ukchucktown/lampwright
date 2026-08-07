@@ -52,6 +52,7 @@ import { systemCommandRunner } from "./process.js";
 import { parseScanRequest } from "./request-schema.js";
 import { scanClaudeCodePlugins } from "./claude-code-plugins.js";
 import { scanCodexPlugins } from "./codex-plugins.js";
+import { scanGeminiCli } from "./gemini-cli.js";
 import { scanVercelSkills } from "./vercel-skills.js";
 import {
   InventoryScanError,
@@ -179,6 +180,25 @@ async function scanWithOptions(
     options.environment,
     options.commandRunner,
   );
+  const gemini = await scanGeminiCli(
+    options.environment,
+    options.commandRunner,
+  );
+  const geminiInstallations = gemini.installations.filter(
+    (installation) =>
+      !vercel.invalidCanonicalRoots.some((root) =>
+        pathIsWithin(root, installation.location.path),
+      ) &&
+      !vercel.installations.some(
+        (claimed) =>
+          pathComparisonKey(claimed.location.path) ===
+            pathComparisonKey(installation.location.path) ||
+          (claimed.location.canonicalPath !== null &&
+            installation.location.canonicalPath !== null &&
+            pathComparisonKey(claimed.location.canonicalPath) ===
+              pathComparisonKey(installation.location.canonicalPath)),
+      ),
+  );
   const reconciledGenericInstallations = genericInstallations.map(
     (installation) =>
       vercel.invalidCanonicalRoots.some((root) =>
@@ -192,6 +212,7 @@ async function scanWithOptions(
       ...vercel.installations,
       ...claudeCode.installations,
       ...codex.installations,
+      ...geminiInstallations,
     ].flatMap((installation) => [
       pathComparisonKey(installation.location.path),
       ...(installation.removal.supplementalArtifacts ?? []).map((artifact) =>
@@ -207,13 +228,16 @@ async function scanWithOptions(
     ...vercel.installations,
     ...claudeCode.installations,
     ...codex.installations,
+    ...geminiInstallations,
   ].sort(compareRecordPath);
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
   const adapterPluginInstallationIds = new Set(
-    [...claudeCode.installations, ...codex.installations].map(
-      (installation) => installation.id,
-    ),
+    [
+      ...claudeCode.installations,
+      ...codex.installations,
+      ...geminiInstallations,
+    ].map((installation) => installation.id),
   );
   const genericPlugins = await createPluginBoundaries(
     installations.filter(
@@ -226,6 +250,7 @@ async function scanWithOptions(
     ...genericPlugins,
     ...claudeCode.plugins,
     ...codex.plugins,
+    ...gemini.plugins,
   ].sort((left, right) => compareText(left.id, right.id));
   const snapshot = {
     installations,
