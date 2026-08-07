@@ -44,10 +44,12 @@ Owner processes are the declared mutation boundary described by
 Commands are always structured executable/argument values and the production
 runner sets `shell: false`. Exact-version `npx` runs from a fresh operating
 system temporary directory with a cleaner-owned npm cache, so acquisition does
-not operate from or add dependencies to the user's project. Generic direct and
-verification commands reject `npx`, `npm`, `yarn`, `pnpm`, and `bunx` names,
-including case-insensitive Windows launcher suffixes, so a package runner cannot
-bypass the exact ephemeral-package trust path.
+not operate from or add dependencies to the user's project. Every direct and
+ephemeral Owner invocation receives cleaner-owned `DO_NOT_TRACK=1` and
+`DISABLE_TELEMETRY=1` environment values; Adapters cannot override them.
+Generic direct and verification commands reject `npx`, `npm`, `yarn`, `pnpm`,
+`pnpx`, and `bunx` names, including case-insensitive Windows launcher suffixes,
+so a package runner cannot bypass the exact ephemeral-package trust path.
 
 ## Scheduling and fallback
 

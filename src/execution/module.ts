@@ -363,6 +363,7 @@ async function executeManagedRemoval(
   if (action.invocation.kind === "direct") {
     const result = await options.processRunner.run({
       command: action.invocation.command,
+      environment: ownerPrivacyEnvironment,
     });
     requireSuccessfulOwnerExit(result.exitCode);
     return ownerSuccess(action, result.exitCode, null);
@@ -384,6 +385,7 @@ async function executeManagedRemoval(
       },
       cwd: state.cwd,
       environment: {
+        ...ownerPrivacyEnvironment,
         npm_config_cache: state.cache,
         npm_config_update_notifier: "false",
         npm_config_fund: "false",
@@ -403,6 +405,11 @@ async function executeManagedRemoval(
   requireSuccessfulOwnerExit(result.exitCode);
   return ownerSuccess(action, result.exitCode, temporaryCleanupSucceeded);
 }
+
+const ownerPrivacyEnvironment = {
+  DISABLE_TELEMETRY: "1",
+  DO_NOT_TRACK: "1",
+} as const;
 
 function requireSuccessfulOwnerExit(
   exitCode: number | null,

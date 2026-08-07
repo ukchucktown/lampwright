@@ -212,6 +212,10 @@ describe("Execution", () => {
         executable: "fixture-manager",
         arguments: ["remove", "action-1"],
       },
+      environment: {
+        DISABLE_TELEMETRY: "1",
+        DO_NOT_TRACK: "1",
+      },
     });
     expect(report).toMatchObject({
       status: "succeeded",
@@ -346,6 +350,8 @@ describe("Execution", () => {
       },
       cwd: expect.stringContaining("skill-cleaner-execution-"),
       environment: expect.objectContaining({
+        DISABLE_TELEMETRY: "1",
+        DO_NOT_TRACK: "1",
         npm_config_cache: join(root, "execution", "v1", "npm-cache"),
         npm_config_global: "false",
       }),
