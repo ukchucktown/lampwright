@@ -142,6 +142,8 @@ export function createState(variant = "A") {
     searchActive: variant === "B",
     selectedIds: [],
     expandedGroupIds: groups.map((group) => group.id),
+    previewVisible: true,
+    previewPercent: 38,
     reviewOpen: false,
     notice: "",
   };
@@ -182,6 +184,18 @@ export function reduce(state, action) {
     });
   if (action.type === "clear-query")
     return clamp({ ...state, query: "", rowIndex: 0, itemIndex: 0 });
+  if (action.type === "resize-preview")
+    return {
+      ...state,
+      previewVisible: true,
+      previewPercent: Math.min(
+        60,
+        Math.max(20, state.previewPercent + action.delta),
+      ),
+      notice: "",
+    };
+  if (action.type === "toggle-preview")
+    return { ...state, previewVisible: !state.previewVisible, notice: "" };
   if (action.type === "escape") {
     if (state.reviewOpen) return { ...state, reviewOpen: false };
     if (state.query !== "")
@@ -194,6 +208,8 @@ export function reduce(state, action) {
   }
   if (action.type === "move")
     return { ...move(state, action.delta), notice: "" };
+  if (action.type === "jump")
+    return { ...jump(state, action.edge), notice: "" };
   if (action.type === "left") {
     if (state.variant === "A" && !state.searchActive)
       return { ...state, focus: "groups", reviewOpen: false };
@@ -323,6 +339,7 @@ export function stateSummary(state) {
     expanded: groups
       .filter((candidate) => state.expandedGroupIds.includes(candidate.id))
       .map((candidate) => candidate.name),
+    preview: state.previewVisible ? `${state.previewPercent}%` : "hidden",
   };
 }
 
@@ -355,6 +372,24 @@ function move(state, delta) {
     rowIndex: wrap(state.rowIndex, treeRows(state).length, delta),
     reviewOpen: false,
   };
+}
+
+function jump(state, edge) {
+  const indexFor = (length) =>
+    edge === "first" || length === 0 ? 0 : length - 1;
+  if (state.searchActive || state.variant === "B")
+    return { ...state, rowIndex: indexFor(fuzzyResults(state).length) };
+  if (state.variant === "A") {
+    if (state.focus === "groups") {
+      const groupIndex = indexFor(groups.length);
+      return { ...state, groupIndex, itemIndex: 0 };
+    }
+    return {
+      ...state,
+      itemIndex: indexFor(groups[state.groupIndex]?.skills.length ?? 0),
+    };
+  }
+  return { ...state, rowIndex: indexFor(treeRows(state).length) };
 }
 
 function toggleExpanded(state) {

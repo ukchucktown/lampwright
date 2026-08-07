@@ -18,12 +18,14 @@ import {
 
 const realMode = process.argv.includes("--real");
 let inventoryLabel = "Synthetic Inventory · read-only";
+let hiddenLabel = "";
 if (realMode) {
   process.stdout.write("Scanning bounded skill roots for live Inventory…\n");
   const { loadRealGroups } = await import("./real-inventory.mjs");
-  const realGroups = await loadRealGroups();
-  groups.splice(0, groups.length, ...realGroups);
+  const realInventory = await loadRealGroups();
+  groups.splice(0, groups.length, ...realInventory.groups);
   inventoryLabel = `${groups.flatMap((group) => group.skills).length} live Installations · read-only scan`;
+  hiddenLabel = `${realInventory.hiddenCount} source/cache/runtime findings hidden`;
 }
 
 const ansi = {
@@ -48,6 +50,7 @@ emitKeypressEvents(process.stdin);
 process.stdin.setRawMode(true);
 process.stdin.resume();
 process.stdout.write("\u001B[?25l");
+process.stdout.on("resize", renderFrame);
 renderFrame();
 
 process.stdin.on("keypress", (text, key) => {
@@ -72,6 +75,15 @@ function close() {
 function keyToAction(text, key, current) {
   if (["1", "2", "3"].includes(text))
     return { type: "variant", variant: variants[Number(text) - 1].key };
+  if (key.shift && key.name === "left")
+    return { type: "resize-preview", delta: 5 };
+  if (key.shift && key.name === "right")
+    return { type: "resize-preview", delta: -5 };
+  if (key.name === "f2") return { type: "toggle-preview" };
+  if (key.name === "pageup") return { type: "move", delta: -pageSize() };
+  if (key.name === "pagedown") return { type: "move", delta: pageSize() };
+  if (key.name === "home") return { type: "jump", edge: "first" };
+  if (key.name === "end") return { type: "jump", edge: "last" };
   if (
     key.name === "up" ||
     (text === "k" && !typing(current)) ||
@@ -97,6 +109,11 @@ function keyToAction(text, key, current) {
   if (text === "/") return { type: "search" };
   if (text === "e" && current.variant === "C" && !typing(current))
     return { type: "toggle-expanded" };
+  if (text === "[" && !typing(current))
+    return { type: "resize-preview", delta: 5 };
+  if (text === "]" && !typing(current))
+    return { type: "resize-preview", delta: -5 };
+  if (text === "p" && !typing(current)) return { type: "toggle-preview" };
   if (typing(current) && !key.ctrl && !key.meta && text.length > 0)
     return { type: "append-query", value: text };
   return null;
@@ -127,6 +144,7 @@ function renderHeader(current) {
   return [
     `${ansi.bold}${ansi.cyan}skill-cleaner navigation prototype${ansi.reset}  ${ansi.yellow}${variant.key} — ${variant.name}${ansi.reset}`,
     `${ansi.dim}${inventoryLabel}${ansi.reset}`,
+    ...(hiddenLabel === "" ? [] : [`${ansi.dim}${hiddenLabel}${ansi.reset}`]),
     `${ansi.dim}Variants: [1] three-pane  [2] fzf-first  [3] tree${ansi.reset}`,
     rule(),
   ].join("\n");
@@ -136,26 +154,39 @@ function renderNavigator(current) {
   const group = groups[current.groupIndex];
   const item = group.skills[current.itemIndex];
   const left = [
-    title("SOURCE GROUPS", current.focus === "groups"),
-    ...groups.map((candidate, index) =>
-      row(
-        `${candidate.kind === "Plugin" ? "◆" : candidate.kind === "Source Group" ? "▣" : "·"} ${candidate.name} (${candidate.skills.length})`,
-        current.focus === "groups" && index === current.groupIndex,
-      ),
+    title("SOURCES / LOCATIONS", current.focus === "groups"),
+    ...viewport(
+      groups,
+      current.groupIndex,
+      bodyRowLimit(),
+      (candidate, index) =>
+        row(
+          `${candidate.kind === "Plugin" ? "◆" : candidate.kind === "Source Group" ? "▣" : "·"} ${candidate.name} (${candidate.skills.length})`,
+          current.focus === "groups" && index === current.groupIndex,
+        ),
     ),
   ];
   const middle = [
     title(group.name.toUpperCase(), current.focus === "skills"),
     `${ansi.dim}${group.kind} · ${group.owner}${ansi.reset}`,
     "",
-    ...group.skills.map((candidate, index) =>
-      row(
-        `${mark(current, candidate)} ${candidate.name}`,
-        current.focus === "skills" && index === current.itemIndex,
-      ),
+    ...viewport(
+      group.skills,
+      current.itemIndex,
+      bodyRowLimit() - 2,
+      (candidate, index) =>
+        row(
+          `${mark(current, candidate)} ${candidate.name}`,
+          current.focus === "skills" && index === current.itemIndex,
+        ),
     ),
   ];
-  return columns(left, middle, preview(group, item), navigatorWidths());
+  return columns(
+    left,
+    middle,
+    current.previewVisible ? preview(group, item) : [],
+    navigatorWidths(current),
+  );
 }
 
 function renderFuzzy(current, overlay) {
@@ -166,7 +197,7 @@ function renderFuzzy(current, overlay) {
     `${ansi.cyan}>${ansi.reset} ${current.query}${ansi.inverse} ${ansi.reset}`,
     `${ansi.dim}${results.length}/${groups.flatMap((group) => group.skills).length} matches · ${current.selectedIds.length} selected${ansi.reset}`,
     "",
-    ...windowed(results, current.rowIndex, 10).map(({ value, index }) =>
+    ...viewport(results, current.rowIndex, bodyRowLimit(), (value, index) =>
       row(
         `${mark(current, value.skill)} ${value.skill.name.padEnd(18)} ${ansi.dim}${value.group.name} / ${value.group.owner}${ansi.reset}`,
         index === current.rowIndex,
@@ -175,9 +206,9 @@ function renderFuzzy(current, overlay) {
   ];
   return columns(
     left,
-    preview(active?.group, active?.skill),
+    current.previewVisible ? preview(active?.group, active?.skill) : [],
     [],
-    finderWidths(),
+    finderWidths(current),
   );
 }
 
@@ -185,24 +216,31 @@ function renderTree(current) {
   const rows = treeRows(current);
   const active = rows[current.rowIndex];
   const list = [
-    title("INSTALLATION SOURCES", true),
+    title("SOURCES / LOCATIONS", true),
     `${ansi.dim}Groups stay navigational; only Installation rows can be marked.${ansi.reset}`,
     "",
-    ...windowed(rows, current.rowIndex, 12).map(({ value, index }) => {
-      const expanded = current.expandedGroupIds.includes(value.group.id);
-      const text =
-        value.kind === "group"
-          ? `${expanded ? "▾" : "▸"} ${value.group.name}  ${ansi.dim}${value.group.kind} · ${value.group.skills.length}${ansi.reset}`
-          : `    ${mark(current, value.skill)} ${value.skill.name.padEnd(18)} ${ansi.dim}${value.skill.status}${ansi.reset}`;
-      return row(text, index === current.rowIndex);
-    }),
+    ...viewport(
+      rows,
+      current.rowIndex,
+      current.previewVisible ? Math.max(5, bodyRowLimit() - 7) : bodyRowLimit(),
+      (value, index) => {
+        const expanded = current.expandedGroupIds.includes(value.group.id);
+        const text =
+          value.kind === "group"
+            ? `${expanded ? "▾" : "▸"} ${value.group.name}  ${ansi.dim}${value.group.kind} · ${value.group.skills.length}${ansi.reset}`
+            : `    ${mark(current, value.skill)} ${value.skill.name.padEnd(18)} ${ansi.dim}${value.skill.status}${ansi.reset}`;
+        return row(text, index === current.rowIndex);
+      },
+    ),
   ];
-  const lower = [
-    rule(),
-    ...(active?.kind === "group"
-      ? groupPreview(active.group)
-      : preview(active?.group, active?.skill)),
-  ];
+  const lower = current.previewVisible
+    ? [
+        rule(),
+        ...(active?.kind === "group"
+          ? groupPreview(active.group)
+          : preview(active?.group, active?.skill)),
+      ]
+    : [];
   return [...list, ...lower].join("\n");
 }
 
@@ -264,12 +302,18 @@ function groupPreview(group) {
 
 function renderState(current) {
   const summary = stateSummary(current);
+  const collapsed = groups
+    .map((group) => group.name)
+    .filter((name) => !summary.expanded.includes(name));
   return [
     rule(),
     `${ansi.bold}STATE${ansi.reset} ${ansi.dim}variant=${summary.variant} mode=${summary.mode} focus=${summary.focus} query=${JSON.stringify(summary.query)}${ansi.reset}`,
-    `${ansi.dim}group=${summary.group ?? "none"} cursor=${summary.cursor ?? "none"}${ansi.reset}`,
-    `${ansi.dim}selected=[${summary.selected.join(", ")}]${ansi.reset}`,
-    ...wrapState(`expanded=[${summary.expanded.join(", ")}]`),
+    ...wrapState(
+      `group=${summary.group ?? "none"} cursor=${summary.cursor ?? "none"} selected=[${summary.selected.join(", ")}]`,
+    ),
+    ...wrapState(
+      `expanded=${summary.expanded.length}/${groups.length} collapsed=[${collapsed.join(", ")}] preview=${summary.preview}`,
+    ),
     ...(current.notice === ""
       ? []
       : [`${ansi.yellow}${current.notice}${ansi.reset}`]),
@@ -282,6 +326,7 @@ function renderKeys(current) {
     : "/ fuzzy search";
   return [
     `${ansi.bold}↑↓/jk${ansi.reset} move  ${ansi.bold}←→/hl${ansi.reset} browse  ${ansi.bold}Tab/Space${ansi.reset} select  ${ansi.bold}Enter${ansi.reset} review`,
+    `${ansi.bold}PgUp/PgDn Home/End${ansi.reset} scroll  ${ansi.bold}Shift-←/→${ansi.reset} resize  ${ansi.bold}F2${ansi.reset} preview`,
     `${ansi.bold}${search}${ansi.reset}  ${ansi.bold}Ctrl-C${ansi.reset} quit`,
     "",
   ].join("\n");
@@ -359,21 +404,50 @@ function truncateAnsi(value, width) {
   return `${result}…${ansi.reset}`;
 }
 
-function navigatorWidths() {
+function navigatorWidths(current) {
+  if (!current.previewVisible) {
+    const usable = terminalWidth() - 2;
+    const groupsWidth = Math.floor(usable * 0.38);
+    return [groupsWidth, usable - groupsWidth, 0];
+  }
   const usable = terminalWidth() - 4;
-  const groupsWidth = Math.floor(usable * 0.28);
-  const skillsWidth = Math.floor(usable * 0.31);
-  return [groupsWidth, skillsWidth, usable - groupsWidth - skillsWidth];
+  const previewWidth = Math.floor((usable * current.previewPercent) / 100);
+  const remaining = usable - previewWidth;
+  const groupsWidth = Math.floor(remaining * 0.46);
+  return [groupsWidth, remaining - groupsWidth, previewWidth];
 }
 
-function finderWidths() {
+function finderWidths(current) {
+  if (!current.previewVisible) return [terminalWidth(), 0, 0];
   const usable = terminalWidth() - 2;
-  const resultsWidth = Math.floor(usable * 0.62);
-  return [resultsWidth, usable - resultsWidth, 0];
+  const previewWidth = Math.floor((usable * current.previewPercent) / 100);
+  return [usable - previewWidth, previewWidth, 0];
 }
 
 function terminalWidth() {
   return Math.max(72, Math.min(process.stdout.columns || 120, 140));
+}
+
+function bodyRowLimit() {
+  return Math.max(6, Math.min(20, (process.stdout.rows || 30) - 15));
+}
+
+function pageSize() {
+  return Math.max(3, bodyRowLimit() - 2);
+}
+
+function viewport(values, cursor, limit, format) {
+  const available = Math.max(1, limit - 2);
+  const visible = windowed(values, cursor, available);
+  const start = visible[0]?.index ?? 0;
+  const end = (visible.at(-1)?.index ?? -1) + 1;
+  return [
+    ...(start > 0 ? [`${ansi.dim}  ↑ ${start} earlier${ansi.reset}`] : []),
+    ...visible.map(({ value, index }) => format(value, index)),
+    ...(end < values.length
+      ? [`${ansi.dim}  ↓ ${values.length - end} later${ansi.reset}`]
+      : []),
+  ];
 }
 
 function wrapState(value) {

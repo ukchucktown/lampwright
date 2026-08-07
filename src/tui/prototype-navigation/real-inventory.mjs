@@ -1,5 +1,9 @@
 // PROTOTYPE: read-only projection from the product Inventory into navigation groups.
 
+import { homedir } from "node:os";
+import { dirname, isAbsolute, relative, sep } from "node:path";
+import process from "node:process";
+
 export async function loadRealGroups() {
   const { runCli } = await import("../../../dist/cli.js");
   const result = await runCli(["scan", "--json"]);
@@ -11,11 +15,11 @@ export async function loadRealGroups() {
 }
 
 function projectInventory(inventory) {
+  const visibleInstallations = inventory.installations.filter(
+    (installation) => !isDefaultOrSystemInstallation(installation),
+  );
   const installations = new Map(
-    inventory.installations.map((installation) => [
-      installation.id,
-      installation,
-    ]),
+    visibleInstallations.map((installation) => [installation.id, installation]),
   );
   const groupedInstallationIds = new Set();
   const result = [];
@@ -45,7 +49,7 @@ function projectInventory(inventory) {
   }
 
   const sourceGroups = new Map();
-  for (const installation of inventory.installations) {
+  for (const installation of visibleInstallations) {
     if (groupedInstallationIds.has(installation.id)) continue;
     if (installation.manager === null || installation.source === null) continue;
     const key = [
@@ -74,34 +78,46 @@ function projectInventory(inventory) {
   }
 
   const collections = new Map();
-  for (const installation of inventory.installations) {
+  for (const installation of visibleInstallations) {
     if (groupedInstallationIds.has(installation.id)) continue;
-    const owner = ownerLabel(installation);
-    const scope = scopeLabel(installation.scope);
-    const key = `${installation.agentId}\u0000${scope}\u0000${owner}`;
+    const root = dirname(installation.location.path);
+    const key = root;
     const existing = collections.get(key) ?? {
       id: `collection:${key}`,
-      name: `${installation.agentId} · ${scope}`,
+      name: displayRoot(root),
       kind: "Navigation collection",
-      owner,
+      owner: "",
       source: "no shared Manager/source evidence",
-      scope,
-      evidence: "display-only collection",
+      scope: "",
+      evidence: "shared installation root only; not install provenance",
       removalBoundary: false,
       skills: [],
+      consumers: [],
+      scopes: [],
     };
     existing.skills.push(projectSkill(installation));
+    existing.consumers.push(installation.agentId);
+    existing.scopes.push(scopeLabel(installation.scope));
     collections.set(key, existing);
   }
   for (const group of collections.values()) {
     group.skills = sorted(group.skills, (value) => value.name);
+    group.owner = unique(group.consumers).sort(compare).join(", ");
+    group.scope = unique(group.scopes).sort(compare).join(", ");
+    delete group.consumers;
+    delete group.scopes;
     result.push(group);
   }
 
-  return result.sort(
-    (left, right) =>
-      groupRank(left) - groupRank(right) || compare(left.name, right.name),
-  );
+  return {
+    groups: result.sort(
+      (left, right) =>
+        groupRank(left) - groupRank(right) || compare(left.name, right.name),
+    ),
+    hiddenCount:
+      inventory.otherFindings.length +
+      (inventory.installations.length - visibleInstallations.length),
+  };
 }
 
 function projectSkill(installation) {
@@ -141,12 +157,25 @@ function removalLabel(installation) {
   return "unavailable";
 }
 
-function ownerLabel(installation) {
-  if (installation.manager !== null) return installation.manager.id;
-  if (installation.plugin !== null) return installation.plugin.id;
-  if (installation.ownership.kind === "agent-runtime")
-    return installation.ownership.agentId;
-  return installation.ownership.kind;
+function isDefaultOrSystemInstallation(installation) {
+  return (
+    installation.ownership.kind === "agent-runtime" ||
+    installation.protection.system.kind === "system-skill"
+  );
+}
+
+function displayRoot(root) {
+  const homeRelative = relative(homedir(), root);
+  if (within(homeRelative))
+    return homeRelative === "" ? "~" : `~${sep}${homeRelative}`;
+  const workspaceRelative = relative(process.cwd(), root);
+  if (within(workspaceRelative))
+    return workspaceRelative === "" ? "." : `.${sep}${workspaceRelative}`;
+  return root;
+}
+
+function within(path) {
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
 function scopeKey(scope) {
