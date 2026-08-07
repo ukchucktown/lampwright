@@ -50,6 +50,22 @@ known agent locations commonly do not exist. Duplicate equivalent roots are
 deduplicated by filesystem identity; contradictory declarations are rejected
 with `InventoryScanError`.
 
+`Inventory.id` is a deterministic fingerprint of the complete normalized
+snapshot, excluding `scannedAt`. Repeating an unchanged scan at another time
+therefore retains the ID, while changed ownership, protection, removal,
+dependency, or record evidence changes it. Execution can use this semantic
+identity when it fresh-scans and replans an approved Removal Plan.
+
+Each physical declared Plugin root receives a stable scan-local boundary ID.
+Installations reference that boundary separately from the Plugin system's
+external ID, so the same external Plugin installed in user and workspace scope
+remains two independently reviewable ownership boundaries. Generic discovery
+materializes the declared root itself as protected, recoverable collateral plus
+an explicit filesystem fallback, even when that root contains no Skills. A
+fallback can therefore quarantine the complete Plugin root—including unknown
+files and directories—instead of treating only discovered `SKILL.md` children
+as the Plugin. Adapters may later add stronger planner-ready evidence.
+
 ## Filesystem behavior
 
 Traversal is recursive only within a declared root and stops once it finds a
@@ -65,6 +81,9 @@ Broken links remain visible with `broken` status and no canonical path or hash.
 On Windows, the scanner queries the reparse tag to distinguish junctions from
 symbolic links, with a conservative path-shape fallback if that query is
 unavailable.
+Filesystem permission evidence for a broken Plugin-root link or junction comes
+from its parent directory, because Quarantine removes the directory entry and
+must not follow the absent target.
 
 Frontmatter `name`, `description`, and string-array `tags` are normalized.
 Malformed frontmatter leaves the finding visible with fallback metadata and an

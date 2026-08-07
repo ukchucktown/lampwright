@@ -26,6 +26,12 @@ The module owns:
 - Skill identity evidence and logical grouping
 - Normalized and namespaced metadata
 - Hard-dependency and soft-reference discovery
+- Materialization of planner-ready Owner operations, fallback evidence,
+  resolved direct or ephemeral-package invocations, protected managed effects,
+  concrete verification checks, exact declarative record cleanup, and physical
+  Plugin boundaries from compiled Adapters
+- Semantic Inventory fingerprinting over normalized evidence, excluding scan
+  time
 
 The returned Inventory is immutable and disposable. Tests exercise the module through `scan` against temporary filesystem fixtures and fake command execution.
 
@@ -46,8 +52,18 @@ This is an in-process module with no side effects. It owns:
 - Managed versus brute-force action selection
 - Confirmation and package-trust requirements
 - Verification expectations
+- Normalized intent materialization for fresh-scan/replan validation
+
+Planning consumes only materialized Inventory evidence. It does not load or
+interpret Adapter catalogs and does not probe the live machine. This preserves
+the two-argument pure interface while allowing Inventory and Adapter loading to
+evolve behind their own seams.
 
 The returned plan is a complete value suitable for terminal rendering, JSON output, approval, and later execution. Tests should assert plans rather than internal rule functions.
+
+Complete means Execution receives resolved structured invocations, precise
+record mutations with expected hashes and protection, and concrete verification
+checks. It must not reopen an Adapter catalog to recover executable behavior.
 
 ## Execution module
 

@@ -45,6 +45,8 @@ collections:
   declared strong identity evidence.
 - `identityHints` records shared names or hashes for display without merging
   Installation identities.
+- `plugins` records ownership boundaries, owned Installation IDs, known
+  collateral resources, and planner-ready removal evidence.
 - `dependencies` stores Inventory-level relationships so hard dependencies and
   soft references can originate from either installations or other findings.
 
@@ -57,20 +59,73 @@ filesystem protection, and dependencies are discriminated unions. This keeps
 callers from representing contradictory combinations such as a plugin resource
 with filesystem ownership or a project skill outside workspace scope.
 
+Each Installation has immutable `removal` evidence. It records an available or
+unavailable managed operation, its concrete direct or ephemeral-package
+invocation, Adapter trust, separately confirmed fallback availability, and
+declarative record cleanup with exact document selectors and hashes. Managed
+operations also carry protected expected remove-path and modify-path effects
+and concrete Adapter verification rules. Inventory materializes these facts;
+Planning never interprets Adapter templates or probes the machine.
+
+An Installation owned by a Plugin carries a scan-unique `pluginBoundaryId`.
+`PluginBoundary.id` is that physical ownership identity, while
+`PluginBoundary.pluginId` is the external tool-supplied identifier. Plugin
+Removal Targets use the boundary ID, so equal external IDs in user and
+workspace roots never collapse. Path-backed Plugin collateral uses an Artifact
+Location, including the `file` artifact kind, plus normal protection evidence.
+Every pathless resource names the exact declarative cleanup that represents it;
+an unresolved cleanup ID is invalid Inventory. Generic scanning represents the
+physical declared root even when it contains no Skills.
+
 ## Plans and reports
 
 `RemovalPlan` is a side-effect-free value. Actions are ordered; `dependsOn` may
 only refer to an earlier action. Quarantine and declarative record cleanup
 always require explicit brute-force confirmation. Managed removal and
-brute-force actions for one target cannot appear in the same plan, so managed
-failure never silently activates fallback.
+brute-force actions cannot affect the same Installation in one plan, so
+managed failure never silently activates fallback while heterogeneous Logical
+Skills remain representable.
 Non-overridable Git, System Skill, permission, and adapter-trust blocks cannot
 have actions. Overridable dependency and ambiguity blocks require the matching
 force approval.
 
+The plan contains normalized intent in addition to resolved targets. This
+preserves remove-all plugin inclusion and the managed-first or brute-force mode
+for Execution's required fresh-scan/replan comparison. A scanner-generated
+`Inventory.id` fingerprints all normalized evidence except `scannedAt`, making
+plan identity stable across unchanged rescans and sensitive to evidence changes.
+
+Actions identify the Installation IDs they affect even when their selected
+target is a Logical Skill or Plugin; Plugin collateral actions may explicitly
+use an empty affected-Installation list. Managed actions disclose their
+resolved invocation and protected expected effects. Direct invocations are
+structured executable/argument arrays. Ephemeral invocation remains a distinct
+exact package-runner envelope with package arguments. Record-cleanup actions
+carry a document format, fully resolved RFC 6901 pointer, expected file and
+record SHA-256 digests, Adapter provenance, and protection. All pointers for
+one physical document are grouped across the complete plan in one atomic action
+with every affected target and Installation ID, so its expected file digest is
+checked only before the complete mutation. A physical document-and-pointer
+selector may belong to only one Inventory removal-owner domain, preventing a
+selected target from deleting state also claimed by an unselected owner. A
+single Plugin boundary and exactly one owned independently selectable child may
+carry identical evidence for alternate selection paths. The claim set must be
+that exact pair with consistent hashes; sibling claims, additional claims,
+unrelated Installations, and unrelated boundaries remain invalid.
+Plugin-boundary, cleanup-conflict, and unavailable-managed-operation blocks are
+non-overridable. Plugin impact warnings list all known collateral before a
+Plugin action is approved.
+
+Verification checks are executable values: target and path absence, exact
+record absence, Owner state, or a structured command with accepted exit codes.
+No verification requires Execution to recover an Adapter definition by ID.
+
 Ephemeral package execution accepts exact Semantic Version values, including
-prerelease and build metadata. Mutable tags and version ranges are rejected at
-the model boundary before package trust can be approved.
+prerelease and build metadata. The v1 runner is the closed `npx` strategy and
+package names must be valid exact npm package identifiers. Alternate runners,
+mutable tags, embedded versions, and version ranges are rejected at the model
+boundary before package trust can be approved. Package approval repeats the
+exact runner, package, version, and Adapter hash tuple.
 
 `ExecutionReport` records action, target, and verification outcomes. Result IDs
 must be unique, completion timestamps cannot precede start timestamps, and the

@@ -31,6 +31,7 @@ import type {
   InventoryId,
   NonInstallationFinding,
   Ownership,
+  PluginBoundary,
   ProtectionStatus,
   Scope,
   SkillIdentity,
@@ -143,31 +144,29 @@ async function scanWithOptions(
   const otherFindings = records.filter(isOtherFinding).sort(compareRecordPath);
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
+  const plugins = await createPluginBoundaries(
+    installations,
+    roots,
+    options.commandRunner,
+  );
+  const snapshot = {
+    installations,
+    otherFindings,
+    logicalSkills,
+    identityHints,
+    plugins,
+    dependencies: [],
+  };
   const inventoryId = stableId(
     "inventory",
-    scannedAt,
-    stringifyModel(roots, 0),
-    ...records.map((record) =>
-      stringifyModel(
-        {
-          id: record.id,
-          contentHash: record.contentHash,
-          modifiedAt: record.modifiedAt,
-        },
-        0,
-      ),
-    ),
+    stringifyModel(snapshot, 0),
   ) as InventoryId;
 
   return parseInventory({
     schemaVersion: 1,
     id: inventoryId,
     scannedAt,
-    installations,
-    otherFindings,
-    logicalSkills,
-    identityHints,
-    dependencies: [],
+    ...snapshot,
   });
 }
 
@@ -530,6 +529,8 @@ function createInstallation(
     plugin,
     manager: null,
     adapterId: root.adapterId,
+    pluginBoundaryId:
+      root.kind === "plugin" ? pluginBoundaryIdForRoot(root) : null,
     agentId: root.agentId,
     scope: scopeForInstallationRoot(root),
     location,
@@ -537,9 +538,124 @@ function createInstallation(
     modifiedAt,
     ownership: ownershipForRoot(root),
     protection,
+    removal: {
+      managed: null,
+      fallback: {
+        kind: "available",
+        requiresSeparateConfirmation: true,
+      },
+      recordCleanups: [],
+    },
     tags: metadata.tags,
     metadata: metadata.metadata,
   };
+}
+
+async function createPluginBoundaries(
+  installations: readonly Installation[],
+  roots: readonly DiscoveryRoot[],
+  commandRunner: InventoryCommandRunner,
+): Promise<readonly PluginBoundary[]> {
+  const grouped = new Map<string, Installation[]>();
+  for (const installation of installations) {
+    if (installation.ownership.kind !== "plugin") {
+      continue;
+    }
+    const boundaryId = installation.pluginBoundaryId;
+    if (boundaryId === null) {
+      throw new InventoryScanError(
+        "invalid-request",
+        `plugin installation ${installation.id} has no boundary id`,
+        installation.location.path,
+      );
+    }
+    grouped.set(boundaryId, [...(grouped.get(boundaryId) ?? []), installation]);
+  }
+
+  const boundaries: PluginBoundary[] = [];
+  for (const root of roots.filter(
+    (candidate): candidate is Extract<DiscoveryRoot, { kind: "plugin" }> =>
+      candidate.kind === "plugin",
+  )) {
+    const stats = await lstatIfAvailable(root.path);
+    if (stats === null || (!stats.isDirectory() && !stats.isSymbolicLink())) {
+      continue;
+    }
+    const id = pluginBoundaryIdForRoot(root);
+    const members = grouped.get(id) ?? [];
+    const sortedMembers = [...members].sort(compareRecordPath);
+    const rootLocation = await pluginRootLocation(root, stats, commandRunner);
+    const rootProtection: ProtectionStatus = {
+      git: await inspectGitProtection(
+        root.path,
+        rootLocation.artifactType.kind === "directory",
+        commandRunner,
+      ),
+      system: { kind: "none" },
+      filesystem: await inspectPathFilesystemProtection(rootLocation),
+    };
+    boundaries.push({
+      id,
+      pluginId: root.plugin.id,
+      version: root.plugin.version,
+      adapterId: root.adapterId,
+      ownership: {
+        kind: "plugin",
+        pluginId: root.plugin.id,
+        independentlySelectable: root.independentlySelectable,
+        confidence: "declared",
+      },
+      installationIds: sortedMembers.map((installation) => installation.id),
+      resources: [
+        {
+          kind: "other",
+          id: "declared-root",
+          location: rootLocation,
+          protection: rootProtection,
+          cleanupId: null,
+        },
+      ],
+      removal: {
+        managed: null,
+        fallback: {
+          kind: "available",
+          requiresSeparateConfirmation: true,
+        },
+        recordCleanups: [],
+      },
+    });
+  }
+  return boundaries.sort((left, right) => compareText(left.id, right.id));
+}
+
+async function pluginRootLocation(
+  root: Extract<DiscoveryRoot, { kind: "plugin" }>,
+  stats: Awaited<ReturnType<typeof lstat>>,
+  commandRunner: InventoryCommandRunner,
+): Promise<ArtifactLocation> {
+  if (!stats.isSymbolicLink()) {
+    return {
+      path: root.path,
+      canonicalPath: await canonicalPath(root.path),
+      artifactType: { kind: "directory" },
+    };
+  }
+  const target = await readlinkWithContext(root.path);
+  const targetStats = await statIfAvailable(root.path);
+  return {
+    path: root.path,
+    canonicalPath: targetStats === null ? null : await canonicalPath(root.path),
+    artifactType: {
+      ...(await linkedArtifactType(target, root.path, commandRunner)),
+      broken: targetStats === null,
+    },
+  };
+}
+
+function pluginBoundaryIdForRoot(
+  root: Extract<DiscoveryRoot, { kind: "plugin" }>,
+): string {
+  return stableId("plugin-boundary", pathComparisonKey(root.path));
 }
 
 function createOtherFinding(
@@ -669,6 +785,26 @@ async function inspectFilesystemProtection(
   candidate: Candidate,
 ): Promise<FilesystemProtection> {
   const path = candidate.broken ? dirname(candidate.path) : candidate.path;
+  try {
+    await access(path, constants.W_OK);
+    return { kind: "writable" };
+  } catch {
+    return {
+      kind: "read-only",
+      reason: "filesystem denied write access",
+    };
+  }
+}
+
+async function inspectPathFilesystemProtection(
+  location: ArtifactLocation,
+): Promise<FilesystemProtection> {
+  const path =
+    (location.artifactType.kind === "symbolic-link" ||
+      location.artifactType.kind === "junction") &&
+    location.artifactType.broken
+      ? dirname(location.path)
+      : location.path;
   try {
     await access(path, constants.W_OK);
     return { kind: "writable" };

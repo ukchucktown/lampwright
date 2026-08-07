@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   createInventoryScanner,
   InventoryScanError,
+  plan,
   stringifyModel,
   type DiscoveryRoot,
   type InventoryCommand,
@@ -171,6 +172,47 @@ async function snapshotDirectory(directoryPath: string): Promise<string[]> {
 }
 
 describe("Inventory scan", () => {
+  it("uses a semantic Inventory ID that ignores scan time and changes with protection evidence", async () => {
+    const environment = await createTestEnvironment();
+    const rootPath = join(environment.home, ".agents", "skills");
+    const skillPath = join(rootPath, "stable");
+    await createSkill(skillPath, { name: "stable" });
+    const request = {
+      roots: [
+        {
+          kind: "user" as const,
+          path: rootPath,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    };
+    const scanEnvironment = unusedDefaultEnvironment(environment);
+
+    const first = await createInventoryScanner({
+      now: () => fixedTime,
+      environment: scanEnvironment,
+      commandRunner: unavailableCommandRunner,
+    }).scan(request);
+    const later = await createInventoryScanner({
+      now: () => new Date("2026-02-04T04:05:06.000Z"),
+      environment: scanEnvironment,
+      commandRunner: unavailableCommandRunner,
+    }).scan(request);
+    const protectedInventory = await createInventoryScanner({
+      now: () => new Date("2026-02-05T04:05:06.000Z"),
+      environment: scanEnvironment,
+      commandRunner: createGitCommandRunner(environment.home),
+    }).scan(request);
+
+    expect(later.scannedAt).not.toBe(first.scannedAt);
+    expect(later.id).toBe(first.id);
+    expect(protectedInventory.id).not.toBe(first.id);
+    expect(protectedInventory.installations[0]?.protection.git.kind).toBe(
+      "protected",
+    );
+  });
+
   it("classifies bounded user, agent, workspace, plugin, and inspection roots", async () => {
     const environment = await createTestEnvironment();
     const userRoot = join(environment.home, ".agents", "skills");
@@ -302,6 +344,223 @@ describe("Inventory scan", () => {
       kind: "system-skill",
       agentId: "fixture",
     });
+  });
+
+  it("keeps identical external Plugin IDs in distinct physical boundaries", async () => {
+    const environment = await createTestEnvironment();
+    const userPluginRoot = join(environment.home, "plugins", "shared");
+    const workspacePluginRoot = join(
+      environment.workspace,
+      ".plugins",
+      "shared",
+    );
+    await Promise.all([
+      createSkill(join(userPluginRoot, "skills", "user-child"), {
+        name: "user-child",
+      }),
+      createSkill(join(workspacePluginRoot, "skills", "workspace-child"), {
+        name: "workspace-child",
+      }),
+    ]);
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [
+        {
+          kind: "plugin",
+          path: userPluginRoot,
+          agentId: "fixture",
+          scope: { kind: "user" },
+          plugin: { id: "shared-plugin", version: "1.0.0" },
+          independentlySelectable: false,
+          adapterId: "fixture-plugin-adapter",
+        },
+        {
+          kind: "plugin",
+          path: workspacePluginRoot,
+          agentId: "fixture",
+          scope: {
+            kind: "workspace",
+            workspacePath: environment.workspace,
+          },
+          plugin: { id: "shared-plugin", version: "1.0.0" },
+          independentlySelectable: false,
+          adapterId: "fixture-plugin-adapter",
+        },
+      ],
+    });
+
+    expect(inventory.plugins).toHaveLength(2);
+    expect(inventory.plugins.map((plugin) => plugin.pluginId)).toEqual([
+      "shared-plugin",
+      "shared-plugin",
+    ]);
+    expect(new Set(inventory.plugins.map((plugin) => plugin.id)).size).toBe(2);
+    expect(
+      new Set(
+        inventory.installations.map(
+          (installation) => installation.pluginBoundaryId,
+        ),
+      ).size,
+    ).toBe(2);
+  });
+
+  it("materializes the declared Plugin root so fallback quarantines all collateral atomically", async () => {
+    const environment = await createTestEnvironment();
+    const pluginRoot = join(environment.home, "plugins", "complete-plugin");
+    const skillPath = join(pluginRoot, "skills", "plugin-child");
+    const hookPath = join(pluginRoot, "hooks", "pre-run.js");
+    const linkedTarget = join(environment.workspace, "linked-plugin-child");
+    await createSkill(skillPath, { name: "plugin-child" });
+    await createSkill(linkedTarget, { name: "linked-plugin-child" });
+    await createDirectoryLink(linkedTarget, join(pluginRoot, "linked-child"));
+    await mkdir(join(pluginRoot, "hooks"), { recursive: true });
+    await writeFile(hookPath, "export default function preRun() {}\n", "utf8");
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [
+        {
+          kind: "plugin",
+          path: pluginRoot,
+          agentId: "fixture",
+          scope: { kind: "user" },
+          plugin: { id: "complete-plugin", version: "1.0.0" },
+          independentlySelectable: false,
+          adapterId: "fixture-plugin-adapter",
+        },
+      ],
+    });
+    const boundary = inventory.plugins[0]!;
+
+    expect(boundary.resources).toContainEqual(
+      expect.objectContaining({
+        kind: "other",
+        id: "declared-root",
+        location: expect.objectContaining({ path: pluginRoot }),
+      }),
+    );
+
+    const removalPlan = plan(inventory, {
+      kind: "targets",
+      targets: [{ kind: "plugin", pluginBoundaryId: boundary.id }],
+      force: false,
+      mode: "brute-force",
+    });
+    const quarantineActions = removalPlan.actions.filter(
+      (action) => action.kind === "quarantine",
+    );
+
+    expect(quarantineActions).toHaveLength(1);
+    expect(quarantineActions[0]).toMatchObject({
+      location: {
+        path: pluginRoot,
+        artifactType: { kind: "directory" },
+      },
+      affectedInstallationIds: inventory.installations
+        .map((installation) => installation.id)
+        .sort(),
+    });
+    expect(removalPlan.verificationChecks).toContainEqual(
+      expect.objectContaining({ kind: "path-absent", path: pluginRoot }),
+    );
+  });
+
+  it("retains an existing Plugin boundary even when it contains no Skills", async () => {
+    const environment = await createTestEnvironment();
+    const pluginRoot = join(environment.home, "plugins", "empty-plugin");
+    await mkdir(pluginRoot, { recursive: true });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [
+        {
+          kind: "plugin",
+          path: pluginRoot,
+          agentId: "fixture",
+          scope: { kind: "user" },
+          plugin: { id: "empty-plugin", version: null },
+          independentlySelectable: false,
+          adapterId: "fixture-plugin-adapter",
+        },
+      ],
+    });
+
+    expect(inventory.installations).toEqual([]);
+    expect(inventory.plugins).toHaveLength(1);
+    expect(inventory.plugins[0]).toMatchObject({
+      pluginId: "empty-plugin",
+      installationIds: [],
+      resources: [
+        {
+          id: "declared-root",
+          location: { path: pluginRoot },
+        },
+      ],
+    });
+    const boundary = inventory.plugins[0]!;
+    const removalPlan = plan(inventory, {
+      kind: "targets",
+      targets: [{ kind: "plugin", pluginBoundaryId: boundary.id }],
+      force: false,
+      mode: "brute-force",
+    });
+    expect(removalPlan.actions).toMatchObject([
+      {
+        kind: "quarantine",
+        location: { path: pluginRoot },
+        affectedInstallationIds: [],
+      },
+    ]);
+  });
+
+  it("uses the writable parent as permission evidence for a broken Plugin root link", async () => {
+    const environment = await createTestEnvironment();
+    const pluginParent = join(environment.home, "plugins");
+    const pluginRoot = join(pluginParent, "broken-plugin");
+    await mkdir(pluginParent, { recursive: true });
+    await createDirectoryLink(
+      join(environment.workspace, "missing-plugin-target"),
+      pluginRoot,
+    );
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [
+        {
+          kind: "plugin",
+          path: pluginRoot,
+          agentId: "fixture",
+          scope: { kind: "user" },
+          plugin: { id: "broken-plugin", version: null },
+          independentlySelectable: false,
+          adapterId: "fixture-plugin-adapter",
+        },
+      ],
+    });
+    const boundary = inventory.plugins[0]!;
+    const rootResource = boundary.resources.find(
+      (resource) => resource.id === "declared-root",
+    )!;
+
+    expect(rootResource.location?.artifactType).toMatchObject({
+      broken: true,
+    });
+    expect(rootResource.protection?.filesystem).toEqual({ kind: "writable" });
+    const removalPlan = plan(inventory, {
+      kind: "targets",
+      targets: [{ kind: "plugin", pluginBoundaryId: boundary.id }],
+      force: false,
+      mode: "brute-force",
+    });
+    expect(removalPlan.blocks).toEqual([]);
+    expect(removalPlan.actions).toMatchObject([
+      { kind: "quarantine", location: { path: pluginRoot } },
+    ]);
   });
 
   it("recognizes links, junctions, broken links, strong groups, and weak hints", async () => {

@@ -4,6 +4,7 @@ export {
   buildInventory,
   buildLogicalSkill,
   buildNonInstallationFinding,
+  buildPluginBoundary,
   buildRemovalPlan,
   buildSystemSkillFinding,
 } from "./model-builders.js";
@@ -15,5 +16,6 @@ export type {
   InstallationFixtureOverrides,
   InventoryFixtureOverrides,
   LogicalSkillFixtureOverrides,
+  PluginBoundaryFixtureOverrides,
   RemovalPlanFixtureOverrides,
 } from "./model-builders.js";

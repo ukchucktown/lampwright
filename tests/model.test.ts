@@ -25,6 +25,93 @@ function summarizeInventory(inventory: Inventory): string[] {
   return inventory.installations.map((installation) => installation.skill.name);
 }
 
+const directInvocation = {
+  kind: "direct" as const,
+  command: {
+    executable: "fixture-manager",
+    arguments: ["remove", "fixture-skill"],
+  },
+};
+
+const writableProtection = buildInstallation().protection;
+const fixtureFileHash = {
+  algorithm: "sha256" as const,
+  digest: "a".repeat(64),
+};
+const fixtureRecordHash = {
+  algorithm: "sha256" as const,
+  digest: "b".repeat(64),
+};
+
+const declarativeRecord = {
+  id: "cleanup-fixture-skill",
+  location: {
+    path: "/fixtures/manager/record.json",
+    canonicalPath: "/fixtures/manager/record.json",
+    artifactType: { kind: "file" as const },
+  },
+  adapterId: "fixture-adapter",
+  format: "json" as const,
+  recordPointer: "/skills/fixture-skill",
+  expectedFileHash: fixtureFileHash,
+  expectedRecordHash: fixtureRecordHash,
+  protection: writableProtection,
+};
+
+const declarativeRecordAction = {
+  location: declarativeRecord.location,
+  adapterId: declarativeRecord.adapterId,
+  format: declarativeRecord.format,
+  expectedFileHash: declarativeRecord.expectedFileHash,
+  protection: declarativeRecord.protection,
+  records: [
+    {
+      recordPointer: declarativeRecord.recordPointer,
+      expectedRecordHash: declarativeRecord.expectedRecordHash,
+    },
+  ],
+};
+
+function buildPluginClaimChild(id: string, cleanupId: string) {
+  return buildInstallation({
+    id,
+    classification: "managed-plugin-resource",
+    skill: { name: id, description: null },
+    identity: {
+      strongEvidence: [
+        {
+          strength: "strong",
+          kind: "plugin",
+          pluginId: "plugin-domain",
+          skillId: id,
+        },
+      ],
+      weakEvidence: [],
+    },
+    plugin: { id: "plugin-domain", version: "1.0.0" },
+    pluginBoundaryId: "plugin-domain-boundary",
+    ownership: {
+      kind: "plugin",
+      pluginId: "plugin-domain",
+      independentlySelectable: true,
+      confidence: "declared",
+    },
+    location: {
+      path: `/fixtures/plugins/plugin-domain/${id}`,
+      canonicalPath: `/fixtures/plugins/plugin-domain/${id}`,
+      artifactType: { kind: "directory" },
+    },
+    removal: {
+      managed: null,
+      fallback: {
+        kind: "available",
+        requiresSeparateConfirmation: true,
+      },
+      recordCleanups: [{ ...declarativeRecord, id: cleanupId }],
+    },
+  });
+}
+
 describe("core model boundary validation", () => {
   it("returns immutable values through the public interface", () => {
     const inventory = buildInventory();
@@ -321,6 +408,403 @@ describe("core model boundary validation", () => {
       }),
     ).toThrow(/weak evidence is not present/);
   });
+
+  it("validates planner-ready removal evidence against ownership", () => {
+    expect(() =>
+      parseInstallation({
+        ...buildInstallation(),
+        removal: {
+          ...buildInstallation().removal,
+          managed: {
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            availability: { kind: "available" },
+            trust: { kind: "trusted" },
+            externalId: null,
+            invocation: directInvocation,
+            effects: [],
+            verifications: [],
+          },
+        },
+      }),
+    ).toThrow(/manager or plugin ownership/);
+  });
+
+  it("requires removal evidence to retain exact Adapter provenance", () => {
+    const managed = {
+      adapterId: "fixture-adapter",
+      operationId: "remove",
+      availability: { kind: "available" as const },
+      trust: { kind: "trusted" as const },
+      externalId: null,
+      invocation: directInvocation,
+      effects: [],
+      verifications: [],
+    };
+    const managerOwned = {
+      ...buildInstallation(),
+      manager: { id: "fixture-manager" },
+      ownership: {
+        kind: "manager" as const,
+        managerId: "fixture-manager",
+        confidence: "declared" as const,
+      },
+    };
+
+    expect(() =>
+      parseInstallation({
+        ...managerOwned,
+        adapterId: null,
+        removal: { ...managerOwned.removal, managed },
+      }),
+    ).toThrow(/must match the inventory record adapter/);
+
+    expect(() =>
+      parseInstallation({
+        ...managerOwned,
+        removal: {
+          ...managerOwned.removal,
+          recordCleanups: [
+            {
+              ...declarativeRecord,
+              adapterId: "other-adapter",
+            },
+          ],
+        },
+      }),
+    ).toThrow(/must match a non-null inventory record adapter/);
+  });
+
+  it("rejects duplicate managed effect paths", () => {
+    const effect = {
+      kind: "remove-path" as const,
+      path: "/fixtures/managed/effect",
+      protection: buildInstallation().protection,
+    };
+    const installation = buildInstallation();
+    expect(() =>
+      parseInstallation({
+        ...installation,
+        manager: { id: "fixture-manager" },
+        ownership: {
+          kind: "manager",
+          managerId: "fixture-manager",
+          confidence: "declared",
+        },
+        removal: {
+          ...installation.removal,
+          managed: {
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            availability: { kind: "available" },
+            trust: { kind: "trusted" },
+            externalId: null,
+            invocation: directInvocation,
+            effects: [effect, effect],
+            verifications: [],
+          },
+        },
+      }),
+    ).toThrow(/duplicate managed removal effect path/);
+  });
+
+  it("requires plugin-owned installations to have one consistent boundary", () => {
+    const child = buildInstallation({
+      classification: "managed-plugin-resource",
+      plugin: { id: "plugin-a", version: "1.0.0" },
+      pluginBoundaryId: "plugin-a-boundary",
+      ownership: {
+        kind: "plugin",
+        pluginId: "plugin-a",
+        independentlySelectable: false,
+        confidence: "declared",
+      },
+    });
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [child],
+      }),
+    ).toThrow(/requires a plugin boundary/);
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [child],
+        plugins: [
+          {
+            id: "plugin-a-boundary",
+            pluginId: "plugin-a",
+            version: "1.0.0",
+            adapterId: "fixture-adapter",
+            ownership: child.ownership,
+            installationIds: [child.id],
+            resources: [
+              {
+                kind: "hook",
+                id: "pre-run",
+                location: {
+                  path: "/fixtures/plugin/hook",
+                  canonicalPath: "/fixtures/plugin/hook",
+                  artifactType: { kind: "file" },
+                },
+                protection: null,
+                cleanupId: null,
+              },
+            ],
+            removal: child.removal,
+          },
+        ],
+      }),
+    ).toThrow(/location and protection/);
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [child],
+        plugins: [
+          {
+            id: "plugin-a-boundary",
+            pluginId: "plugin-a",
+            version: "1.0.0",
+            adapterId: "fixture-adapter",
+            ownership: child.ownership,
+            installationIds: [child.id],
+            resources: [
+              {
+                kind: "command",
+                id: "manifest-command",
+                location: null,
+                protection: null,
+                cleanupId: "missing-cleanup",
+              },
+            ],
+            removal: child.removal,
+          },
+        ],
+      }),
+    ).toThrow(/cleanup does not exist/);
+  });
+
+  it("rejects inconsistent evidence for one physical cleanup document", () => {
+    const firstCleanup = {
+      ...declarativeRecord,
+      id: "cleanup-first",
+      location: {
+        ...declarativeRecord.location,
+        path: "C:\\State\\records.json",
+        canonicalPath: "C:\\State\\records.json",
+      },
+    };
+    const secondCleanup = {
+      ...firstCleanup,
+      id: "cleanup-second",
+      location: {
+        ...firstCleanup.location,
+        path: "c:\\state\\RECORDS.json",
+        canonicalPath: "c:\\state\\RECORDS.json",
+      },
+      recordPointer: "/skills/second",
+      expectedFileHash: {
+        algorithm: "sha256" as const,
+        digest: "d".repeat(64),
+      },
+    };
+    const first = buildInstallation({
+      removal: {
+        ...buildInstallation().removal,
+        recordCleanups: [firstCleanup],
+      },
+    });
+    const second = buildInstallation({
+      id: "installation-2",
+      location: {
+        path: "/fixtures/skills/second",
+        canonicalPath: "/fixtures/skills/second",
+        artifactType: { kind: "directory" },
+      },
+      identity: {
+        strongEvidence: [
+          {
+            strength: "strong",
+            kind: "canonical-target",
+            canonicalPath: "/fixtures/skills/second",
+          },
+        ],
+        weakEvidence: [],
+      },
+      removal: {
+        ...buildInstallation().removal,
+        recordCleanups: [secondCleanup],
+      },
+    });
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [first, second],
+      }),
+    ).toThrow(/physical document require consistent file evidence/);
+  });
+
+  it("rejects one cleanup selector claimed by selected and unselected owners", () => {
+    const firstCleanup = {
+      ...declarativeRecord,
+      id: "cleanup-selected",
+    };
+    const secondCleanup = {
+      ...declarativeRecord,
+      id: "cleanup-unselected",
+    };
+    const selected = buildInstallation({
+      removal: {
+        ...buildInstallation().removal,
+        recordCleanups: [firstCleanup],
+      },
+    });
+    const unselected = buildInstallation({
+      id: "installation-unselected",
+      location: {
+        path: "/fixtures/skills/unselected",
+        canonicalPath: "/fixtures/skills/unselected",
+        artifactType: { kind: "directory" },
+      },
+      identity: {
+        strongEvidence: [
+          {
+            strength: "strong",
+            kind: "canonical-target",
+            canonicalPath: "/fixtures/skills/unselected",
+          },
+        ],
+        weakEvidence: [],
+      },
+      protection: {
+        git: {
+          kind: "protected",
+          worktreeRoot: "/fixtures/project",
+        },
+        system: { kind: "none" },
+        filesystem: { kind: "writable" },
+      },
+      removal: {
+        ...buildInstallation().removal,
+        recordCleanups: [secondCleanup],
+      },
+    });
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [selected, unselected],
+      }),
+    ).toThrow(/cleanup selector is claimed by multiple removal owners/);
+  });
+
+  it("accepts one selector exposed by a Plugin boundary and its owned child", () => {
+    const boundaryCleanup = {
+      ...declarativeRecord,
+      id: "cleanup-plugin-boundary",
+    };
+    const child = buildPluginClaimChild(
+      "plugin-domain-child",
+      "cleanup-plugin-child",
+    );
+
+    const inventory = parseInventory({
+      ...buildInventory(),
+      installations: [child],
+      plugins: [
+        {
+          id: "plugin-domain-boundary",
+          pluginId: "plugin-domain",
+          version: "1.0.0",
+          adapterId: "fixture-adapter",
+          ownership: child.ownership,
+          installationIds: [child.id],
+          resources: [],
+          removal: {
+            managed: null,
+            fallback: {
+              kind: "available",
+              requiresSeparateConfirmation: true,
+            },
+            recordCleanups: [boundaryCleanup],
+          },
+        },
+      ],
+    });
+
+    expect(inventory.plugins[0]?.installationIds).toEqual([child.id]);
+    const boundary = inventory.plugins[0]!;
+    expect(() =>
+      parseInventory({
+        ...inventory,
+        plugins: [
+          {
+            ...boundary,
+            removal: {
+              ...boundary.removal,
+              recordCleanups: boundary.removal.recordCleanups.map(
+                (cleanup) => ({
+                  ...cleanup,
+                  expectedRecordHash: {
+                    algorithm: "sha256",
+                    digest: "c".repeat(64),
+                  },
+                }),
+              ),
+            },
+          },
+        ],
+      }),
+    ).toThrow(
+      /alternate Plugin cleanup claims require consistent record evidence/,
+    );
+  });
+
+  it("rejects a selector claim set containing sibling Plugin children", () => {
+    const first = buildPluginClaimChild(
+      "plugin-domain-first",
+      "cleanup-plugin-first",
+    );
+    const sibling = buildPluginClaimChild(
+      "plugin-domain-sibling",
+      "cleanup-plugin-sibling",
+    );
+
+    expect(() =>
+      parseInventory({
+        ...buildInventory(),
+        installations: [first, sibling],
+        plugins: [
+          {
+            id: "plugin-domain-boundary",
+            pluginId: "plugin-domain",
+            version: "1.0.0",
+            adapterId: "fixture-adapter",
+            ownership: first.ownership,
+            installationIds: [first.id, sibling.id],
+            resources: [],
+            removal: {
+              managed: null,
+              fallback: {
+                kind: "available",
+                requiresSeparateConfirmation: true,
+              },
+              recordCleanups: [
+                {
+                  ...declarativeRecord,
+                  id: "cleanup-plugin-boundary",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toThrow(/cleanup selector is claimed by multiple removal owners/);
+  });
 });
 
 describe("removal plan invariants", () => {
@@ -338,6 +822,7 @@ describe("removal plan invariants", () => {
             id: "action-1",
             kind: "quarantine",
             target,
+            affectedInstallationIds: ["installation-1"],
             dependsOn: [],
             approvals: [{ kind: "confirmation" }],
             location: buildInstallation().location,
@@ -345,6 +830,96 @@ describe("removal plan invariants", () => {
         ],
       }),
     ).toThrow(/brute-force confirmation/);
+  });
+
+  it("requires actions to declare affected Installation IDs explicitly", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-1",
+            kind: "quarantine",
+            target,
+            dependsOn: [],
+            approvals: [{ kind: "brute-force-confirmation" }],
+            location: buildInstallation().location,
+          },
+        ],
+      }),
+    ).toThrow(ModelValidationError);
+  });
+
+  it("requires normalized target intent to match resolved plan targets", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        intent: {
+          kind: "targets",
+          targets: [
+            { kind: "installation", installationId: "another-installation" },
+          ],
+          force: false,
+          mode: "managed-first",
+        },
+      }),
+    ).toThrow(/normalized target intent/);
+  });
+
+  it("rejects shell executables in materialized managed invocations", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-managed",
+            kind: "managed-removal",
+            target,
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [{ kind: "confirmation" }],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            invocation: {
+              kind: "direct",
+              command: { executable: "sh", arguments: ["-c", "remove"] },
+            },
+            fallback: { kind: "unavailable", reason: "manager owns state" },
+            effects: [],
+          },
+        ],
+      }),
+    ).toThrow(/shell executable/);
+  });
+
+  it("requires exact record cleanup selectors and SHA-256 evidence", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-cleanup",
+            kind: "record-cleanup",
+            affectedTargets: [target],
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [{ kind: "brute-force-confirmation" }],
+            ...declarativeRecordAction,
+            records: [
+              {
+                recordPointer: "/skills/fixture-skill",
+                expectedRecordHash: { algorithm: "sha256", digest: "short" },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/SHA-256 digest/);
   });
 
   it("keeps managed removal and fallback in separate plans", () => {
@@ -356,6 +931,7 @@ describe("removal plan invariants", () => {
             id: "action-managed",
             kind: "managed-removal",
             target,
+            affectedInstallationIds: ["installation-1"],
             dependsOn: [],
             approvals: [{ kind: "confirmation" }],
             owner: {
@@ -365,16 +941,18 @@ describe("removal plan invariants", () => {
             },
             adapterId: "fixture-adapter",
             operationId: "remove",
-            packageExecution: null,
+            invocation: directInvocation,
             fallback: {
               kind: "available",
               requiresSeparateConfirmation: true,
             },
+            effects: [],
           },
           {
             id: "action-quarantine",
             kind: "quarantine",
             target,
+            affectedInstallationIds: ["installation-1"],
             dependsOn: ["action-managed"],
             approvals: [{ kind: "brute-force-confirmation" }],
             location: buildInstallation().location,
@@ -382,6 +960,57 @@ describe("removal plan invariants", () => {
         ],
       }),
     ).toThrow(/separate plans/);
+  });
+
+  it("allows heterogeneous methods for different Installations in one Logical Skill", () => {
+    const logicalTarget = {
+      kind: "logical-skill" as const,
+      logicalSkillId: "logical-skill-1",
+    };
+    expect(
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        intent: {
+          kind: "targets",
+          targets: [logicalTarget],
+          force: false,
+          mode: "managed-first",
+        },
+        targets: [logicalTarget],
+        actions: [
+          {
+            id: "action-managed",
+            kind: "managed-removal",
+            target: logicalTarget,
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [{ kind: "confirmation" }],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            invocation: directInvocation,
+            fallback: {
+              kind: "available",
+              requiresSeparateConfirmation: true,
+            },
+            effects: [],
+          },
+          {
+            id: "action-quarantine",
+            kind: "quarantine",
+            target: logicalTarget,
+            affectedInstallationIds: ["installation-2"],
+            dependsOn: [],
+            approvals: [{ kind: "brute-force-confirmation" }],
+            location: buildInstallation().location,
+          },
+        ],
+      }).actions,
+    ).toHaveLength(2);
   });
 
   it("requires action dependencies to refer to earlier actions", () => {
@@ -392,11 +1021,11 @@ describe("removal plan invariants", () => {
           {
             id: "action-1",
             kind: "record-cleanup",
-            target,
+            affectedTargets: [target],
+            affectedInstallationIds: ["installation-1"],
             dependsOn: ["action-later"],
             approvals: [{ kind: "confirmation" }],
-            path: "/fixtures/manager/record.json",
-            adapterId: "fixture-adapter",
+            ...declarativeRecordAction,
           },
         ],
       }),
@@ -412,6 +1041,7 @@ describe("removal plan invariants", () => {
             id: "action-1",
             kind: "quarantine",
             target,
+            affectedInstallationIds: ["installation-1"],
             dependsOn: [],
             approvals: [{ kind: "brute-force-confirmation" }],
             location: buildInstallation().location,
@@ -429,7 +1059,50 @@ describe("removal plan invariants", () => {
     ).toThrow(/non-overridable block/);
   });
 
-  it("requires exact package trust before ephemeral execution", () => {
+  it("applies blocks to every target affected by a global cleanup action", () => {
+    const basePlan = buildRemovalPlan();
+    const firstTarget = {
+      kind: "installation" as const,
+      installationId: "installation-1",
+    };
+    const secondTarget = {
+      kind: "installation" as const,
+      installationId: "installation-2",
+    };
+    expect(() =>
+      parseRemovalPlan({
+        ...basePlan,
+        intent: {
+          kind: "targets",
+          targets: [firstTarget, secondTarget],
+          force: false,
+          mode: "brute-force",
+        },
+        targets: [firstTarget, secondTarget],
+        actions: [
+          {
+            id: "action-global-cleanup",
+            kind: "record-cleanup",
+            affectedTargets: [firstTarget, secondTarget],
+            affectedInstallationIds: ["installation-1", "installation-2"],
+            dependsOn: [],
+            approvals: [{ kind: "brute-force-confirmation" }],
+            ...declarativeRecordAction,
+          },
+        ],
+        blocks: [
+          {
+            kind: "git-protection",
+            target: secondTarget,
+            path: declarativeRecord.location.path,
+            overridable: false,
+          },
+        ],
+      }),
+    ).toThrow(/non-overridable block/);
+  });
+
+  it("rejects protected expected effects on managed actions", () => {
     expect(() =>
       parseRemovalPlan({
         ...buildRemovalPlan(),
@@ -438,6 +1111,7 @@ describe("removal plan invariants", () => {
             id: "action-1",
             kind: "managed-removal",
             target,
+            affectedInstallationIds: ["installation-1"],
             dependsOn: [],
             approvals: [{ kind: "confirmation" }],
             owner: {
@@ -447,14 +1121,72 @@ describe("removal plan invariants", () => {
             },
             adapterId: "fixture-adapter",
             operationId: "remove",
-            packageExecution: {
-              runner: "npx",
-              packageName: "fixture-manager",
-              packageVersion: "1.2.3",
-              adapterHash: "adapter-hash",
-              mayDownload: true,
+            invocation: directInvocation,
+            fallback: {
+              kind: "available",
+              requiresSeparateConfirmation: true,
+            },
+            effects: [
+              {
+                kind: "modify-path",
+                path: "/fixtures/project/settings.json",
+                protection: {
+                  git: {
+                    kind: "protected",
+                    worktreeRoot: "/fixtures/project",
+                  },
+                  system: { kind: "none" },
+                  filesystem: { kind: "writable" },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/cannot mutate a protected expected effect/);
+  });
+
+  it("requires exact package trust before ephemeral execution", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-1",
+            kind: "managed-removal",
+            target,
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [
+              { kind: "confirmation" },
+              {
+                kind: "package-trust",
+                runner: "npx",
+                packageName: "fixture-manager",
+                packageVersion: "1.2.3",
+                adapterHash: "different-adapter-hash",
+              },
+            ],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            invocation: {
+              kind: "ephemeral-package",
+              packageExecution: {
+                runner: "npx",
+                packageName: "fixture-manager",
+                packageVersion: "1.2.3",
+                adapterHash: "adapter-hash",
+                mayDownload: true,
+              },
+              packageArguments: ["remove", "fixture-skill"],
             },
             fallback: { kind: "unavailable", reason: "manager owns state" },
+            effects: [],
           },
         ],
       }),
@@ -472,6 +1204,7 @@ describe("removal plan invariants", () => {
               id: "action-1",
               kind: "managed-removal",
               target,
+              affectedInstallationIds: ["installation-1"],
               dependsOn: [],
               approvals: [
                 {
@@ -489,14 +1222,19 @@ describe("removal plan invariants", () => {
               },
               adapterId: "fixture-adapter",
               operationId: "remove",
-              packageExecution: {
-                runner: "npx",
-                packageName: "fixture-manager",
-                packageVersion,
-                adapterHash: "adapter-hash",
-                mayDownload: true,
+              invocation: {
+                kind: "ephemeral-package",
+                packageExecution: {
+                  runner: "npx",
+                  packageName: "fixture-manager",
+                  packageVersion,
+                  adapterHash: "adapter-hash",
+                  mayDownload: true,
+                },
+                packageArguments: ["remove", "fixture-skill"],
               },
               fallback: { kind: "unavailable", reason: "manager owns state" },
+              effects: [],
             },
           ],
         }),
@@ -519,6 +1257,7 @@ describe("removal plan invariants", () => {
             id: "action-1",
             kind: "quarantine",
             target: otherTarget,
+            affectedInstallationIds: ["installation-2"],
             dependsOn: [],
             approvals: [{ kind: "brute-force-confirmation" }],
             location: buildInstallation().location,
@@ -546,11 +1285,11 @@ describe("removal plan invariants", () => {
     const recordCleanup = {
       id: "action-cleanup",
       kind: "record-cleanup" as const,
-      target,
+      affectedTargets: [target],
+      affectedInstallationIds: ["installation-1"],
       dependsOn: [],
       approvals: [{ kind: "confirmation" as const }],
-      path: "/fixtures/manager/record.json",
-      adapterId: "fixture-adapter",
+      ...declarativeRecordAction,
     };
 
     expect(() =>
@@ -568,6 +1307,7 @@ describe("removal plan invariants", () => {
             id: "action-managed",
             kind: "managed-removal",
             target,
+            affectedInstallationIds: ["installation-1"],
             dependsOn: [],
             approvals: [{ kind: "confirmation" }],
             owner: {
@@ -577,11 +1317,12 @@ describe("removal plan invariants", () => {
             },
             adapterId: "fixture-adapter",
             operationId: "remove",
-            packageExecution: null,
+            invocation: directInvocation,
             fallback: {
               kind: "available",
               requiresSeparateConfirmation: true,
             },
+            effects: [],
           },
           {
             ...recordCleanup,

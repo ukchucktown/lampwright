@@ -196,11 +196,7 @@ function compileAction(
       ),
     };
   }
-  const { runner, ...base } = action;
-  return {
-    ...normalizeDeclaration(base),
-    runner: selectVariant(runner, platform, sourcePath_, `action ${action.id}`),
-  };
+  return normalizeDeclaration(action);
 }
 
 function compileRoot(
@@ -419,8 +415,6 @@ function validateDefinitionSemantics(
   for (const action of definition.actions ?? []) {
     if (action.kind === "managed") {
       validateVariants(action.command, action, definition, sourcePath_);
-    } else {
-      validateVariants(action.runner, action, definition, sourcePath_);
     }
   }
   for (const verification of definition.verificationRules ?? []) {

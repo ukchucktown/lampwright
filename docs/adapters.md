@@ -94,9 +94,12 @@ NUL bytes, and pipe, redirection, chaining, or statement tokens. Later
 execution must still pass the compiled executable and arguments directly to a
 process runner with shell handling disabled.
 
-Ephemeral actions separately declare their runner, package name, exact
-Semantic Version, possible download behavior, and arguments. Tags and version
-ranges do not compile.
+Ephemeral actions use the closed v1 `npx` runner strategy and separately
+declare a valid npm package identifier, exact Semantic Version, possible
+download behavior, and package arguments. The runner is not an operating-system
+variant and cannot inject flags; direct commands remain a separate action kind.
+Alternate runners, embedded package versions, tags, and version ranges do not
+compile.
 
 ## Local adapter trust
 

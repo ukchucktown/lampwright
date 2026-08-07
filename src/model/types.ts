@@ -139,6 +139,7 @@ export interface ProtectionStatus {
 }
 
 export type ArtifactType =
+  | { readonly kind: "file" }
   | { readonly kind: "directory" }
   | {
       readonly kind: "symbolic-link";
@@ -174,7 +175,7 @@ export interface ManagerReference {
 export type RemovalTarget =
   | { readonly kind: "installation"; readonly installationId: InstallationId }
   | { readonly kind: "logical-skill"; readonly logicalSkillId: LogicalSkillId }
-  | { readonly kind: "plugin"; readonly pluginId: string };
+  | { readonly kind: "plugin"; readonly pluginBoundaryId: string };
 
 export type InventoryRecordReference =
   | { readonly kind: "installation"; readonly installationId: InstallationId }
@@ -224,6 +225,7 @@ export interface Installation {
   readonly plugin: PluginReference | null;
   readonly manager: ManagerReference | null;
   readonly adapterId: string | null;
+  readonly pluginBoundaryId: string | null;
   readonly agentId: string;
   readonly scope: Scope;
   readonly location: ArtifactLocation;
@@ -231,6 +233,7 @@ export interface Installation {
   readonly modifiedAt: string | null;
   readonly ownership: Ownership;
   readonly protection: ProtectionStatus;
+  readonly removal: RemovalEvidence;
   readonly tags: readonly string[];
   readonly metadata: JsonObject;
 }
@@ -299,6 +302,7 @@ export interface Inventory {
   readonly otherFindings: readonly NonInstallationFinding[];
   readonly logicalSkills: readonly LogicalSkill[];
   readonly identityHints: readonly WeakIdentityHint[];
+  readonly plugins: readonly PluginBoundary[];
   readonly dependencies: readonly Dependency[];
 }
 
@@ -316,7 +320,7 @@ export type ApprovalRequirement =
     }
   | {
       readonly kind: "package-trust";
-      readonly runner: string;
+      readonly runner: PackageRunner;
       readonly packageName: string;
       readonly packageVersion: string;
       readonly adapterHash: string;
@@ -330,39 +334,168 @@ export type FallbackAvailability =
   | { readonly kind: "unavailable"; readonly reason: string };
 
 export interface EphemeralPackageExecution {
-  readonly runner: string;
+  readonly runner: PackageRunner;
   readonly packageName: string;
   readonly packageVersion: string;
   readonly adapterHash: string;
   readonly mayDownload: true;
 }
 
+export type PackageRunner = "npx";
+
+export interface ExecutableCommand {
+  readonly executable: string;
+  readonly arguments: readonly string[];
+}
+
+export type ManagedRemovalInvocation =
+  | {
+      readonly kind: "direct";
+      readonly command: ExecutableCommand;
+    }
+  | {
+      readonly kind: "ephemeral-package";
+      readonly packageExecution: EphemeralPackageExecution;
+      readonly packageArguments: readonly string[];
+    };
+
+export type AdapterExecutionTrust =
+  | { readonly kind: "trusted" }
+  | {
+      readonly kind: "blocked";
+      readonly adapterId: string;
+      readonly contentHash: string;
+    };
+
+export type ManagedRemovalAvailability =
+  | { readonly kind: "available" }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
+export interface ManagedRemovalEvidence {
+  readonly adapterId: string;
+  readonly operationId: string;
+  readonly availability: ManagedRemovalAvailability;
+  readonly trust: AdapterExecutionTrust;
+  readonly externalId: string | null;
+  readonly invocation: ManagedRemovalInvocation;
+  readonly effects: readonly ManagedRemovalEffect[];
+  readonly verifications: readonly ManagedVerificationEvidence[];
+}
+
+export interface ManagedRemovalEffect {
+  readonly kind: "remove-path" | "modify-path";
+  readonly path: string;
+  readonly protection: ProtectionStatus;
+}
+
+export type DeclarativeDocumentFormat = "json" | "jsonc" | "yaml";
+
+export interface Sha256Digest {
+  readonly algorithm: "sha256";
+  readonly digest: string;
+}
+
+export type ManagedVerificationEvidence =
+  | {
+      readonly kind: "path-absent";
+      readonly path: string;
+    }
+  | {
+      readonly kind: "record-absent";
+      readonly path: string;
+      readonly format: DeclarativeDocumentFormat;
+      readonly recordPointer: string;
+    }
+  | {
+      readonly kind: "owner-state-absent";
+      readonly externalId: string;
+    }
+  | {
+      readonly kind: "command-succeeds";
+      readonly command: ExecutableCommand;
+      readonly successExitCodes: readonly number[];
+    };
+
+export interface DeclarativeRecordCleanup {
+  readonly id: string;
+  readonly location: ArtifactLocation;
+  readonly adapterId: string;
+  readonly format: DeclarativeDocumentFormat;
+  readonly recordPointer: string;
+  readonly expectedFileHash: Sha256Digest;
+  readonly expectedRecordHash: Sha256Digest;
+  readonly protection: ProtectionStatus;
+}
+
+export interface RemovalEvidence {
+  readonly managed: ManagedRemovalEvidence | null;
+  readonly fallback: FallbackAvailability;
+  readonly recordCleanups: readonly DeclarativeRecordCleanup[];
+}
+
+export type PluginResourceKind =
+  "agent" | "command" | "hook" | "configuration" | "other";
+
+export interface PluginResource {
+  readonly kind: PluginResourceKind;
+  readonly id: string;
+  readonly location: ArtifactLocation | null;
+  readonly protection: ProtectionStatus | null;
+  readonly cleanupId: string | null;
+}
+
+export interface PluginBoundary {
+  readonly id: string;
+  readonly pluginId: string;
+  readonly version: string | null;
+  readonly adapterId: string | null;
+  readonly ownership: PluginOwnership;
+  readonly installationIds: readonly InstallationId[];
+  readonly resources: readonly PluginResource[];
+  readonly removal: RemovalEvidence;
+}
+
 interface RemovalActionBase {
   readonly id: RemovalActionId;
-  readonly target: RemovalTarget;
+  readonly affectedInstallationIds: readonly InstallationId[];
   readonly dependsOn: readonly RemovalActionId[];
   readonly approvals: readonly ApprovalRequirement[];
 }
 
-export type ManagedRemovalAction = RemovalActionBase & {
+interface SingleTargetRemovalActionBase extends RemovalActionBase {
+  readonly target: RemovalTarget;
+}
+
+export type ManagedRemovalAction = SingleTargetRemovalActionBase & {
   readonly kind: "managed-removal";
   readonly owner: ManagedOwnership;
   readonly adapterId: string;
   readonly operationId: string;
-  readonly packageExecution: EphemeralPackageExecution | null;
+  readonly invocation: ManagedRemovalInvocation;
   readonly fallback: FallbackAvailability;
+  readonly effects: readonly ManagedRemovalEffect[];
 };
 
-export type QuarantineAction = RemovalActionBase & {
+export type QuarantineAction = SingleTargetRemovalActionBase & {
   readonly kind: "quarantine";
   readonly location: ArtifactLocation;
 };
 
 export type RecordCleanupAction = RemovalActionBase & {
   readonly kind: "record-cleanup";
-  readonly path: string;
+  readonly affectedTargets: readonly RemovalTarget[];
+  readonly location: ArtifactLocation;
   readonly adapterId: string;
+  readonly format: DeclarativeDocumentFormat;
+  readonly expectedFileHash: Sha256Digest;
+  readonly protection: ProtectionStatus;
+  readonly records: readonly RecordCleanupRecord[];
 };
+
+export interface RecordCleanupRecord {
+  readonly recordPointer: string;
+  readonly expectedRecordHash: Sha256Digest;
+}
 
 export type RemovalAction =
   ManagedRemovalAction | QuarantineAction | RecordCleanupAction;
@@ -400,10 +533,31 @@ export type PlanBlock =
       readonly overridable: false;
     }
   | {
+      readonly kind: "cleanup-conflict";
+      readonly target: RemovalTarget;
+      readonly path: string;
+      readonly reason: string;
+      readonly overridable: false;
+    }
+  | {
       readonly kind: "adapter-trust";
       readonly target: RemovalTarget;
       readonly adapterId: string;
       readonly contentHash: string;
+      readonly overridable: false;
+    }
+  | {
+      readonly kind: "plugin-boundary";
+      readonly target: RemovalTarget;
+      readonly pluginId: string;
+      readonly alternative: Extract<RemovalTarget, { kind: "plugin" }>;
+      readonly overridable: false;
+    }
+  | {
+      readonly kind: "managed-removal-unavailable";
+      readonly target: RemovalTarget;
+      readonly reason: string;
+      readonly fallback: FallbackAvailability;
       readonly overridable: false;
     };
 
@@ -425,9 +579,9 @@ export type PlanWarning =
       readonly packageExecution: EphemeralPackageExecution;
     }
   | {
-      readonly kind: "unreconciled-manager-state";
+      readonly kind: "unreconciled-owner-state";
       readonly target: RemovalTarget;
-      readonly managerId: string;
+      readonly owner: ManagedOwnership;
       readonly reason: string;
     };
 
@@ -447,6 +601,19 @@ export type VerificationCheck =
       readonly kind: "owner-state-absent";
       readonly owner: ManagedOwnership;
       readonly externalId: string;
+    }
+  | {
+      readonly id: VerificationCheckId;
+      readonly kind: "record-absent";
+      readonly path: string;
+      readonly format: DeclarativeDocumentFormat;
+      readonly recordPointer: string;
+    }
+  | {
+      readonly id: VerificationCheckId;
+      readonly kind: "command-succeeds";
+      readonly command: ExecutableCommand;
+      readonly successExitCodes: readonly number[];
     };
 
 export interface RemovalPlan {
@@ -454,12 +621,29 @@ export interface RemovalPlan {
   readonly id: RemovalPlanId;
   readonly inventoryId: InventoryId;
   readonly createdAt: string;
+  readonly intent: RemovalPlanIntent;
   readonly targets: readonly RemovalTarget[];
   readonly actions: readonly RemovalAction[];
   readonly blocks: readonly PlanBlock[];
   readonly warnings: readonly PlanWarning[];
   readonly verificationChecks: readonly VerificationCheck[];
 }
+
+export type RemovalPlanMode = "managed-first" | "brute-force";
+
+export type RemovalPlanIntent =
+  | {
+      readonly kind: "targets";
+      readonly targets: readonly RemovalTarget[];
+      readonly force: boolean;
+      readonly mode: RemovalPlanMode;
+    }
+  | {
+      readonly kind: "all";
+      readonly includePlugins: boolean;
+      readonly force: boolean;
+      readonly mode: RemovalPlanMode;
+    };
 
 export interface ExecutionError {
   readonly code: string;
