@@ -15,6 +15,8 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
+import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
+import { systemCommandRunner } from "../inventory/process.js";
 import type {
   QuarantineFileStats,
   QuarantineFileSystem,
@@ -66,10 +68,19 @@ export const nodeQuarantineFileSystem: QuarantineFileSystem = {
   },
   async readLink(path): Promise<QuarantineLink> {
     const target = await readlink(path);
-    const junction =
-      process.platform === "win32" &&
-      (target.startsWith("\\\\?\\") || target.startsWith("\\??\\"));
-    return { kind: junction ? "junction" : "symbolic-link", target };
+    if (process.platform !== "win32") {
+      return { kind: "symbolic-link", target };
+    }
+    const result = await systemCommandRunner.run({
+      executable: "fsutil",
+      arguments: ["reparsepoint", "query", path],
+    });
+    const kind =
+      result.exitCode === 0 ? parseWindowsReparseKind(result.stdout) : null;
+    if (kind === null) {
+      throw new Error(`unable to classify Windows reparse point: ${path}`);
+    }
+    return { kind, target };
   },
   async realpath(path) {
     return realpath(path);

@@ -32,6 +32,7 @@ import {
 } from "../src/index.js";
 import { syncRegularFile } from "../src/quarantine/filesystem.js";
 import { junctionTargetForCreation } from "../src/quarantine/integrity.js";
+import { parseWindowsReparseKind } from "../src/filesystem/windows-reparse.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
 const createTestEnvironment = createIsolatedTestEnvironmentFixture();
@@ -88,7 +89,28 @@ it("removes Windows namespaces before asking Node to create a junction", () => {
   );
 });
 
-it("recreates the same junction target across supported Windows versions", async () => {
+it("classifies Windows links from their reparse tags", () => {
+  expect(parseWindowsReparseKind("Reparse Tag Value : 0xA0000003")).toBe(
+    "junction",
+  );
+  expect(parseWindowsReparseKind("Reparse Tag Value : 0xA000000C")).toBe(
+    "symbolic-link",
+  );
+  expect(parseWindowsReparseKind("unrecognized output")).toBeNull();
+  expect(
+    parseWindowsReparseKind(
+      [
+        "Reparse Tag Value : 0xA000000C",
+        "Print Name: C:\\skills\\0xA0000003",
+      ].join("\n"),
+    ),
+  ).toBe("symbolic-link");
+  expect(
+    parseWindowsReparseKind("Print Name: C:\\skills\\0xA0000003"),
+  ).toBeNull();
+});
+
+it("distinguishes and recreates Windows junctions across supported Node versions", async () => {
   if (process.platform !== "win32") {
     return;
   }
@@ -106,35 +128,13 @@ it("recreates the same junction target across supported Windows versions", async
   await symlink(target, symbolic, "dir");
   await symlink(`${target}\\`, symbolicTrailing, "dir");
   const originalLink = await nodeQuarantineFileSystem.readLink(original);
-
-  if (process.versions.node.startsWith("20.")) {
-    const junctionStats = await lstat(original);
-    const symbolicStats = await lstat(symbolic);
-    console.info(
-      "Windows link diagnostics",
-      JSON.stringify({
-        node: process.version,
-        junction: {
-          rawTarget: await readlink(original),
-          classified: originalLink,
-          mode: junctionStats.mode,
-          size: junctionStats.size,
-          blocks: junctionStats.blocks,
-        },
-        symbolic: {
-          rawTarget: await readlink(symbolic),
-          classified: await nodeQuarantineFileSystem.readLink(symbolic),
-          mode: symbolicStats.mode,
-          size: symbolicStats.size,
-          blocks: symbolicStats.blocks,
-        },
-        symbolicTrailing: {
-          rawTarget: await readlink(symbolicTrailing),
-          classified: await nodeQuarantineFileSystem.readLink(symbolicTrailing),
-        },
-      }),
-    );
-  }
+  expect(originalLink.kind).toBe("junction");
+  await expect(
+    nodeQuarantineFileSystem.readLink(symbolic),
+  ).resolves.toMatchObject({ kind: "symbolic-link" });
+  await expect(
+    nodeQuarantineFileSystem.readLink(symbolicTrailing),
+  ).resolves.toMatchObject({ kind: "symbolic-link" });
 
   await nodeQuarantineFileSystem.symlink(
     junctionTargetForCreation(originalLink.target),
