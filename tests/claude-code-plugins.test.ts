@@ -113,6 +113,15 @@ function userSettingsPath(environment: FixtureEnvironment): string {
   return join(claudeRoot(environment), "settings.json");
 }
 
+function pluginDataPath(environment: FixtureEnvironment): string {
+  return join(
+    claudeRoot(environment),
+    "plugins",
+    "data",
+    "quality-suite-acme-marketplace",
+  );
+}
+
 function installPath(
   environment: FixtureEnvironment,
   marketplace = "acme-marketplace",
@@ -177,6 +186,12 @@ describe("Claude Code plugin adapter", () => {
       description: "Quality tools",
       skills: ["./capabilities"],
       commands: "./custom-commands",
+      hooks: { hooks: {} },
+      mcpServers: { fixture: { command: "fixture-server" } },
+      lspServers: {
+        fixture: { command: "fixture-lsp", extensionToLanguage: {} },
+      },
+      experimental: { monitors: [{ name: "watch", command: "watch" }] },
     });
     await writeSkill(join(installed, "capabilities", "security"), "security");
     await mkdir(join(installed, "custom-commands"), { recursive: true });
@@ -185,6 +200,7 @@ describe("Claude Code plugin adapter", () => {
       "# secure\n",
       "utf8",
     );
+    await mkdir(pluginDataPath(environment), { recursive: true });
     await createRegistry(environment, [
       {
         scope: "user",
@@ -197,6 +213,9 @@ describe("Claude Code plugin adapter", () => {
     ]);
     await writeJson(userSettingsPath(environment), {
       enabledPlugins: { "quality-suite@acme-marketplace": true },
+      pluginConfigs: {
+        "quality-suite@acme-marketplace": { options: { mode: "strict" } },
+      },
       unrelated: { keep: true },
     });
 
@@ -233,10 +252,16 @@ describe("Claude Code plugin adapter", () => {
         "hooks",
         "installed-plugin-root",
         "installed-registry-record",
+        "inline-hooks",
+        "inline-lsp-servers",
+        "inline-mcp-servers",
+        "inline-monitors",
         "mcp-servers",
         "manifest-commands",
         "scope-settings-record",
         "settings",
+        "persistent-data",
+        "user-plugin-config-record",
       ]),
     );
     expect(plugin.removal).toMatchObject({
@@ -261,7 +286,7 @@ describe("Claude Code plugin adapter", () => {
       },
       fallback: { kind: "available" },
       primaryArtifactPresent: false,
-      recordCleanups: [{}, {}],
+      recordCleanups: [{}, {}, {}],
     });
 
     const childPlan = plan(inventory, {
@@ -281,6 +306,24 @@ describe("Claude Code plugin adapter", () => {
         pluginId: "quality-suite@acme-marketplace",
         alternative: pluginTarget(plugin),
         overridable: false,
+      }),
+    );
+    expect(childPlan.warnings).toContainEqual(
+      expect.objectContaining({
+        kind: "plugin-impact",
+        target: {
+          kind: "installation",
+          installationId: inventory.installations[0]!.id,
+        },
+        affectedResources: expect.arrayContaining([
+          "agent:agents",
+          "command:commands",
+          "hook:inline-hooks",
+          "configuration:inline-mcp-servers",
+          "skill:lint:" + join(installed, "skills", "lint"),
+          "skill:review:" + join(installed, "skills", "review"),
+          "skill:security:" + join(installed, "capabilities", "security"),
+        ]),
       }),
     );
 
@@ -305,6 +348,12 @@ describe("Claude Code plugin adapter", () => {
         target: pluginTarget(plugin),
       }),
     ]);
+    expect(pluginPlan.verificationChecks).toContainEqual(
+      expect.objectContaining({
+        kind: "path-absent",
+        path: pluginDataPath(environment),
+      }),
+    );
     expect(pluginPlan.warnings).toContainEqual(
       expect.objectContaining({
         kind: "plugin-impact",
@@ -337,6 +386,10 @@ describe("Claude Code plugin adapter", () => {
       enabledPlugins: {
         "quality-suite@acme-marketplace": true,
         "unrelated@other-marketplace": true,
+      },
+      pluginConfigs: {
+        "quality-suite@acme-marketplace": { options: { mode: "strict" } },
+        "unrelated@other-marketplace": { options: { keep: true } },
       },
     });
     const inventoryScanner = scanner(environment, true);
@@ -375,8 +428,10 @@ describe("Claude Code plugin adapter", () => {
         await readFile(userSettingsPath(environment), "utf8"),
       ) as {
         enabledPlugins: Record<string, unknown>;
+        pluginConfigs: Record<string, unknown>;
       };
       delete settings.enabledPlugins["quality-suite@acme-marketplace"];
+      delete settings.pluginConfigs["quality-suite@acme-marketplace"];
       await writeJson(userSettingsPath(environment), settings);
       return { exitCode: 0, stdout: "uninstalled", stderr: "" };
     });
@@ -549,12 +604,28 @@ describe("Claude Code plugin adapter", () => {
       "catalog-source",
     );
     await createPluginRoot(marketplacePlugin, "catalog-source");
+    const outsideMarketplaceSource = join(
+      fixture.temporary,
+      "outside-marketplace-source",
+    );
+    const linkedMarketplaceSource = join(
+      marketplaceRoot,
+      "plugins",
+      "linked-source",
+    );
+    await createPluginRoot(outsideMarketplaceSource, "linked-source");
+    await symlink(
+      outsideMarketplaceSource,
+      linkedMarketplaceSource,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     await writeJson(
       join(marketplaceRoot, ".claude-plugin", "marketplace.json"),
       {
         name: "team-catalog",
         plugins: [
           { name: "catalog-source", source: "./plugins/catalog-source" },
+          { name: "linked-source", source: "./plugins/linked-source" },
         ],
       },
     );
@@ -585,6 +656,11 @@ describe("Claude Code plugin adapter", () => {
         }),
       ]),
     );
+    expect(
+      inventory.otherFindings.some((finding) =>
+        finding.location.path.startsWith(outsideMarketplaceSource),
+      ),
+    ).toBe(false);
   });
 
   it("offers declarative fallback only when the Claude lifecycle is absent", async () => {
@@ -665,6 +741,69 @@ describe("Claude Code plugin adapter", () => {
     );
   });
 
+  it("fails closed for unsafe scope settings and duplicate scope records", async () => {
+    const unsafeFixture = await createTestEnvironment();
+    const unsafeEnvironment = scanEnvironment(unsafeFixture);
+    const unsafeInstall = installPath(unsafeEnvironment);
+    await createPluginRoot(unsafeInstall);
+    await createRegistry(unsafeEnvironment, [
+      { scope: "user", installPath: unsafeInstall, version: "1.2.3" },
+    ]);
+    await writeJson(userSettingsPath(unsafeEnvironment), {
+      enabledPlugins: { "quality-suite@acme-marketplace": true },
+    });
+    await link(
+      userSettingsPath(unsafeEnvironment),
+      join(claudeRoot(unsafeEnvironment), "settings-alias.json"),
+    );
+
+    const unsafeInventory = await scanner(unsafeEnvironment, true).scan({});
+    expect(unsafeInventory.plugins[0]?.removal).toMatchObject({
+      managed: {
+        availability: {
+          kind: "unavailable",
+          reason:
+            "the Claude plugin scope settings are invalid or unsafe to read",
+        },
+      },
+      fallback: {
+        kind: "unavailable",
+        reason:
+          "the Claude plugin scope settings are invalid or unsafe to read",
+      },
+      recordCleanups: [],
+    });
+
+    const duplicateFixture = await createTestEnvironment();
+    const duplicateEnvironment = scanEnvironment(duplicateFixture);
+    const duplicateInstall = installPath(duplicateEnvironment);
+    await createPluginRoot(duplicateInstall);
+    const duplicateRecord = {
+      scope: "user",
+      installPath: duplicateInstall,
+      version: "1.2.3",
+    };
+    await createRegistry(duplicateEnvironment, [
+      duplicateRecord,
+      duplicateRecord,
+    ]);
+
+    const duplicateInventory = await scanner(duplicateEnvironment, true).scan(
+      {},
+    );
+    expect(duplicateInventory.plugins).toHaveLength(1);
+    expect(duplicateInventory.plugins[0]?.removal).toMatchObject({
+      managed: {
+        availability: {
+          kind: "unavailable",
+          reason:
+            "duplicate Claude plugin registry records identify the same scope",
+        },
+      },
+      fallback: { kind: "unavailable" },
+    });
+  });
+
   it("offers a separate quarantined fallback after managed failure and preserves unrelated settings", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
@@ -677,6 +816,10 @@ describe("Claude Code plugin adapter", () => {
       enabledPlugins: {
         "quality-suite@acme-marketplace": true,
         "keep@other": true,
+      },
+      pluginConfigs: {
+        "quality-suite@acme-marketplace": { options: { remove: true } },
+        "keep@other": { options: { keep: true } },
       },
       future: { keep: true },
     });
@@ -725,6 +868,19 @@ describe("Claude Code plugin adapter", () => {
       "record-cleanup",
       "record-cleanup",
     ]);
+    expect(
+      fallback.actions
+        .filter((action) => action.kind === "record-cleanup")
+        .flatMap((action) =>
+          action.records.map((record) => record.recordPointer),
+        ),
+    ).toEqual(
+      expect.arrayContaining([
+        "/plugins/quality-suite@acme-marketplace/0",
+        "/enabledPlugins/quality-suite@acme-marketplace",
+        "/pluginConfigs/quality-suite@acme-marketplace",
+      ]),
+    );
     const recovered = await execution.execute(fallback, {
       grants: [{ kind: "confirmation" }, { kind: "brute-force-confirmation" }],
     });
@@ -734,10 +890,12 @@ describe("Claude Code plugin adapter", () => {
       await readFile(userSettingsPath(environment), "utf8"),
     ) as {
       enabledPlugins: Record<string, unknown>;
+      pluginConfigs: Record<string, unknown>;
       future: unknown;
     };
     expect(settings).toEqual({
       enabledPlugins: { "keep@other": true },
+      pluginConfigs: { "keep@other": { options: { keep: true } } },
       future: { keep: true },
     });
   });
@@ -776,5 +934,44 @@ describe("Claude Code plugin adapter", () => {
         }),
       }),
     ]);
+  });
+
+  it("keeps an out-of-root linked source Skill out of active plugin installations", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const installed = installPath(environment);
+    await writeJson(join(installed, ".claude-plugin", "plugin.json"), {
+      name: "quality-suite",
+      version: "1.2.3",
+    });
+    const sourceSkill = join(fixture.temporary, "source-repository", "review");
+    const linkPath = join(installed, "skills", "review");
+    await writeSkill(sourceSkill, "source-review");
+    await mkdir(dirname(linkPath), { recursive: true });
+    await symlink(
+      sourceSkill,
+      linkPath,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await createRegistry(environment, [
+      { scope: "user", installPath: installed, version: "1.2.3" },
+    ]);
+
+    const inventory = await scanner(environment, false).scan({});
+    expect(inventory.installations).toEqual([]);
+    expect(inventory.plugins[0]?.installationIds).toEqual([]);
+    expect(inventory.otherFindings).toContainEqual(
+      expect.objectContaining({
+        classification: "source-artifact",
+        skill: { name: "review", description: null },
+        location: expect.objectContaining({
+          path: linkPath,
+          canonicalPath: expect.any(String),
+        }),
+      }),
+    );
+    expect(inventory.otherFindings[0]?.location.canonicalPath).not.toBe(
+      linkPath,
+    );
   });
 });

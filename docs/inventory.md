@@ -178,12 +178,15 @@ roots must remain under the exact versioned cache location
 root is visible only as blocked Plugin state and grants no fallback authority.
 
 The scanner reads `.claude-plugin/plugin.json`, the default component
-directories, and safe manifest-declared component paths. Every `SKILL.md`
-child is a `managed-plugin-resource` Installation with strong Plugin-plus-Skill
-identity evidence and `independentlySelectable: false`. Directory, symbolic
-link, junction, and broken-link locations remain distinct filesystem facts.
-The complete Plugin root is also retained as collateral so fallback moves the
-bundle entry without traversing link targets.
+directories, safe manifest-declared component paths, and inline hook, MCP, LSP,
+and monitor configuration. This includes workflow, output-style, theme, monitor,
+and executable collateral when present. Every in-root `SKILL.md` child is a
+`managed-plugin-resource` Installation with strong Plugin-plus-Skill identity
+evidence and `independentlySelectable: false`. Directory, symbolic link,
+junction, and broken-link locations remain distinct filesystem facts. A Skill
+link resolving outside the cached Plugin root is a source-only finding, not an
+active Installation. The complete Plugin root is also retained as collateral
+so fallback moves the bundle entry without traversing link targets.
 
 Marketplace checkout metadata is bounded to
 `plugins/marketplaces/*/.claude-plugin/marketplace.json`. Relative Plugin
@@ -191,7 +194,8 @@ sources declared there, Plugin trees in the current project, and unreferenced
 versioned cache entries are `otherFindings`, not Installations. Their Skills
 are therefore visible for diagnosis without becoming removal targets. The
 scanner does not crawl arbitrary marketplace repositories or follow manifest
-paths outside their declared root.
+paths, linked marketplace roots, or linked source roots outside their declared
+boundary.
 
 Registry and settings mutation evidence is accepted only from stable regular
 JSON files with unique keys and a single hard link. Declarative cleanup records

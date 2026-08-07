@@ -104,7 +104,7 @@ export async function scan(request: ScanRequest = {}): Promise<Inventory> {
           ["mistral-vibe", process.env.VIBE_HOME],
         ].flatMap(([agentId, path]) =>
           typeof path === "string" && path.trim().length > 0
-            ? [[agentId, path.trim()]]
+            ? [[agentId, path]]
             : [],
         ),
       ),
@@ -202,9 +202,12 @@ async function scanWithOptions(
   ].sort(compareRecordPath);
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
+  const claudeInstallationIds = new Set(
+    claudeCode.installations.map((installation) => installation.id),
+  );
   const genericPlugins = await createPluginBoundaries(
     installations.filter(
-      (installation) => installation.adapterId !== "claude-code.plugins",
+      (installation) => !claudeInstallationIds.has(installation.id),
     ),
     roots,
     options.commandRunner,

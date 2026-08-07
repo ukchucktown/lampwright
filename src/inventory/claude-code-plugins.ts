@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants } from "node:fs";
 import {
   access,
   lstat,
-  open,
   readdir,
   readlink,
   realpath,
@@ -19,11 +17,7 @@ import {
   sep,
 } from "node:path";
 
-import {
-  type ParseError,
-  parseTree,
-  type Node as JsonNode,
-} from "jsonc-parser";
+import { type ParseError, parseTree } from "jsonc-parser";
 
 import {
   CLAUDE_CODE_EXECUTABLE,
@@ -45,11 +39,16 @@ import type {
   PluginResource,
   ProtectionStatus,
   Scope,
-  Sha256Digest,
   StrongIdentityEvidence,
   WeakIdentityEvidence,
 } from "../model/types.js";
 import { hashSkillDirectory } from "./content-hash.js";
+import {
+  digest,
+  hasDuplicateKeys,
+  pathKey,
+  readStableRegularFile,
+} from "./evidence.js";
 import { inspectGitProtection } from "./git-protection.js";
 import { stableId } from "./identity.js";
 import { readSkillMetadata } from "./metadata.js";
@@ -110,6 +109,7 @@ interface PluginManifest {
   readonly version: string | null;
   readonly skills: readonly string[];
   readonly components: readonly ManifestComponent[];
+  readonly document: StableJsonDocument | null;
   readonly raw: Record<string, unknown> | null;
   readonly invalid: boolean;
 }
@@ -117,12 +117,13 @@ interface PluginManifest {
 interface ManifestComponent {
   readonly kind: PluginResource["kind"];
   readonly id: string;
-  readonly relativePath: string;
+  readonly relativePath: string | null;
 }
 
 interface MaterializedPlugin {
   readonly installations: readonly Installation[];
   readonly boundary: PluginBoundary;
+  readonly otherFindings: readonly NonInstallationFinding[];
 }
 
 export interface ClaudeCodePluginsScanResult {
@@ -147,8 +148,10 @@ export async function scanClaudeCodePlugins(
   const allReferencedPaths = new Set(
     (registryEntries ?? []).map((entry) => pathKey(entry.record.installPath)),
   );
-  const applicableEntries = (registryEntries ?? []).filter((entry) =>
-    appliesToWorkspace(entry.record, environment.workspaceDirectory),
+  const applicableEntries = uniqueRegistryEntries(
+    (registryEntries ?? []).filter((entry) =>
+      appliesToWorkspace(entry.record, environment.workspaceDirectory),
+    ),
   );
   const installPathUseCount = countInstallPaths(registryEntries ?? []);
   const pluginScopeCount = countPluginScopes(registryEntries ?? []);
@@ -177,7 +180,7 @@ export async function scanClaudeCodePlugins(
     }
   }
 
-  const otherFindings = await scanNonInstallationPluginTrees({
+  const nonInstallationTrees = await scanNonInstallationPluginTrees({
     environment,
     commandRunner,
     configRoot,
@@ -192,7 +195,10 @@ export async function scanClaudeCodePlugins(
     plugins: materialized
       .map((plugin) => plugin.boundary)
       .sort((left, right) => compareText(left.id, right.id)),
-    otherFindings: otherFindings.sort((left, right) =>
+    otherFindings: [
+      ...materialized.flatMap((plugin) => plugin.otherFindings),
+      ...nonInstallationTrees,
+    ].sort((left, right) =>
       compareText(left.location.path, right.location.path),
     ),
   };
@@ -226,6 +232,7 @@ async function materializePlugin(input: {
           version: null,
           skills: [],
           components: [],
+          document: null,
           raw: null,
           invalid: false,
         } satisfies PluginManifest)
@@ -247,15 +254,50 @@ async function materializePlugin(input: {
           input.entry.record.installPath,
           manifestResult,
         );
-  const installations = await Promise.all(
-    skillPaths.map((skillPath) =>
-      materializeSkill({
-        commandRunner: input.commandRunner,
-        entry: input.entry,
-        manifest: manifestResult,
-        scope,
-        pluginRoot: input.entry.record.installPath,
+  const locatedSkills = (
+    await Promise.all(
+      skillPaths.map(async (skillPath) => ({
         skillPath,
+        location: await artifactLocation(skillPath, input.commandRunner),
+      })),
+    )
+  ).filter(
+    (
+      skill,
+    ): skill is {
+      readonly skillPath: string;
+      readonly location: ArtifactLocation;
+    } => skill.location !== null,
+  );
+  const externalSkills = locatedSkills.filter((skill) =>
+    resolvesOutsideRoot(rootLocation, skill.location),
+  );
+  const installations = await Promise.all(
+    locatedSkills
+      .filter((skill) => !resolvesOutsideRoot(rootLocation, skill.location))
+      .map((skill) =>
+        materializeSkill({
+          commandRunner: input.commandRunner,
+          entry: input.entry,
+          manifest: manifestResult,
+          scope,
+          pluginRoot: input.entry.record.installPath,
+          skillPath: skill.skillPath,
+          location: skill.location,
+        }),
+      ),
+  );
+  const linkedSourceFindings = await Promise.all(
+    externalSkills.map((skill) =>
+      sourceSkillFinding({
+        skillPath: skill.skillPath,
+        location: skill.location,
+        classification: "source-artifact",
+        sourceId: input.entry.pluginKey,
+        sourceRoot: input.entry.record.installPath,
+        scope,
+        commandRunner: input.commandRunner,
+        readMetadata: false,
       }),
     ),
   );
@@ -269,6 +311,7 @@ async function materializePlugin(input: {
     input.environment,
     input.entry,
     input.commandRunner,
+    input.pluginScopeCount === 1,
   );
   const dataLocation =
     input.pluginScopeCount === 1
@@ -290,28 +333,33 @@ async function materializePlugin(input: {
           true,
         )
       : await protectionFor(rootLocation, input.commandRunner);
+  const removalSafetyReason =
+    unsafeReason ??
+    (settings.kind === "invalid"
+      ? "the Claude plugin scope settings are invalid or unsafe to read"
+      : null);
   const managed = await managedRemoval({
     environment: input.environment,
     commandRunner: input.commandRunner,
     entry: input.entry,
     manager: input.manager,
-    unsafeReason,
+    unsafeReason: removalSafetyReason,
     registry: input.registry,
     settings,
     dataLocation,
   });
   const fallbackReason =
-    unsafeReason ??
+    removalSafetyReason ??
     (input.entry.record.scope === "managed"
       ? "managed Claude Code plugins are read-only"
-      : settings.kind === "invalid"
-        ? "the Claude plugin scope settings are invalid or unsafe to read"
-        : input.installPathUseCount > 1 && rootLocation !== null
-          ? "the Claude plugin cache path is shared by multiple installed scopes"
-          : null);
+      : input.installPathUseCount > 1 && rootLocation !== null
+        ? "the Claude plugin cache path is shared by multiple installed scopes"
+        : null);
   const cleanups = [
     registryCleanup,
-    ...(settings.kind === "present" ? [settings.cleanup] : []),
+    ...(settings.kind === "valid"
+      ? settings.records.map((record) => record.cleanup)
+      : []),
   ];
   const resources = await pluginResources({
     commandRunner: input.commandRunner,
@@ -327,6 +375,7 @@ async function materializePlugin(input: {
 
   return {
     installations,
+    otherFindings: linkedSourceFindings,
     boundary: {
       id: input.entry.boundaryId,
       pluginId: input.entry.pluginKey,
@@ -361,11 +410,9 @@ async function materializeSkill(input: {
   readonly scope: Scope;
   readonly pluginRoot: string;
   readonly skillPath: string;
+  readonly location: ArtifactLocation;
 }): Promise<Installation> {
-  const location = (await artifactLocation(
-    input.skillPath,
-    input.commandRunner,
-  ))!;
+  const location = input.location;
   const protection = await protectionFor(location, input.commandRunner);
   const fallbackName = basename(input.skillPath);
   const metadata = isBroken(location)
@@ -488,26 +535,13 @@ async function managedRemoval(input: {
             0
           ? "Claude Code 2.1.212 or newer is required for exact marketplace-qualified uninstall"
           : null);
-  const settingsPath = settingsPathFor(input.environment, input.entry.record);
-  const settingsProtection =
-    input.settings.kind === "present"
-      ? input.settings.document.protection
-      : await protectionFor(
-          absentFileLocation(settingsPath),
-          input.commandRunner,
-          true,
-        );
   const effects = [
     {
       kind: "modify-path" as const,
       path: input.registry.path,
       protection: input.registry.protection,
     },
-    {
-      kind: "modify-path" as const,
-      path: settingsPath,
-      protection: settingsProtection,
-    },
+    ...(input.settings.kind === "valid" ? input.settings.effects : []),
     ...(input.dataLocation === null
       ? []
       : [
@@ -559,57 +593,145 @@ async function managedRemoval(input: {
         format: "json",
         recordPointer: input.entry.recordPointer,
       },
-      ...(input.settings.kind === "present"
-        ? [
-            {
-              kind: "record-absent" as const,
-              path: input.settings.document.path,
-              format: "json" as const,
-              recordPointer: input.settings.recordPointer,
-            },
-          ]
+      ...(input.settings.kind === "valid"
+        ? input.settings.records.map((record) => ({
+            kind: "record-absent" as const,
+            path: record.document.path,
+            format: "json" as const,
+            recordPointer: record.recordPointer,
+          }))
         : []),
     ],
   };
 }
 
+interface SettingsRecordEvidence {
+  readonly id: string;
+  readonly document: StableJsonDocument;
+  readonly recordPointer: string;
+  readonly cleanup: DeclarativeRecordCleanup;
+}
+
 type ScopeSettingsEvidence =
-  | { readonly kind: "absent" }
   | { readonly kind: "invalid" }
   | {
-      readonly kind: "present";
-      readonly document: StableJsonDocument;
-      readonly recordPointer: string;
-      readonly cleanup: DeclarativeRecordCleanup;
+      readonly kind: "valid";
+      readonly records: readonly SettingsRecordEvidence[];
+      readonly effects: readonly {
+        readonly kind: "modify-path";
+        readonly path: string;
+        readonly protection: ProtectionStatus;
+      }[];
     };
 
 async function scopeSettingsEvidence(
   environment: InventoryScanEnvironment,
   entry: RegistryEntry,
   commandRunner: InventoryCommandRunner,
+  includePluginConfig: boolean,
 ): Promise<ScopeSettingsEvidence> {
-  if (entry.record.scope === "managed") return { kind: "absent" };
-  const path = settingsPathFor(environment, entry.record);
-  const result = await readStableJson(path, commandRunner);
-  if (result.kind !== "valid") return result;
-  if (!isRecord(result.document.value)) return { kind: "invalid" };
-  const enabled = result.document.value.enabledPlugins;
-  if (enabled === undefined) return { kind: "absent" };
-  if (!isRecord(enabled)) return { kind: "invalid" };
-  if (!Object.hasOwn(enabled, entry.pluginKey)) {
-    return { kind: "absent" };
+  if (entry.record.scope === "managed") {
+    return { kind: "valid", records: [], effects: [] };
   }
-  const recordPointer = `/enabledPlugins/${escapePointer(entry.pluginKey)}`;
+  const scopePath = settingsPathFor(environment, entry.record);
+  const userPath = join(claudeConfigRoot(environment), "settings.json");
+  const fieldsByPath = new Map<
+    string,
+    Set<"enabledPlugins" | "pluginConfigs">
+  >();
+  fieldsByPath.set(scopePath, new Set(["enabledPlugins"]));
+  if (includePluginConfig) {
+    const fields = fieldsByPath.get(userPath) ?? new Set();
+    fields.add("pluginConfigs");
+    fieldsByPath.set(userPath, fields);
+  }
+  const records: SettingsRecordEvidence[] = [];
+  const effects = new Map<
+    string,
+    {
+      readonly kind: "modify-path";
+      readonly path: string;
+      readonly protection: ProtectionStatus;
+    }
+  >();
+  for (const [path, fields] of fieldsByPath) {
+    const result = await readStableJson(path, commandRunner);
+    if (result.kind === "invalid") return { kind: "invalid" };
+    if (result.kind === "absent") {
+      if (fields.has("enabledPlugins")) {
+        effects.set(pathKey(path), {
+          kind: "modify-path",
+          path,
+          protection: await protectionFor(
+            absentFileLocation(path),
+            commandRunner,
+            true,
+          ),
+        });
+      }
+      continue;
+    }
+    if (!isRecord(result.document.value)) return { kind: "invalid" };
+    if (fields.has("enabledPlugins")) {
+      const enabled = result.document.value.enabledPlugins;
+      if (enabled !== undefined && !isRecord(enabled)) {
+        return { kind: "invalid" };
+      }
+      if (isRecord(enabled) && Object.hasOwn(enabled, entry.pluginKey)) {
+        records.push(
+          settingsRecordEvidence(
+            "scope-settings-record",
+            "claude-plugin-settings-record",
+            result.document,
+            `/enabledPlugins/${escapePointer(entry.pluginKey)}`,
+            enabled[entry.pluginKey],
+          ),
+        );
+      }
+      effects.set(pathKey(path), {
+        kind: "modify-path",
+        path,
+        protection: result.document.protection,
+      });
+    }
+    if (fields.has("pluginConfigs")) {
+      const configs = result.document.value.pluginConfigs;
+      if (configs !== undefined && !isRecord(configs)) {
+        return { kind: "invalid" };
+      }
+      if (isRecord(configs) && Object.hasOwn(configs, entry.pluginKey)) {
+        records.push(
+          settingsRecordEvidence(
+            "user-plugin-config-record",
+            "claude-plugin-config-record",
+            result.document,
+            `/pluginConfigs/${escapePointer(entry.pluginKey)}`,
+            configs[entry.pluginKey],
+          ),
+        );
+        effects.set(pathKey(path), {
+          kind: "modify-path",
+          path,
+          protection: result.document.protection,
+        });
+      }
+    }
+  }
+  return { kind: "valid", records, effects: [...effects.values()] };
+}
+
+function settingsRecordEvidence(
+  id: string,
+  namespace: string,
+  document: StableJsonDocument,
+  recordPointer: string,
+  value: unknown,
+): SettingsRecordEvidence {
   return {
-    kind: "present",
-    document: result.document,
+    id,
+    document,
     recordPointer,
-    cleanup: recordCleanup(
-      "claude-plugin-settings-record",
-      result.document,
-      recordPointer,
-      enabled[entry.pluginKey],
-    ),
+    cleanup: recordCleanup(namespace, document, recordPointer, value),
   };
 }
 
@@ -651,16 +773,16 @@ async function pluginResources(input: {
         : null,
     },
   ];
-  if (input.settings.kind === "present") {
-    resources.push({
-      kind: "configuration",
-      id: "scope-settings-record",
-      location: null,
-      protection: null,
-      cleanupId: input.declarativeCleanupAvailable
-        ? input.settings.cleanup.id
-        : null,
-    });
+  if (input.settings.kind === "valid") {
+    for (const record of input.settings.records) {
+      resources.push({
+        kind: "configuration",
+        id: record.id,
+        location: null,
+        protection: null,
+        cleanupId: input.declarativeCleanupAvailable ? record.cleanup.id : null,
+      });
+    }
   }
   if (input.rootLocation !== null) {
     resources.push({
@@ -679,6 +801,7 @@ async function pluginResources(input: {
       { kind: "configuration", id: "lsp-servers", relativePath: ".lsp.json" },
       { kind: "other", id: "workflows", relativePath: "workflows" },
       { kind: "other", id: "output-styles", relativePath: "output-styles" },
+      { kind: "other", id: "themes", relativePath: "themes" },
       { kind: "other", id: "monitors", relativePath: "monitors" },
       { kind: "other", id: "executables", relativePath: "bin" },
     ];
@@ -687,6 +810,17 @@ async function pluginResources(input: {
       ...defaultComponents,
       ...input.manifest.components,
     ]) {
+      if (component.relativePath === null) {
+        if (input.manifest.document === null) continue;
+        resources.push({
+          kind: component.kind,
+          id: component.id,
+          location: input.manifest.document.location,
+          protection: input.manifest.document.protection,
+          cleanupId: null,
+        });
+        continue;
+      }
       const componentPath = safeManifestPath(
         input.entry.record.installPath,
         component.relativePath === "." ||
@@ -784,6 +918,7 @@ async function readPluginManifest(
       version: null,
       skills: [],
       components: [],
+      document: null,
       raw: null,
       invalid: false,
     };
@@ -795,6 +930,7 @@ async function readPluginManifest(
       version: null,
       skills: [],
       components: [],
+      document: null,
       raw: null,
       invalid: true,
     };
@@ -808,6 +944,7 @@ async function readPluginManifest(
       version: null,
       skills: [],
       components: [],
+      document: result.document,
       raw: value,
       invalid: true,
     };
@@ -827,6 +964,7 @@ async function readPluginManifest(
       version: optionalString(value.version),
       skills: [],
       components: [],
+      document: result.document,
       raw: value,
       invalid: true,
     };
@@ -837,6 +975,7 @@ async function readPluginManifest(
     version: optionalString(value.version),
     skills,
     components,
+    document: result.document,
     raw: value,
     invalid: false,
   };
@@ -846,16 +985,14 @@ function parseManifestComponents(
   pluginRoot: string,
   manifest: Record<string, unknown>,
 ): readonly ManifestComponent[] | null {
-  const fields = [
+  const pathFields = [
     ["commands", "command", "manifest-commands"],
     ["agents", "agent", "manifest-agents"],
-    ["hooks", "hook", "manifest-hooks"],
-    ["mcpServers", "configuration", "manifest-mcp-servers"],
-    ["lspServers", "configuration", "manifest-lsp-servers"],
+    ["workflows", "other", "manifest-workflows"],
     ["outputStyles", "other", "manifest-output-styles"],
   ] as const;
   const components: ManifestComponent[] = [];
-  for (const [field, kind, id] of fields) {
+  for (const [field, kind, id] of pathFields) {
     const paths = stringList(manifest[field]);
     if (paths === null) return null;
     for (const [index, relativePath] of paths.entries()) {
@@ -865,6 +1002,70 @@ function parseManifestComponents(
         id: paths.length === 1 ? id : `${id}-${String(index + 1)}`,
         relativePath,
       });
+    }
+  }
+  const mergeFields = [
+    ["hooks", "hook", "hooks"],
+    ["mcpServers", "configuration", "mcp-servers"],
+    ["lspServers", "configuration", "lsp-servers"],
+  ] as const;
+  for (const [field, kind, id] of mergeFields) {
+    const value = manifest[field];
+    if (isRecord(value)) {
+      components.push({ kind, id: `inline-${id}`, relativePath: null });
+      continue;
+    }
+    const paths = stringList(value);
+    if (paths === null) return null;
+    for (const [index, relativePath] of paths.entries()) {
+      if (safeManifestPath(pluginRoot, relativePath) === null) return null;
+      components.push({
+        kind,
+        id:
+          paths.length === 1
+            ? `manifest-${id}`
+            : `manifest-${id}-${String(index + 1)}`,
+        relativePath,
+      });
+    }
+  }
+  const experimental = manifest.experimental;
+  if (isRecord(experimental)) {
+    const themes = stringList(experimental.themes);
+    if (themes === null) return null;
+    for (const [index, relativePath] of themes.entries()) {
+      if (safeManifestPath(pluginRoot, relativePath) === null) return null;
+      components.push({
+        kind: "other",
+        id:
+          themes.length === 1
+            ? "manifest-themes"
+            : `manifest-themes-${String(index + 1)}`,
+        relativePath,
+      });
+    }
+    const monitors = experimental.monitors;
+    if (Array.isArray(monitors)) {
+      if (monitors.some((monitor) => !isRecord(monitor))) return null;
+      components.push({
+        kind: "other",
+        id: "inline-monitors",
+        relativePath: null,
+      });
+    } else {
+      const monitorPaths = stringList(monitors);
+      if (monitorPaths === null) return null;
+      for (const [index, relativePath] of monitorPaths.entries()) {
+        if (safeManifestPath(pluginRoot, relativePath) === null) return null;
+        components.push({
+          kind: "other",
+          id:
+            monitorPaths.length === 1
+              ? "manifest-monitors"
+              : `manifest-monitors-${String(index + 1)}`,
+          relativePath,
+        });
+      }
     }
   }
   return components;
@@ -943,6 +1144,18 @@ function appliesToWorkspace(
     (record.projectPath !== null &&
       pathKey(record.projectPath) === pathKey(workspaceDirectory))
   );
+}
+
+function uniqueRegistryEntries(
+  entries: readonly RegistryEntry[],
+): readonly RegistryEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const identity = recordIdentity(entry.pluginKey, entry.record);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
 }
 
 function modelScope(
@@ -1146,8 +1359,12 @@ async function marketplaceSourceFindings(input: {
     withFileTypes: true,
   }).catch(() => []);
   for (const marketplace of marketplaces) {
-    if (!marketplace.isDirectory() && !marketplace.isSymbolicLink()) continue;
+    if (!marketplace.isDirectory()) continue;
     const marketplaceRoot = join(input.marketplacesRoot, marketplace.name);
+    const canonicalMarketplaceRoot = await realpath(marketplaceRoot).catch(
+      () => null,
+    );
+    if (canonicalMarketplaceRoot === null) continue;
     const manifestResult = await readStableJson(
       join(marketplaceRoot, ".claude-plugin", "marketplace.json"),
       input.commandRunner,
@@ -1166,6 +1383,16 @@ async function marketplaceSourceFindings(input: {
       if (pluginName === null || sourcePath === null) continue;
       const pluginRoot = safeManifestPath(marketplaceRoot, sourcePath);
       if (pluginRoot === null) continue;
+      const pluginStats = await lstat(pluginRoot).catch(() => null);
+      const canonicalPluginRoot = await realpath(pluginRoot).catch(() => null);
+      if (
+        pluginStats === null ||
+        !pluginStats.isDirectory() ||
+        canonicalPluginRoot === null ||
+        !pathIsWithin(canonicalMarketplaceRoot, canonicalPluginRoot)
+      ) {
+        continue;
+      }
       findings.push(
         ...(await sourceSkillFindings({
           pluginRoot,
@@ -1173,7 +1400,6 @@ async function marketplaceSourceFindings(input: {
           sourceId: `${pluginName}@${marketplace.name}`,
           scope: { kind: "user" },
           commandRunner: input.commandRunner,
-          requireManifest: true,
         })),
       );
     }
@@ -1200,57 +1426,88 @@ async function sourceSkillFindings(input: {
     return [];
   }
   const skillPaths = await discoverSkillDirectories(input.pluginRoot, manifest);
+  const canonicalRoot = await realpath(input.pluginRoot).catch(() => null);
   const findings: NonInstallationFinding[] = [];
   for (const skillPath of skillPaths) {
     const location = await artifactLocation(skillPath, input.commandRunner);
     if (location === null) continue;
-    const name = basename(skillPath);
-    const metadata = isBroken(location)
-      ? null
-      : await readSkillMetadata(join(skillPath, "SKILL.md"), name);
-    const protection = await protectionFor(location, input.commandRunner);
-    findings.push({
-      id: stableId(
-        "finding",
-        CLAUDE_CODE_PLUGIN_ADAPTER_ID,
-        input.classification,
-        pathKey(skillPath),
-      ) as FindingId,
-      classification: input.classification,
-      skill: metadata?.skill ?? { name, description: null },
-      identity: {
-        strongEvidence: [],
-        weakEvidence: [
-          {
-            strength: "weak",
-            kind: "name",
-            normalizedName: (metadata?.skill.name ?? name)
-              .normalize("NFKC")
-              .toLowerCase(),
-          },
-        ],
-      },
-      source: { id: input.sourceId, url: null },
-      plugin: null,
-      manager: null,
-      adapterId: CLAUDE_CODE_PLUGIN_ADAPTER_ID,
-      agentId,
-      scope: input.scope,
-      location,
-      contentHash: null,
-      modifiedAt: await modificationTime(skillPath),
-      ownership: { kind: "unknown", confidence: "unknown" },
-      protection,
-      tags: ["claude-code", "plugin", input.classification],
-      metadata: {
-        "claude-code-plugin": {
-          state: input.classification,
-          sourceRoot: input.pluginRoot,
-        },
-      },
-    });
+    if (
+      canonicalRoot !== null &&
+      location.canonicalPath !== null &&
+      !pathIsWithin(canonicalRoot, location.canonicalPath)
+    ) {
+      continue;
+    }
+    findings.push(
+      await sourceSkillFinding({
+        skillPath,
+        location,
+        classification: input.classification,
+        sourceId: input.sourceId,
+        sourceRoot: input.pluginRoot,
+        scope: input.scope,
+        commandRunner: input.commandRunner,
+      }),
+    );
   }
   return findings;
+}
+
+async function sourceSkillFinding(input: {
+  readonly skillPath: string;
+  readonly location: ArtifactLocation;
+  readonly classification: "source-artifact" | "cache-or-vendor-artifact";
+  readonly sourceId: string;
+  readonly sourceRoot: string;
+  readonly scope: Scope;
+  readonly commandRunner: InventoryCommandRunner;
+  readonly readMetadata?: boolean;
+}): Promise<NonInstallationFinding> {
+  const name = basename(input.skillPath);
+  const metadata =
+    isBroken(input.location) || input.readMetadata === false
+      ? null
+      : await readSkillMetadata(join(input.skillPath, "SKILL.md"), name);
+  return {
+    id: stableId(
+      "finding",
+      CLAUDE_CODE_PLUGIN_ADAPTER_ID,
+      input.classification,
+      pathKey(input.skillPath),
+    ) as FindingId,
+    classification: input.classification,
+    skill: metadata?.skill ?? { name, description: null },
+    identity: {
+      strongEvidence: [],
+      weakEvidence: [
+        {
+          strength: "weak",
+          kind: "name",
+          normalizedName: (metadata?.skill.name ?? name)
+            .normalize("NFKC")
+            .toLowerCase(),
+        },
+      ],
+    },
+    source: { id: input.sourceId, url: null },
+    plugin: null,
+    manager: null,
+    adapterId: CLAUDE_CODE_PLUGIN_ADAPTER_ID,
+    agentId,
+    scope: input.scope,
+    location: input.location,
+    contentHash: null,
+    modifiedAt: await modificationTime(input.skillPath),
+    ownership: { kind: "unknown", confidence: "unknown" },
+    protection: await protectionFor(input.location, input.commandRunner),
+    tags: ["claude-code", "plugin", input.classification],
+    metadata: {
+      "claude-code-plugin": {
+        state: input.classification,
+        sourceRoot: input.sourceRoot,
+      },
+    },
+  };
 }
 
 async function readStableJson(
@@ -1301,60 +1558,6 @@ async function readStableJson(
   };
 }
 
-async function readStableRegularFile(
-  path: string,
-  initialStats: Stats,
-): Promise<{ readonly bytes: Buffer; readonly canonicalPath: string } | null> {
-  if (
-    !initialStats.isFile() ||
-    initialStats.isSymbolicLink() ||
-    initialStats.nlink !== 1
-  ) {
-    return null;
-  }
-  const handle = await open(
-    path,
-    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
-  ).catch(() => null);
-  if (handle === null) return null;
-  try {
-    const openedStats = await handle.stat();
-    if (
-      !openedStats.isFile() ||
-      openedStats.nlink !== 1 ||
-      !sameFile(initialStats, openedStats)
-    ) {
-      return null;
-    }
-    const bytes = await handle.readFile();
-    const finalStats = await handle.stat();
-    const pathStats = await lstat(path).catch(() => null);
-    const canonicalPath = await realpath(path).catch(() => null);
-    const confirmedStats = await lstat(path).catch(() => null);
-    if (
-      pathStats === null ||
-      confirmedStats === null ||
-      canonicalPath === null ||
-      !pathStats.isFile() ||
-      pathStats.isSymbolicLink() ||
-      pathStats.nlink !== 1 ||
-      !sameFile(openedStats, finalStats) ||
-      !sameFile(finalStats, pathStats) ||
-      !sameFile(pathStats, confirmedStats) ||
-      openedStats.size !== finalStats.size ||
-      openedStats.mtimeMs !== finalStats.mtimeMs ||
-      openedStats.ctimeMs !== finalStats.ctimeMs
-    ) {
-      return null;
-    }
-    return { bytes, canonicalPath };
-  } catch {
-    return null;
-  } finally {
-    await handle.close();
-  }
-}
-
 async function artifactLocation(
   path: string,
   commandRunner: InventoryCommandRunner,
@@ -1368,7 +1571,7 @@ async function artifactLocation(
   if (pathStats.isSymbolicLink()) {
     const target = await readlink(path);
     const followed = await stat(path).catch(() => null);
-    const kind = await linkArtifactType(path, commandRunner);
+    const kind = await linkArtifactType(path, target, commandRunner);
     return {
       path,
       canonicalPath: followed === null ? null : await realpath(path),
@@ -1398,6 +1601,7 @@ async function artifactLocation(
 
 async function linkArtifactType(
   path: string,
+  target: string,
   commandRunner: InventoryCommandRunner,
 ): Promise<"symbolic-link" | "junction"> {
   if (process.platform !== "win32") return "symbolic-link";
@@ -1405,8 +1609,11 @@ async function linkArtifactType(
     executable: "fsutil",
     arguments: ["reparsepoint", "query", path],
   });
-  return result.exitCode === 0
-    ? (parseWindowsReparseKind(result.stdout) ?? "symbolic-link")
+  if (result.exitCode === 0) {
+    return parseWindowsReparseKind(result.stdout) ?? "symbolic-link";
+  }
+  return target.startsWith("\\\\?\\") || target.startsWith("\\??\\")
+    ? "junction"
     : "symbolic-link";
 }
 
@@ -1416,7 +1623,7 @@ async function protectionFor(
   absent = false,
 ): Promise<ProtectionStatus> {
   const writablePath =
-    absent || isBroken(location)
+    absent || isLink(location)
       ? await nearestExistingAncestor(dirname(location.path))
       : location.path;
   const filesystem = await access(writablePath, constants.W_OK)
@@ -1552,29 +1759,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasDuplicateKeys(node: JsonNode): boolean {
-  if (node.type === "object") {
-    const seen = new Set<string>();
-    for (const property of node.children ?? []) {
-      const key = property.children?.[0]?.value;
-      if (typeof key !== "string" || seen.has(key)) return true;
-      seen.add(key);
-    }
-  }
-  return (node.children ?? []).some(hasDuplicateKeys);
-}
-
-function sameFile(left: Stats, right: Stats): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function digest(bytes: Buffer): Sha256Digest {
-  return {
-    algorithm: "sha256",
-    digest: createHash("sha256").update(bytes).digest("hex"),
-  };
-}
-
 function escapePointer(value: string): string {
   return value.replace(/~/g, "~0").replace(/\//g, "~1");
 }
@@ -1589,13 +1773,20 @@ function pathIsWithin(rootPath: string, candidatePath: string): boolean {
   );
 }
 
-function portableRelativePath(rootPath: string, artifactPath: string): string {
-  return relative(rootPath, artifactPath).split(sep).join("/");
+function resolvesOutsideRoot(
+  root: ArtifactLocation | null,
+  artifact: ArtifactLocation,
+): boolean {
+  return (
+    root?.canonicalPath !== null &&
+    root?.canonicalPath !== undefined &&
+    artifact.canonicalPath !== null &&
+    !pathIsWithin(root.canonicalPath, artifact.canonicalPath)
+  );
 }
 
-function pathKey(path: string): string {
-  const normalized = resolve(path);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+function portableRelativePath(rootPath: string, artifactPath: string): string {
+  return relative(rootPath, artifactPath).split(sep).join("/");
 }
 
 function isBroken(location: ArtifactLocation): boolean {
@@ -1603,6 +1794,13 @@ function isBroken(location: ArtifactLocation): boolean {
     (location.artifactType.kind === "symbolic-link" ||
       location.artifactType.kind === "junction") &&
     location.artifactType.broken
+  );
+}
+
+function isLink(location: ArtifactLocation): boolean {
+  return (
+    location.artifactType.kind === "symbolic-link" ||
+    location.artifactType.kind === "junction"
   );
 }
 
