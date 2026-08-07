@@ -40,7 +40,9 @@ import type {
   QuarantineModuleOptions,
   QuarantineRequest,
   QuarantineResult,
+  PurgePreview,
   QuarantineSelection,
+  RestorePreview,
   RestoreResult,
 } from "./types.js";
 import { QuarantineError } from "./types.js";
@@ -177,7 +179,7 @@ export function createQuarantineModule(
         systemCommandRunner,
       ));
 
-  return {
+  const module: QuarantineModule = {
     async list(): Promise<readonly QuarantineEntry[]> {
       if (!(await ensureLayout(fileSystem, layout, false))) {
         return [];
@@ -400,6 +402,126 @@ export function createQuarantineModule(
       };
     },
 
+    async previewRestore(entryInput, resolutionInput): Promise<RestorePreview> {
+      const entry = parseQuarantineEntry(entryInput);
+      const resolution =
+        resolutionInput === undefined
+          ? undefined
+          : parseRestoreResolution(resolutionInput);
+      const loaded = await loadEntry(fileSystem, layout, entry.id);
+      if (loaded === null) {
+        return {
+          schemaVersion: 1,
+          status: "blocked",
+          entryId: entry.id,
+          reason: "entry-not-found",
+          path: entry.originalLocation.path,
+        };
+      }
+      if (
+        stringifyModel(loaded.entry, 0) !== stringifyModel(entry, 0) ||
+        !(await entryIntegrityMatches(fileSystem, loaded))
+      )
+        return {
+          schemaVersion: 1,
+          status: "blocked",
+          entryId: entry.id,
+          reason: "integrity-failed",
+          path: entry.originalLocation.path,
+        };
+      if (resolution?.kind === "replace-record-postimage") {
+        if (loaded.entry.kind !== "record-cleanup-preimage")
+          throw new QuarantineError(
+            "invalid-request",
+            "postimage replacement is only valid for a record preimage",
+            entry.originalLocation.path,
+          );
+        const stats = await lstatIfAvailable(
+          fileSystem,
+          entry.originalLocation.path,
+        );
+        if (
+          stats?.kind !== "file" ||
+          !(await pathMatchesDigest(
+            fileSystem,
+            entry.originalLocation.path,
+            loaded.entry.expectedPostimageHash,
+          ))
+        )
+          return {
+            schemaVersion: 1,
+            status: "blocked",
+            entryId: entry.id,
+            reason: "destination-changed",
+            path: entry.originalLocation.path,
+          };
+      }
+      const destination =
+        resolution?.kind === "alternate-destination"
+          ? resolve(resolution.path)
+          : entry.originalLocation.path;
+      if (
+        resolution?.kind === "alternate-destination" &&
+        (await pathResolvesInside(fileSystem, layout.base, destination))
+      )
+        throw new QuarantineError(
+          "invalid-request",
+          `alternate restore destination cannot be inside quarantine state: ${destination}`,
+          destination,
+        );
+      if (
+        resolution?.kind !== "replace-record-postimage" &&
+        (await lstatIfAvailable(fileSystem, destination)) !== null
+      ) {
+        return {
+          schemaVersion: 1,
+          status: "blocked",
+          entryId: entry.id,
+          reason: "destination-occupied",
+          path: destination,
+        };
+      }
+      await assertSafeDestinationParent(fileSystem, destination);
+      const paths =
+        resolution?.kind === "replace-record-postimage"
+          ? [
+              destination,
+              restoreTemporaryPath(destination, entry.id),
+              restoreBackupPath(destination, entry.id),
+            ]
+          : [destination, restoreTemporaryPath(destination, entry.id)];
+      for (const path of paths) {
+        const protection = await blockedByGitProtection(
+          inspectProtection,
+          entry,
+          path,
+        );
+        if (protection !== null && protection.status === "blocked")
+          return {
+            schemaVersion: 1,
+            status: "blocked",
+            entryId: protection.entryId,
+            reason: protection.reason,
+            path: protection.path,
+          };
+      }
+      for (const path of paths.slice(1)) {
+        if ((await lstatIfAvailable(fileSystem, path)) !== null) {
+          throw new QuarantineError(
+            "recovery-failed",
+            `path is already occupied: ${path}`,
+            path,
+          );
+        }
+      }
+      return {
+        schemaVersion: 1,
+        status: "would-restore",
+        entryId: entry.id,
+        destination,
+      };
+    },
+
     async purge(selectionInput): Promise<{
       readonly purgedAt: string;
       readonly entries: readonly PurgeEntryResult[];
@@ -414,7 +536,11 @@ export function createQuarantineModule(
           purgedAt: purgedAt.toISOString(),
           entries:
             selection.kind === "entries"
-              ? selectedMissingResults(selection.entryIds)
+              ? selectedMissingResults(selection.entryIds).map((entry) => ({
+                  entryId: entry.entryId,
+                  status: "unchanged" as const,
+                  reason: "entry-not-found" as const,
+                }))
               : [],
         };
       }
@@ -470,7 +596,69 @@ export function createQuarantineModule(
       }
       return { purgedAt: purgedAt.toISOString(), entries: results };
     },
+    async previewPurge(selectionInput): Promise<PurgePreview> {
+      const selection = parseQuarantineSelection(selectionInput);
+      const now = readTime(options.now);
+      if (!(await ensureLayout(fileSystem, layout, false)))
+        return {
+          schemaVersion: 1,
+          entries:
+            selection.kind === "entries"
+              ? selectedMissingResults(selection.entryIds).map((entry) => ({
+                  entryId: entry.entryId,
+                  status: "unchanged" as const,
+                  reason: "entry-not-found" as const,
+                }))
+              : [],
+        };
+      const ids = await selectedEntryIds(fileSystem, layout, selection);
+      const results: PurgePreview["entries"][number][] = [];
+      for (const entryId of ids) {
+        let loaded: LoadedEntry | null;
+        try {
+          loaded = await loadEntry(fileSystem, layout, entryId);
+        } catch (error: unknown) {
+          if (isIntegrityError(error)) {
+            results.push({
+              entryId,
+              status: "blocked",
+              reason: "integrity-failed",
+            });
+            continue;
+          }
+          throw error;
+        }
+        if (loaded === null) {
+          if (selection.kind === "entries")
+            results.push({
+              entryId,
+              status: "unchanged",
+              reason: "entry-not-found",
+            });
+          continue;
+        }
+        if (
+          selection.kind === "expired" &&
+          Date.parse(loaded.entry.expiresAt) > now.getTime()
+        )
+          continue;
+        if (!(await entryIntegrityMatches(fileSystem, loaded))) {
+          results.push({
+            entryId,
+            status: "blocked",
+            reason: "integrity-failed",
+          });
+          continue;
+        }
+        results.push({ entryId, status: "would-purge" });
+      }
+      return {
+        schemaVersion: 1,
+        entries: results,
+      };
+    },
   };
+  return module;
 }
 
 function createLayout(stateRoot: string): StateLayout {

@@ -120,7 +120,9 @@ Interface:
 ```ts
 list(): Promise<readonly QuarantineEntry[]>
 quarantine(request: QuarantineRequest): Promise<QuarantineResult>
+previewRestore(entry: QuarantineEntry, resolution?: RestoreResolution): Promise<RestorePreview>
 restore(entry: QuarantineEntry, resolution?: RestoreResolution): Promise<RestoreResult>
+previewPurge(selection: QuarantineSelection): Promise<PurgePreview>
 purge(selection: QuarantineSelection): Promise<PurgeResult>
 ```
 
@@ -132,6 +134,9 @@ timestamps, and a nonempty collection of provenance subjects so one global
 record mutation can retain evidence for every affected Owner and Installation.
 Restore accepts a free original or explicit alternate destination; replacing a
 record postimage is a distinct resolution guarded by the exact expected hash.
+The preview operations perform the same integrity, collision, and Git checks
+needed to describe Restore or Purge without recovering transactions or
+mutating state, so presentation dry runs do not reproduce Quarantine rules.
 
 The module owns platform-specific state paths, atomic no-clobber moves or copies,
 transaction recovery, manifests, collision and Git-protection checks, 30-day

@@ -315,6 +315,21 @@ describe("Quarantine module", () => {
         },
       ],
     });
+    await expect(
+      quarantine.previewPurge({
+        kind: "entries",
+        entryIds: ["missing-entry" as QuarantineEntry["id"]],
+      }),
+    ).resolves.toEqual({
+      schemaVersion: 1,
+      entries: [
+        {
+          entryId: "missing-entry",
+          status: "unchanged",
+          reason: "entry-not-found",
+        },
+      ],
+    });
     await missing(stateRoot);
   });
 
@@ -341,6 +356,55 @@ describe("Quarantine module", () => {
     });
     await expect(readFile(source, "utf8")).resolves.toBe("recover me");
     await expect(quarantine.list()).resolves.toEqual([]);
+  });
+
+  it("previews restore and purge without changing source or Quarantine state", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const source = join(environment.home, "preview.txt");
+    await writeFile(source, "preview me", "utf8");
+    const { quarantine } = createHarness(stateRoot);
+    const entry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(source, "file"),
+        provenance: provenance(),
+      }),
+    );
+    const entryDirectory = join(
+      stateRoot,
+      "quarantine",
+      "v1",
+      "entries",
+      entry.id,
+    );
+    const manifestPath = join(entryDirectory, "manifest.json");
+    const payloadPath = join(entryDirectory, "payload");
+    const before = {
+      entries: await readdir(dirname(entryDirectory)),
+      manifest: await readFile(manifestPath, "utf8"),
+      payload: await readFile(payloadPath, "utf8"),
+    };
+
+    await expect(quarantine.previewRestore(entry)).resolves.toMatchObject({
+      schemaVersion: 1,
+      status: "would-restore",
+      destination: source,
+    });
+    await expect(
+      quarantine.previewPurge({ kind: "entries", entryIds: [entry.id] }),
+    ).resolves.toEqual({
+      schemaVersion: 1,
+      entries: [{ entryId: entry.id, status: "would-purge" }],
+    });
+
+    await missing(source);
+    await expect(quarantine.list()).resolves.toEqual([entry]);
+    await expect(readdir(dirname(entryDirectory))).resolves.toEqual(
+      before.entries,
+    );
+    await expect(readFile(manifestPath, "utf8")).resolves.toBe(before.manifest);
+    await expect(readFile(payloadPath, "utf8")).resolves.toBe(before.payload);
   });
 
   it("uses an EXDEV copy without following a nested external link", async () => {
