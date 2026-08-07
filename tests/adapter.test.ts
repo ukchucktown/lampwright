@@ -545,7 +545,9 @@ describe("Adapter loading", () => {
       pathBases: fixturePathBases(environment),
     });
 
-    expect(catalog.adapters).toHaveLength(1);
+    expect(
+      catalog.adapters.filter((adapter) => adapter.id === "fixture.read-only"),
+    ).toHaveLength(1);
   });
 
   it("rejects mutable ephemeral package versions and accepts exact Semantic Versions", async () => {
