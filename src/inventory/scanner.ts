@@ -64,6 +64,7 @@ import {
   InventoryScanError,
   type DiscoveryRoot,
   type InventoryCommandRunner,
+  type InventoryScanEnvironment,
   type InventoryScanner,
   type InventoryScannerOptions,
   type ScanRequest,
@@ -91,34 +92,45 @@ export function createInventoryScanner(
   };
 }
 
-export async function scan(request: ScanRequest = {}): Promise<Inventory> {
+/**
+ * Resolves the scan environment from the current process.
+ *
+ * Every caller that scans real machine state must use this rather than
+ * assembling an environment of its own, so command-line and library scans
+ * cannot disagree about where an agent, manager, or lock file lives.
+ */
+export function defaultInventoryScanEnvironment(): InventoryScanEnvironment {
   const homeDirectory = homedir();
+  return {
+    homeDirectory,
+    workspaceDirectory: process.cwd(),
+    configDirectory:
+      process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
+    stateDirectory: process.env.XDG_STATE_HOME || null,
+    cacheDirectory:
+      process.env.XDG_CACHE_HOME || join(homeDirectory, ".cache"),
+    nodeVersion: process.versions.node,
+    agentHomeDirectories: Object.fromEntries(
+      [
+        ["autohand-code", process.env.AUTOHAND_HOME],
+        ["claude-code", process.env.CLAUDE_CONFIG_DIR],
+        ["codex", process.env.CODEX_HOME],
+        ["grok", process.env.GROK_HOME],
+        ["hermes-agent", process.env.HERMES_HOME],
+        ["mistral-vibe", process.env.VIBE_HOME],
+      ].flatMap(([agentId, path]) =>
+        typeof path === "string" && path.trim().length > 0
+          ? [[agentId, path]]
+          : [],
+      ),
+    ),
+  };
+}
+
+export async function scan(request: ScanRequest = {}): Promise<Inventory> {
   return scanWithOptions(request, {
     now: () => new Date(),
-    environment: {
-      homeDirectory,
-      workspaceDirectory: process.cwd(),
-      configDirectory:
-        process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
-      stateDirectory: process.env.XDG_STATE_HOME || null,
-      cacheDirectory:
-        process.env.XDG_CACHE_HOME || join(homeDirectory, ".cache"),
-      nodeVersion: process.versions.node,
-      agentHomeDirectories: Object.fromEntries(
-        [
-          ["autohand-code", process.env.AUTOHAND_HOME],
-          ["claude-code", process.env.CLAUDE_CONFIG_DIR],
-          ["codex", process.env.CODEX_HOME],
-          ["grok", process.env.GROK_HOME],
-          ["hermes-agent", process.env.HERMES_HOME],
-          ["mistral-vibe", process.env.VIBE_HOME],
-        ].flatMap(([agentId, path]) =>
-          typeof path === "string" && path.trim().length > 0
-            ? [[agentId, path]]
-            : [],
-        ),
-      ),
-    },
+    environment: defaultInventoryScanEnvironment(),
     commandRunner: systemCommandRunner,
   });
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -57,6 +57,18 @@ async function runBuiltExecutableIn(
   environment: IsolatedTestEnvironment,
   ...arguments_: string[]
 ): Promise<ExecutableResult> {
+  return runBuiltExecutableWith(
+    environment,
+    environment.environmentVariables,
+    ...arguments_,
+  );
+}
+
+async function runBuiltExecutableWith(
+  environment: IsolatedTestEnvironment,
+  environmentVariables: NodeJS.ProcessEnv,
+  ...arguments_: string[]
+): Promise<ExecutableResult> {
   try {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
@@ -64,7 +76,7 @@ async function runBuiltExecutableIn(
       {
         cwd: environment.workspace,
         env: {
-          ...environment.environmentVariables,
+          ...environmentVariables,
           PATH: environment.temporary,
           Path: environment.temporary,
         },
@@ -625,6 +637,62 @@ describe("the non-interactive CLI", () => {
 });
 
 describe("the built skill-cleaner executable", () => {
+  it("reads the Vercel global lock from the home-relative location when XDG_STATE_HOME is unset", async () => {
+    const environment = await createTestEnvironment();
+    const canonical = join(
+      environment.home,
+      ".agents",
+      "skills",
+      "review-tools",
+    );
+    await mkdir(canonical, { recursive: true });
+    await writeFile(
+      join(canonical, "SKILL.md"),
+      "---\nname: review-tools\ndescription: Review changes\n---\n",
+      "utf8",
+    );
+    await writeFile(
+      join(environment.home, ".agents", ".skill-lock.json"),
+      JSON.stringify({
+        version: 3,
+        skills: {
+          "review-tools": {
+            source: "acme/review-tools",
+            sourceType: "github",
+            sourceUrl: "https://github.com/acme/review-tools.git",
+            skillPath: "skills/review-tools",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const withoutStateHome = { ...environment.environmentVariables };
+    delete withoutStateHome.XDG_STATE_HOME;
+    const result = await runBuiltExecutableWith(
+      environment,
+      withoutStateHome,
+      "scan",
+      "--json",
+    );
+
+    expect(result.exitCode).toBe(0);
+    const inventory = JSON.parse(result.stdout) as Inventory;
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === canonical,
+    );
+    expect(installation).toMatchObject({
+      manager: { id: "vercel-skills" },
+      adapterId: "vercel.skills",
+      source: {
+        id: "acme/review-tools",
+        url: "https://github.com/acme/review-tools.git",
+      },
+      ownership: { kind: "manager", managerId: "vercel-skills" },
+    });
+    expect(await readdir(environment.state)).toEqual([]);
+  });
+
   it("prints help and exits successfully", async () => {
     const output = await runBuiltExecutable("--help");
 

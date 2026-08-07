@@ -184,9 +184,23 @@ state, cache, quarantine, or temporary files.
 
 When either `<workspace>/skills-lock.json` or the global Vercel lock exists,
 Inventory reads the regular JSON file and reconciles every lock key against
-the bounded path registry pinned to `skills@1.5.22`. The global lock is
-`$XDG_STATE_HOME/skills/.skill-lock.json` when a state directory is supplied,
-and `~/.agents/.skill-lock.json` otherwise. Global and project canonical
+the bounded path registry pinned to `skills@1.5.22`.
+
+The manager resolves exactly one global lock: `$XDG_STATE_HOME/skills/.skill-lock.json`
+when `XDG_STATE_HOME` is set, and `~/.agents/.skill-lock.json` when it is not.
+`InventoryScanEnvironment.stateDirectory` therefore carries the environment
+variable itself and is `null` when unset; substituting a conventional default
+such as `~/.local/state` would make the unset branch unreachable.
+
+Discovery and authority are separate. A lock written under one environment
+stays on disk when the variable later changes, so Inventory reads whichever of
+the two known locations is present, preferring the manager-resolved one when
+both exist. Skills recorded in a lock the manager cannot currently resolve
+remain fully visible with their Manager, source, and supplemental collateral
+evidence, but managed removal reports `unavailable` with that reason, leaving
+the exact declarative fallback and Quarantine. A malformed lock at a candidate
+location is reported rather than skipped, so an unreadable authoritative lock
+never silently promotes a stale one. Global and project canonical
 installations are respectively under `~/.agents/skills` and
 `<workspace>/.agents/skills`. Known agent-native copies, links, legacy
 universal paths, and bounded Eve subagent directories are inspected without

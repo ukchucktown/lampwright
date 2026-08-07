@@ -69,6 +69,17 @@ export interface InventoryScanEnvironment {
   readonly homeDirectory: string;
   readonly workspaceDirectory: string;
   readonly configDirectory?: string;
+  /**
+   * The value of `XDG_STATE_HOME`, or `null` when it is unset.
+   *
+   * This is the environment variable itself, not a resolved state location.
+   * Managers branch on whether a user set it: Vercel `skills` reads its global
+   * lock from `<XDG_STATE_HOME>/skills/.skill-lock.json` when it is set and
+   * from `<home>/.agents/.skill-lock.json` when it is not. Substituting a
+   * conventional default such as `~/.local/state` makes the unset branch
+   * unreachable and hides real installations. skill-cleaner's own state root is
+   * unrelated and lives behind `state/root.ts`.
+   */
   readonly stateDirectory?: string | null;
   /**
    * The cache location an agent runtime unpacks itself into, following
