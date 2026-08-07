@@ -50,6 +50,16 @@ As implementation begins, organize code around the deep modules described in `do
 
 For Codex-authored branches, use the `feat/` prefix and include the issue number when practical, for example `feat/issue-4-generic-discovery`.
 
+### Advisor and executor budget
+
+- For implementation issues, default to one higher-effort primary Advisor and at most one lower-effort Executor when model-effort controls are available.
+- Keep the roles separate. The Advisor owns issue recovery, source-of-truth reconciliation, the bounded plan, high-risk decisions, review, and final verification. The Executor owns issue-scoped edits and the initial quality-gate run; it must not expand product or architecture scope.
+- Constrain Advisor messages that direct implementation: use enumerated steps and fewer than 100 words per plan, handoff, or interim summary unless a safety or specification conflict requires more context.
+- Cap higher-effort Advisor model invocations at three per implementation task: scope and recovery, post-implementation review, and final verification. Configure the orchestration backend to reject a fourth call when supported; otherwise treat this as a manual hard limit. If more calls are genuinely necessary, explain why and obtain the user's explicit approval before exceeding the cap.
+- Avoid duplicate research. The Advisor or Executor performs each research task once, and completed findings are reused.
+- Reuse the same Executor for targeted corrections rather than creating another implementation agent. The Advisor remains responsible for integrating the handoff and independently verifying the worktree.
+- Do not add separate review or research agents unless the user explicitly expands this budget.
+
 ## Architectural rules
 
 - Inventory is live, immutable, disposable state. Do not introduce an installation database.
