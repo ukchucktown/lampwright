@@ -657,6 +657,7 @@ async function scanExtensions(
           independentlySelectable: false,
           confidence: "declared",
         },
+        runtimeDefault: false,
         installationIds: [],
         resources,
         removal: {

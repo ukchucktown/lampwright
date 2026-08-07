@@ -274,6 +274,19 @@ that same root so Codex cannot create its helper alias during a read-only scan.
 can observe the complete structured command and environment through
 `InventoryCommandRunner` without invoking the developer's Codex installation.
 
+A Plugin whose declared `marketplaceSource` resolves inside a runtime-managed
+marketplace root is marked `runtimeDefault` on its boundary. Two are in use:
+`<XDG_CACHE_HOME>/codex-runtimes`, defaulting to `~/.cache/codex-runtimes`, and
+`<CODEX_HOME>/.tmp/bundled-marketplaces`. Codex
+ships those Plugins with itself. They stay ordinary removable Installations
+with their managed removal intact, because `codex plugin` can uninstall them;
+the flag exists so presentation can set them aside and so a bulk sweep cannot
+take them. `--all --include-plugins` therefore skips a runtime default, and
+removing one requires naming its boundary. Matching on the managed location
+rather than a marketplace name survives the runtime adding or renaming a
+marketplace, and a user marketplace whose name collides with a runtime one is
+never flagged.
+
 List output must be unique-key JSON with `installed` and `available` arrays.
 Every installed record must attest `installed: true`, a safe Plugin and
 marketplace segment, an exact matching `<plugin>@<marketplace>` identifier, and

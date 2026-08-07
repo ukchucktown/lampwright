@@ -97,6 +97,8 @@ export async function scan(request: ScanRequest = {}): Promise<Inventory> {
       configDirectory:
         process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
       stateDirectory: process.env.XDG_STATE_HOME || null,
+      cacheDirectory:
+        process.env.XDG_CACHE_HOME || join(homeDirectory, ".cache"),
       nodeVersion: process.versions.node,
       agentHomeDirectories: Object.fromEntries(
         [
@@ -486,6 +488,8 @@ function validateEnvironment(options: InventoryScannerOptions): void {
     (options.environment.stateDirectory !== undefined &&
       options.environment.stateDirectory !== null &&
       !isAbsolute(options.environment.stateDirectory)) ||
+    (options.environment.cacheDirectory !== undefined &&
+      !isAbsolute(options.environment.cacheDirectory)) ||
     Object.values(options.environment.agentHomeDirectories ?? {}).some(
       (path) => !isAbsolute(path),
     )
@@ -1188,6 +1192,7 @@ async function createPluginBoundaries(
         independentlySelectable: root.independentlySelectable,
         confidence: "declared",
       },
+      runtimeDefault: false,
       installationIds: sortedMembers.map((installation) => installation.id),
       resources: [
         {

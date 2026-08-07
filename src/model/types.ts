@@ -465,6 +465,15 @@ export interface PluginBoundary {
   readonly version: string | null;
   readonly adapterId: string | null;
   readonly ownership: PluginOwnership;
+  /**
+   * Whether the agent runtime ships this Plugin with itself.
+   *
+   * Declared by the owning system, never inferred from a name or version. A
+   * runtime default stays removable when its Owner supports removal; the flag
+   * keeps it out of ordinary browsing and bulk selection so a user cleaning
+   * their own Skills does not sweep the agent's own bundled capability.
+   */
+  readonly runtimeDefault: boolean;
   readonly installationIds: readonly InstallationId[];
   readonly resources: readonly PluginResource[];
   readonly removal: RemovalEvidence;

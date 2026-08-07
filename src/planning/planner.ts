@@ -313,9 +313,11 @@ function targetsForAll(
     }
   }
   if (includePlugins) {
-    for (const plugin of [...inventory.plugins].sort((left, right) =>
-      compareText(left.id, right.id),
-    )) {
+    // A runtime default is removable, but never by a bulk sweep: the user must
+    // name the agent's own bundled Plugin to remove it.
+    for (const plugin of [...inventory.plugins]
+      .filter((candidate) => !candidate.runtimeDefault)
+      .sort((left, right) => compareText(left.id, right.id))) {
       targets.push({ kind: "plugin", pluginBoundaryId: plugin.id });
     }
   }

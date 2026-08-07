@@ -512,6 +512,7 @@ async function scanWithContext(
       configDirectory: process.env.XDG_CONFIG_HOME || join(home, ".config"),
       stateDirectory:
         process.env.XDG_STATE_HOME || join(home, ".local", "state"),
+      cacheDirectory: process.env.XDG_CACHE_HOME || join(home, ".cache"),
       nodeVersion: process.versions.node,
     },
     commandRunner: systemCommandRunner,

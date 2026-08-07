@@ -387,6 +387,7 @@ async function materializePlugin(input: {
         independentlySelectable: false,
         confidence: "declared",
       },
+      runtimeDefault: false,
       installationIds: installations.map((installation) => installation.id),
       resources,
       removal: {

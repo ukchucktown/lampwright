@@ -70,6 +70,12 @@ export interface InventoryScanEnvironment {
   readonly workspaceDirectory: string;
   readonly configDirectory?: string;
   readonly stateDirectory?: string | null;
+  /**
+   * The cache location an agent runtime unpacks itself into, following
+   * `XDG_CACHE_HOME` and defaulting to `<home>/.cache`. Used to recognize a
+   * marketplace the runtime manages rather than one a user added.
+   */
+  readonly cacheDirectory?: string;
   readonly nodeVersion?: string;
   readonly agentHomeDirectories?: Readonly<Record<string, string>>;
 }

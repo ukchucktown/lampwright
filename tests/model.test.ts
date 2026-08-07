@@ -574,6 +574,7 @@ describe("core model boundary validation", () => {
             pluginId: "plugin-a",
             version: "1.0.0",
             adapterId: "fixture-adapter",
+            runtimeDefault: false,
             ownership: child.ownership,
             installationIds: [child.id],
             resources: [
@@ -605,6 +606,7 @@ describe("core model boundary validation", () => {
             pluginId: "plugin-a",
             version: "1.0.0",
             adapterId: "fixture-adapter",
+            runtimeDefault: false,
             ownership: child.ownership,
             installationIds: [child.id],
             resources: [
@@ -757,6 +759,7 @@ describe("core model boundary validation", () => {
           pluginId: "plugin-domain",
           version: "1.0.0",
           adapterId: "fixture-adapter",
+          runtimeDefault: false,
           ownership: child.ownership,
           installationIds: [child.id],
           resources: [],
@@ -820,6 +823,7 @@ describe("core model boundary validation", () => {
             pluginId: "plugin-domain",
             version: "1.0.0",
             adapterId: "fixture-adapter",
+            runtimeDefault: false,
             ownership: first.ownership,
             installationIds: [first.id, sibling.id],
             resources: [],

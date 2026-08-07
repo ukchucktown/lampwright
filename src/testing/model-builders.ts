@@ -214,6 +214,7 @@ export function buildPluginBoundary(
           independentlySelectable: false,
           confidence: "declared",
         },
+        runtimeDefault: false,
         installationIds: [],
         resources: [],
         removal: {

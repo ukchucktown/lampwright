@@ -502,6 +502,7 @@ const pluginBoundarySchema = z.strictObject({
   version: nonEmptyString.nullable(),
   adapterId: nonEmptyString.nullable(),
   ownership: pluginOwnershipSchema,
+  runtimeDefault: z.boolean(),
   installationIds: z.array(modelId),
   resources: z.array(pluginResourceSchema),
   removal: removalEvidenceSchema,
