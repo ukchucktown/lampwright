@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ModelSerializationError,
   ModelValidationError,
+  parseExecutionApprovals,
   parseExecutionReport,
   parseInstallation,
   parseInventory,
@@ -897,6 +898,118 @@ describe("removal plan invariants", () => {
     ).toThrow(/shell executable/);
   });
 
+  it.each([
+    "npx",
+    "/usr/local/bin/npm",
+    "C:\\Tools\\YARN.CMD",
+    "pnpm.exe",
+    "C:\\Tools\\PNPX.CMD",
+    "BUNX.PS1",
+  ])("rejects generic package-runner command %s", (executable) => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-managed",
+            kind: "managed-removal",
+            target,
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [{ kind: "confirmation" }],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            invocation: {
+              kind: "direct",
+              command: { executable, arguments: ["remove"] },
+            },
+            fallback: { kind: "unavailable", reason: "manager owns state" },
+            effects: [],
+          },
+        ],
+      }),
+    ).toThrow(/package runners require exact ephemeral package execution/);
+  });
+
+  it("rejects package runners in generic verification commands", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-managed",
+            kind: "managed-removal",
+            target,
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [{ kind: "confirmation" }],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            invocation: directInvocation,
+            fallback: { kind: "unavailable", reason: "manager owns state" },
+            effects: [],
+            verifications: [
+              {
+                kind: "command-succeeds",
+                command: { executable: "NPX.CMD", arguments: ["--version"] },
+                successExitCodes: [0],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/package runners require exact ephemeral package execution/);
+  });
+
+  it("binds each concrete verification to evidence on its exact action", () => {
+    expect(() =>
+      parseRemovalPlan({
+        ...buildRemovalPlan(),
+        actions: [
+          {
+            id: "action-managed",
+            kind: "managed-removal",
+            target,
+            affectedInstallationIds: ["installation-1"],
+            dependsOn: [],
+            approvals: [{ kind: "confirmation" }],
+            owner: {
+              kind: "manager",
+              managerId: "fixture-manager",
+              confidence: "declared",
+            },
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            invocation: directInvocation,
+            fallback: { kind: "unavailable", reason: "manager owns state" },
+            effects: [],
+            verifications: [
+              { kind: "path-absent", path: "/fixtures/owned-by-action" },
+            ],
+          },
+        ],
+        verificationChecks: [
+          {
+            id: "forged-check",
+            kind: "path-absent",
+            actionId: "action-managed",
+            path: "/fixtures/unrelated",
+          },
+        ],
+      }),
+    ).toThrow(/not authorized by its owning action/);
+  });
+
   it("requires exact record cleanup selectors and SHA-256 evidence", () => {
     expect(() =>
       parseRemovalPlan({
@@ -1336,6 +1449,30 @@ describe("removal plan invariants", () => {
 });
 
 describe("execution reports and deterministic JSON", () => {
+  it("validates exact, unique execution approval grants", () => {
+    const approvals = parseExecutionApprovals({
+      grants: [
+        { kind: "confirmation" },
+        {
+          kind: "package-trust",
+          runner: "npx",
+          packageName: "fixture-manager",
+          packageVersion: "1.2.3",
+          adapterHash: "a".repeat(64),
+        },
+      ],
+    });
+    expect(Object.isFrozen(approvals)).toBe(true);
+    expect(() =>
+      parseExecutionApprovals({
+        grants: [{ kind: "confirmation" }, { kind: "confirmation" }],
+      }),
+    ).toThrow(/duplicate execution approval/);
+    expect(() =>
+      parseExecutionApprovals({ grants: [{ kind: "force" }] }),
+    ).toThrow(ModelValidationError);
+  });
+
   it("rejects inconsistent status and result timestamps", () => {
     expect(() =>
       parseExecutionReport({
@@ -1359,6 +1496,24 @@ describe("execution reports and deterministic JSON", () => {
         status: "failed",
       }),
     ).toThrow(/requires a failed result/);
+  });
+
+  it("rejects verification results when the final rescan failed", () => {
+    expect(() =>
+      parseExecutionReport({
+        ...buildExecutionReport(),
+        status: "failed",
+        finalInventoryId: null,
+        rescanError: {
+          code: "final-rescan-failed",
+          message: "scanner unavailable",
+          details: {},
+        },
+        verificationResults: [
+          { checkId: "check-1", status: "passed", details: {} },
+        ],
+      }),
+    ).toThrow(/failed final rescan cannot claim verification/);
   });
 
   it("rejects dangling action relationships in reports", () => {
@@ -1394,6 +1549,36 @@ describe("execution reports and deterministic JSON", () => {
         ],
       }),
     ).toThrow(/action result does not exist/);
+  });
+
+  it("binds fallback offers to executable brute-force plans from the final Inventory", () => {
+    expect(() =>
+      parseExecutionReport({
+        ...buildExecutionReport(),
+        status: "failed",
+        actionResults: [
+          {
+            actionId: "action-1",
+            startedAt: "2026-01-01T00:02:30.000Z",
+            completedAt: "2026-01-01T00:02:40.000Z",
+            status: "failed",
+            error: { code: "manager-failed", message: "failed", details: {} },
+          },
+        ],
+        targetResults: [
+          {
+            target: {
+              kind: "installation",
+              installationId: "installation-1",
+            },
+            status: "unresolved",
+            actionIds: ["action-1"],
+            reason: "managed removal failed",
+          },
+        ],
+        fallbackPlans: [buildRemovalPlan()],
+      }),
+    ).toThrow(/fallback offer/);
   });
 
   it("serializes equivalent values deterministically", () => {

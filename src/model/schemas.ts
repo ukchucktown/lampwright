@@ -494,7 +494,7 @@ export const inventorySchema = z.strictObject({
   dependencies: z.array(dependencySchema),
 });
 
-const approvalRequirementSchema = z.discriminatedUnion("kind", [
+export const approvalRequirementSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("confirmation") }),
   z.strictObject({ kind: z.literal("brute-force-confirmation") }),
   z.strictObject({
@@ -515,6 +515,10 @@ const approvalRequirementSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export const executionApprovalsSchema = z.strictObject({
+  grants: z.array(approvalRequirementSchema),
+});
+
 const removalActionBase = {
   id: modelId,
   affectedInstallationIds: z.array(modelId),
@@ -532,6 +536,7 @@ const managedRemovalActionSchema = z.strictObject({
   invocation: managedRemovalInvocationSchema,
   fallback: fallbackAvailabilitySchema,
   effects: z.array(managedRemovalEffectSchema),
+  verifications: z.array(managedVerificationEvidenceSchema).default([]),
 });
 
 const quarantineActionSchema = z.strictObject({
@@ -665,24 +670,29 @@ const verificationCheckSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     id: modelId,
     kind: z.literal("path-absent"),
+    actionId: modelId,
     path: nonEmptyString,
   }),
   z.strictObject({
     id: modelId,
     kind: z.literal("owner-state-absent"),
+    actionId: modelId,
     owner: managedOwnershipSchema,
     externalId: nonEmptyString,
   }),
   z.strictObject({
     id: modelId,
     kind: z.literal("record-absent"),
+    actionId: modelId,
     path: nonEmptyString,
     format: declarativeDocumentFormatSchema,
     recordPointer,
+    expectedRecordHash: sha256DigestSchema.nullable(),
   }),
   z.strictObject({
     id: modelId,
     kind: z.literal("command-succeeds"),
+    actionId: modelId,
     command: executableCommandSchema,
     successExitCodes: z.array(z.number().int().min(0).max(255)).min(1),
   }),
@@ -758,7 +768,7 @@ const targetResultSchema = z.discriminatedUnion("status", [
   }),
   z.strictObject({
     target: removalTargetSchema,
-    status: z.enum(["partially-removed", "unresolved"]),
+    status: z.enum(["partially-removed", "unresolved", "failed"]),
     actionIds: z.array(modelId),
     reason: nonEmptyString,
   }),
@@ -781,16 +791,24 @@ const verificationResultSchema = z.discriminatedUnion("status", [
     status: z.literal("failed"),
     error: executionErrorSchema,
   }),
+  z.strictObject({
+    checkId: modelId,
+    status: z.literal("skipped"),
+    reason: nonEmptyString,
+  }),
 ]);
 
 export const executionReportSchema = z.strictObject({
   schemaVersion: z.literal(1),
   planId: modelId,
   inventoryId: modelId,
+  finalInventoryId: modelId.nullable(),
+  rescanError: executionErrorSchema.nullable(),
   startedAt: timestamp,
   completedAt: timestamp,
   status: z.enum(["succeeded", "partial", "failed", "blocked"]),
   actionResults: z.array(actionResultSchema),
   targetResults: z.array(targetResultSchema),
   verificationResults: z.array(verificationResultSchema),
+  fallbackPlans: z.array(removalPlanSchema),
 });

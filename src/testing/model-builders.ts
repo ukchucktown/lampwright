@@ -298,12 +298,15 @@ export function buildExecutionReport(
     schemaVersion: 1,
     planId: "removal-plan-1",
     inventoryId: "inventory-1",
+    finalInventoryId: "inventory-1",
+    rescanError: null,
     startedAt: "2026-01-01T00:02:00.000Z",
     completedAt: "2026-01-01T00:03:00.000Z",
     status: "succeeded",
     actionResults: [],
     targetResults: [],
     verificationResults: [],
+    fallbackPlans: [],
     ...overrides,
   });
 }

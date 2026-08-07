@@ -5,6 +5,7 @@ export {
 } from "./json.js";
 export {
   ModelValidationError,
+  parseExecutionApprovals,
   parseExecutionReport,
   parseInstallation,
   parseInventory,

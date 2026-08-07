@@ -1011,6 +1011,7 @@ function createActions(
         invocation: managed.invocation,
         fallback: unit.removal.fallback,
         effects: managed.effects,
+        verifications: managed.verifications,
       };
       actions.push(action);
       terminalActionIds.set(unit.key, [action.id]);
@@ -1459,10 +1460,12 @@ function createVerificationChecks(
         id: stableId(
           "verification",
           inventory.id,
+          action.id,
           "path-absent",
           action.location.path,
         ) as VerificationCheckId,
         kind: "path-absent",
+        actionId: action.id,
         path: action.location.path,
       });
     }
@@ -1494,6 +1497,7 @@ function createVerificationChecks(
                   action.id,
                   stringifyModel(verification, 0),
                 ) as VerificationCheckId,
+                actionId: action.id,
                 ...verification,
               });
               break;
@@ -1505,7 +1509,9 @@ function createVerificationChecks(
                   action.id,
                   stringifyModel(verification, 0),
                 ) as VerificationCheckId,
+                actionId: action.id,
                 ...verification,
+                expectedRecordHash: null,
               });
               break;
             case "owner-state-absent":
@@ -1517,6 +1523,7 @@ function createVerificationChecks(
                   stringifyModel(verification, 0),
                 ) as VerificationCheckId,
                 kind: "owner-state-absent",
+                actionId: action.id,
                 owner: action.owner,
                 externalId: verification.externalId,
               });
@@ -1529,6 +1536,7 @@ function createVerificationChecks(
                   action.id,
                   stringifyModel(verification, 0),
                 ) as VerificationCheckId,
+                actionId: action.id,
                 ...verification,
               });
               break;
@@ -1543,10 +1551,12 @@ function createVerificationChecks(
           id: stableId(
             "verification",
             inventory.id,
+            action.id,
             "path-absent",
             effect.path,
           ) as VerificationCheckId,
           kind: "path-absent",
+          actionId: action.id,
           path: effect.path,
         });
       }
@@ -1557,14 +1567,17 @@ function createVerificationChecks(
           id: stableId(
             "verification",
             inventory.id,
+            action.id,
             "record-absent",
             action.location.path,
             record.recordPointer,
           ) as VerificationCheckId,
           kind: "record-absent",
+          actionId: action.id,
           path: action.location.path,
           format: action.format,
           recordPointer: record.recordPointer,
+          expectedRecordHash: record.expectedRecordHash,
         });
       }
     }
@@ -1573,12 +1586,12 @@ function createVerificationChecks(
     check.kind === "target-unavailable"
       ? `${check.kind}:${targetKey(check.target)}`
       : check.kind === "path-absent"
-        ? `${check.kind}:${check.path}`
+        ? `${check.actionId}:${check.kind}:${check.path}`
         : check.kind === "owner-state-absent"
-          ? `${check.kind}:${stringifyModel(check.owner, 0)}:${check.externalId}`
+          ? `${check.actionId}:${check.kind}:${stringifyModel(check.owner, 0)}:${check.externalId}`
           : check.kind === "record-absent"
-            ? `${check.kind}:${check.path}:${check.recordPointer}`
-            : `${check.kind}:${stringifyModel(check.command, 0)}:${check.successExitCodes.join(",")}`,
+            ? `${check.actionId}:${check.kind}:${check.path}:${check.recordPointer}`
+            : `${check.actionId}:${check.kind}:${stringifyModel(check.command, 0)}:${check.successExitCodes.join(",")}`,
   );
 }
 

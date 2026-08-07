@@ -326,6 +326,10 @@ export type ApprovalRequirement =
       readonly adapterHash: string;
     };
 
+export interface ExecutionApprovals {
+  readonly grants: readonly ApprovalRequirement[];
+}
+
 export type FallbackAvailability =
   | {
       readonly kind: "available";
@@ -474,6 +478,7 @@ export type ManagedRemovalAction = SingleTargetRemovalActionBase & {
   readonly invocation: ManagedRemovalInvocation;
   readonly fallback: FallbackAvailability;
   readonly effects: readonly ManagedRemovalEffect[];
+  readonly verifications: readonly ManagedVerificationEvidence[];
 };
 
 export type QuarantineAction = SingleTargetRemovalActionBase & {
@@ -594,24 +599,29 @@ export type VerificationCheck =
   | {
       readonly id: VerificationCheckId;
       readonly kind: "path-absent";
+      readonly actionId: RemovalActionId;
       readonly path: string;
     }
   | {
       readonly id: VerificationCheckId;
       readonly kind: "owner-state-absent";
+      readonly actionId: RemovalActionId;
       readonly owner: ManagedOwnership;
       readonly externalId: string;
     }
   | {
       readonly id: VerificationCheckId;
       readonly kind: "record-absent";
+      readonly actionId: RemovalActionId;
       readonly path: string;
       readonly format: DeclarativeDocumentFormat;
       readonly recordPointer: string;
+      readonly expectedRecordHash: Sha256Digest | null;
     }
   | {
       readonly id: VerificationCheckId;
       readonly kind: "command-succeeds";
+      readonly actionId: RemovalActionId;
       readonly command: ExecutableCommand;
       readonly successExitCodes: readonly number[];
     };
@@ -687,7 +697,7 @@ export type TargetResult =
     }
   | {
       readonly target: RemovalTarget;
-      readonly status: "partially-removed" | "unresolved";
+      readonly status: "partially-removed" | "unresolved" | "failed";
       readonly actionIds: readonly RemovalActionId[];
       readonly reason: string;
     }
@@ -708,6 +718,11 @@ export type VerificationResult =
       readonly checkId: VerificationCheckId;
       readonly status: "failed";
       readonly error: ExecutionError;
+    }
+  | {
+      readonly checkId: VerificationCheckId;
+      readonly status: "skipped";
+      readonly reason: string;
     };
 
 export type ExecutionStatus = "succeeded" | "partial" | "failed" | "blocked";
@@ -716,10 +731,13 @@ export interface ExecutionReport {
   readonly schemaVersion: 1;
   readonly planId: RemovalPlanId;
   readonly inventoryId: InventoryId;
+  readonly finalInventoryId: InventoryId | null;
+  readonly rescanError: ExecutionError | null;
   readonly startedAt: string;
   readonly completedAt: string;
   readonly status: ExecutionStatus;
   readonly actionResults: readonly ActionResult[];
   readonly targetResults: readonly TargetResult[];
   readonly verificationResults: readonly VerificationResult[];
+  readonly fallbackPlans: readonly RemovalPlan[];
 }
