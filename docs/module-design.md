@@ -91,12 +91,28 @@ The external interface does not expose process spawning or filesystem primitives
 Interface:
 
 ```ts
-quarantine(request: QuarantineRequest): Promise<QuarantineEntry>
+list(): Promise<readonly QuarantineEntry[]>
+quarantine(request: QuarantineRequest): Promise<QuarantineResult>
 restore(entry: QuarantineEntry, resolution?: RestoreResolution): Promise<RestoreResult>
 purge(selection: QuarantineSelection): Promise<PurgeResult>
 ```
 
-The module owns platform-specific state paths, atomic moves or copies, manifests, collision detection, retention, and integrity verification. Callers never manipulate quarantine directories directly.
+`QuarantineResult` distinguishes a committed entry from an already-absent
+source. An entry is either a displaced filesystem artifact or the captured
+preimage of a declarative manager-record cleanup. Its versioned manifest records
+the original `ArtifactLocation`, content integrity, restoration metadata,
+timestamps, and a nonempty collection of provenance subjects so one global
+record mutation can retain evidence for every affected Owner and Installation.
+Restore accepts a free original or explicit alternate destination; replacing a
+record postimage is a distinct resolution guarded by the exact expected hash.
+
+The module owns platform-specific state paths, atomic no-clobber moves or copies,
+transaction recovery, manifests, collision and Git-protection checks, 30-day
+retention, and integrity verification. State is created lazily under the shared
+local-state root, which follows operating-system conventions and supports an
+explicit override. `list()` and already-absent quarantine requests do not create
+state; expiry runs only through `purge({ kind: "expired" })`. Callers never
+manipulate quarantine directories directly.
 
 ## Adapter module
 
