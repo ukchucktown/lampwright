@@ -89,6 +89,55 @@ export const VERCEL_SKILLS_GLOBAL_AGENT_IDS = [
 export const CLAUDE_CODE_PLUGIN_ADAPTER_ID = "claude-code.plugins";
 export const CLAUDE_CODE_EXECUTABLE = "claude";
 
+export const CODEX_PLUGIN_ADAPTER_ID = "codex.plugins";
+export const CODEX_EXECUTABLE = "codex";
+
+function codexPluginRemoveArgumentTemplates() {
+  return [
+    { kind: "literal" as const, value: "plugin" },
+    { kind: "literal" as const, value: "remove" },
+    { kind: "value" as const, from: "externalId" as const },
+    { kind: "literal" as const, value: "--json" },
+  ];
+}
+
+export function codexPluginRemoveArguments(
+  externalId: string,
+): readonly string[] {
+  return codexPluginRemoveArgumentTemplates().map((argument) =>
+    argument.kind === "literal" ? argument.value : externalId,
+  );
+}
+
+const codexPlugins = {
+  schemaVersion: 1,
+  id: CODEX_PLUGIN_ADAPTER_ID,
+  name: "Codex plugins",
+  platforms: ["darwin", "linux", "win32"],
+  probes: [
+    {
+      id: "codex-executable",
+      kind: "executable",
+      executable: { default: CODEX_EXECUTABLE },
+    },
+  ],
+  actions: [
+    {
+      id: "remove-user-plugin",
+      kind: "managed",
+      ownerKind: "plugin",
+      operationId: "remove-user-plugin",
+      requiresProbes: ["codex-executable"],
+      command: {
+        default: {
+          executable: CODEX_EXECUTABLE,
+          arguments: codexPluginRemoveArgumentTemplates(),
+        },
+      },
+    },
+  ],
+} as const;
+
 export type ClaudeCodePluginScope = "user" | "project" | "local";
 
 function claudePluginUninstallArgumentTemplates(scope: ClaudeCodePluginScope) {
@@ -228,9 +277,18 @@ export const CLAUDE_CODE_PLUGIN_ADAPTER_HASH = createHash("sha256")
   .update(claudeCodePluginsContent)
   .digest("hex");
 
+const codexPluginsContent = `${JSON.stringify(codexPlugins, null, 2)}\n`;
+export const CODEX_PLUGIN_ADAPTER_HASH = createHash("sha256")
+  .update(codexPluginsContent)
+  .digest("hex");
+
 // Keeping the source list outside the public Adapter module prevents callers
 // from marking arbitrary local content as package-trusted built-in content.
 export const builtInAdapterSources: readonly BuiltInAdapterSource[] = [
+  {
+    name: "codex-plugins.jsonc",
+    content: codexPluginsContent,
+  },
   {
     name: "claude-code-plugins.jsonc",
     content: claudeCodePluginsContent,

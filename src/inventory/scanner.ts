@@ -51,6 +51,7 @@ import { readSkillMetadata, type ParsedSkillMetadata } from "./metadata.js";
 import { systemCommandRunner } from "./process.js";
 import { parseScanRequest } from "./request-schema.js";
 import { scanClaudeCodePlugins } from "./claude-code-plugins.js";
+import { scanCodexPlugins } from "./codex-plugins.js";
 import { scanVercelSkills } from "./vercel-skills.js";
 import {
   InventoryScanError,
@@ -174,6 +175,10 @@ async function scanWithOptions(
     options.environment,
     options.commandRunner,
   );
+  const codex = await scanCodexPlugins(
+    options.environment,
+    options.commandRunner,
+  );
   const reconciledGenericInstallations = genericInstallations.map(
     (installation) =>
       vercel.invalidCanonicalRoots.some((root) =>
@@ -183,14 +188,16 @@ async function scanWithOptions(
         : installation,
   );
   const claimedPaths = new Set(
-    [...vercel.installations, ...claudeCode.installations].flatMap(
-      (installation) => [
-        pathComparisonKey(installation.location.path),
-        ...(installation.removal.supplementalArtifacts ?? []).map((artifact) =>
-          pathComparisonKey(artifact.location.path),
-        ),
-      ],
-    ),
+    [
+      ...vercel.installations,
+      ...claudeCode.installations,
+      ...codex.installations,
+    ].flatMap((installation) => [
+      pathComparisonKey(installation.location.path),
+      ...(installation.removal.supplementalArtifacts ?? []).map((artifact) =>
+        pathComparisonKey(artifact.location.path),
+      ),
+    ]),
   );
   const installations = [
     ...reconciledGenericInstallations.filter(
@@ -199,27 +206,34 @@ async function scanWithOptions(
     ),
     ...vercel.installations,
     ...claudeCode.installations,
+    ...codex.installations,
   ].sort(compareRecordPath);
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
-  const claudeInstallationIds = new Set(
-    claudeCode.installations.map((installation) => installation.id),
+  const adapterPluginInstallationIds = new Set(
+    [...claudeCode.installations, ...codex.installations].map(
+      (installation) => installation.id,
+    ),
   );
   const genericPlugins = await createPluginBoundaries(
     installations.filter(
-      (installation) => !claudeInstallationIds.has(installation.id),
+      (installation) => !adapterPluginInstallationIds.has(installation.id),
     ),
     roots,
     options.commandRunner,
   );
-  const plugins = [...genericPlugins, ...claudeCode.plugins].sort(
-    (left, right) => compareText(left.id, right.id),
-  );
+  const plugins = [
+    ...genericPlugins,
+    ...claudeCode.plugins,
+    ...codex.plugins,
+  ].sort((left, right) => compareText(left.id, right.id));
   const snapshot = {
     installations,
-    otherFindings: [...otherFindings, ...claudeCode.otherFindings].sort(
-      compareRecordPath,
-    ),
+    otherFindings: [
+      ...otherFindings,
+      ...claudeCode.otherFindings,
+      ...codex.otherFindings,
+    ].sort(compareRecordPath),
     logicalSkills,
     identityHints,
     plugins,
@@ -387,10 +401,21 @@ function defaultDiscoveryRoots(
     agentId: genericAgentId,
     adapterId: null,
   };
-  return pathComparisonKey(userRoot.path) ===
-    pathComparisonKey(workspaceRoot.path)
-    ? [workspaceRoot]
-    : [userRoot, workspaceRoot];
+  const codexRoot: DiscoveryRoot = {
+    kind: "agent",
+    path: join(
+      environment.agentHomeDirectories?.codex ??
+        join(environment.homeDirectory, ".codex"),
+      "skills",
+    ),
+    agentId: "codex",
+    adapterId: null,
+  };
+  const genericRoots =
+    pathComparisonKey(userRoot.path) === pathComparisonKey(workspaceRoot.path)
+      ? [workspaceRoot]
+      : [userRoot, workspaceRoot];
+  return [...genericRoots, codexRoot];
 }
 
 function normalizeWorkspaceRoot(

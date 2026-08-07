@@ -7,10 +7,11 @@ scan(request: ScanRequest): Promise<Inventory>
 ```
 
 The normal scanner resolves the bounded generic `.agents/skills` roots under
-the current user's home and current workspace. Callers may add explicit,
-absolute discovery roots. The module owns root resolution, traversal, metadata
-parsing, hashing, classification, Git inspection, identity grouping, and result
-validation. It never scans the home or workspace itself.
+the current user's home and current workspace and Codex's standalone
+`<CODEX_HOME>/skills` root. Callers may add explicit, absolute discovery roots.
+The module owns root resolution, traversal, metadata parsing, hashing,
+classification, Git inspection, identity grouping, and result validation. It
+never scans the home or workspace itself.
 
 For deterministic tests, create an `InventoryScanner` with an injected clock,
 isolated path environment, and structured command runner:
@@ -202,3 +203,63 @@ JSON files with unique keys and a single hard link. Declarative cleanup records
 carry exact file and record hashes. Shared cache paths, duplicate scope records,
 invalid manifests/settings, and administrator-managed records remain blocked
 instead of widening the removal boundary.
+
+## Codex plugin reconciliation
+
+Inventory obtains installed Codex Plugin state only from the supported
+`codex plugin list --json` command. The command receives the injected or
+environment-derived `CODEX_HOME`; its temporary-directory variables point to
+that same root so Codex cannot create its helper alias during a read-only scan.
+`DO_NOT_TRACK=1` and `DISABLE_TELEMETRY=1` are also fixed by the scanner. Tests
+can observe the complete structured command and environment through
+`InventoryCommandRunner` without invoking the developer's Codex installation.
+
+List output must be unique-key JSON with `installed` and `available` arrays.
+Every installed record must attest `installed: true`, a safe Plugin and
+marketplace segment, an exact matching `<plugin>@<marketplace>` identifier, and
+a version containing only Codex's safe version characters. The active root is
+derived rather than accepted from output:
+
+```text
+<CODEX_HOME>/plugins/cache/<marketplace>/<plugin>/<version>
+```
+
+The scanner rejects missing, linked, non-directory, or canonically escaping
+cache hierarchy segments. The containing Plugin resource is the unversioned
+Plugin cache directory, so all stale versions are collateral of one lifecycle
+operation and never independent Installations. If the supported command is
+unavailable or invalid, bounded direct cache entries and their manifest Skills
+remain visible as `cache-or-vendor-artifact` findings with no removal authority.
+
+Manifest lookup first recognizes a regular root `plugin.json` only when its
+`$schema` is exactly Agent Plugins v1's
+`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`; unrelated root
+files fall back to legacy precedence: `.codex-plugin/plugin.json`, then
+`.claude-plugin/plugin.json`, then `.cursor-plugin/plugin.json`. Agent Plugins
+use direct `skills/` children and `mcp.json` by default; their Codex hooks,
+apps, and interface assets come from `extensions.com.openai` or a regular
+`.codex-plugin/plugin.json` overlay. Legacy manifests retain recursive Skill
+discovery and generated migrated-command Skills. Commands, hooks, MCP, apps,
+generated migrated-command Skills, custom `./` paths, and interface assets are
+inspected only within the active root. A nonempty legacy custom Skills
+declaration replaces the default `skills/` root.
+Lexically escaping paths and custom paths that resolve outside the Plugin root
+block Managed Removal. A child Skill link resolving outside the cache is
+source-only evidence and never an active Plugin Installation.
+
+Local source paths explicitly returned by Codex may contribute bounded
+`source-artifact` findings. Linked roots and linked children that resolve
+outside such a source are not crawled. Equal names in source trees, cache
+versions, standalone Codex Skills, generic Agent Skills, and active Plugin
+children do not merge identities or transfer ownership.
+
+Each attested Plugin is one user-scope Plugin boundary. Its active Skills use
+strong Plugin-plus-Skill identity and `independentlySelectable: false`; ordinary
+remove-all therefore excludes the containing Plugin. Managed effects cover the
+whole unversioned cache boundary and the stable or safely absent
+`<CODEX_HOME>/config.toml`. The retained
+`plugins/data/<plugin>-<marketplace>` directory for legacy Plugins, or
+`plugins/data/agent-plugins/<sha256(marketplace + NUL + plugin)[:32]>` for
+Agent Plugins, is reported as orphanable collateral but is not an effect or
+absence verification. Because v1 cannot
+perform an exact declarative TOML edit, Codex Plugin fallback is unavailable.

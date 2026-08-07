@@ -700,7 +700,9 @@ describe("Inventory scan", () => {
       kind: "protected",
       worktreeRoot,
     });
-    expect(observedCommands).toEqual([
+    expect(
+      observedCommands.filter((command) => command.executable === "git"),
+    ).toEqual([
       {
         executable: "git",
         arguments: ["-C", worktreeRoot, "rev-parse", "--show-toplevel"],
