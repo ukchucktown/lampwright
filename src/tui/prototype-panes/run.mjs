@@ -8,7 +8,7 @@
 import process from "node:process";
 
 import { loadSections } from "./inventory.mjs";
-import { render, PANE_TOP } from "./frame.mjs";
+import { renderLines, PANE_TOP } from "./frame.mjs";
 import { createState, layout, panes, reduce } from "./model.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -23,8 +23,13 @@ function viewport() {
 const sections = await loadSections();
 let state = createState(sections, viewport());
 
+// Repaint in place: home, then each line erased to its end. Clearing the whole
+// screen every event tears visibly under a stream of mouse reports.
 function draw() {
-  process.stdout.write(`${ESC}[H${ESC}[2J${render(state)}`);
+  const lines = renderLines(state);
+  process.stdout.write(
+    `${ESC}[H` + lines.map((line) => `${line}${ESC}[K`).join("\n") + `${ESC}[J`,
+  );
 }
 
 // ── mouse ──────────────────────────────────────────────────────────────────
@@ -53,8 +58,10 @@ function onMouse(button, column, row, pressed) {
     return;
   }
 
-  const onDivider = Math.abs(column - (leftWidth + 1)) <= 1;
-  if (dragging || (onDivider && button < 32)) {
+  const motion = button >= 32;
+  const onDivider = column === leftWidth + 1;
+
+  if (dragging || (onDivider && !motion)) {
     dragging = true;
     state = reduce(state, {
       type: "set-left-percent",
@@ -62,6 +69,10 @@ function onMouse(button, column, row, pressed) {
     });
     return;
   }
+
+  // Motion with a button held is not a click; without this every twitch of the
+  // pointer re-selects whatever row it passes over.
+  if (motion) return;
 
   const paneRow = row - PANE_TOP - 1;
   if (paneRow < 0 || paneRow >= paneRows) return;
