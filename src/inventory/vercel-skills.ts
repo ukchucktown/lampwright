@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { constants, type Stats } from "node:fs";
+import { constants } from "node:fs";
 import {
   access,
   lstat,
-  open,
   readdir,
   readFile,
   readlink,
@@ -12,11 +11,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import {
-  parseTree,
-  type Node as JsonNode,
-  type ParseError,
-} from "jsonc-parser";
+import { parseTree, type ParseError } from "jsonc-parser";
 
 import {
   VERCEL_SKILLS_ADAPTER_HASH,
@@ -43,6 +38,12 @@ import type {
   WeakIdentityEvidence,
 } from "../model/types.js";
 import { hashSkillDirectory } from "./content-hash.js";
+import {
+  digest,
+  hasDuplicateKeys,
+  pathKey,
+  readStableRegularFile,
+} from "./evidence.js";
 import { inspectGitProtection } from "./git-protection.js";
 import { stableId } from "./identity.js";
 import { readSkillMetadata } from "./metadata.js";
@@ -716,67 +717,6 @@ async function readLockDocument(
   };
 }
 
-async function readStableRegularFile(
-  path: string,
-  initialStats: Stats,
-): Promise<{
-  readonly bytes: Buffer;
-  readonly canonicalPath: string;
-} | null> {
-  if (
-    !initialStats.isFile() ||
-    initialStats.isSymbolicLink() ||
-    initialStats.nlink !== 1
-  ) {
-    return null;
-  }
-  const handle = await open(
-    path,
-    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
-  ).catch(() => null);
-  if (handle === null) return null;
-  try {
-    const openedStats = await handle.stat();
-    if (
-      !openedStats.isFile() ||
-      openedStats.nlink !== 1 ||
-      !sameFile(initialStats, openedStats)
-    ) {
-      return null;
-    }
-    const bytes = await handle.readFile();
-    const finalStats = await handle.stat();
-    const pathStats = await lstat(path).catch(() => null);
-    const canonicalPath = await realpath(path).catch(() => null);
-    const confirmedStats = await lstat(path).catch(() => null);
-    if (
-      pathStats === null ||
-      confirmedStats === null ||
-      canonicalPath === null ||
-      !pathStats.isFile() ||
-      pathStats.isSymbolicLink() ||
-      pathStats.nlink !== 1 ||
-      !sameFile(openedStats, finalStats) ||
-      !sameFile(finalStats, pathStats) ||
-      !sameFile(pathStats, confirmedStats) ||
-      openedStats.size !== finalStats.size ||
-      openedStats.mtimeMs !== finalStats.mtimeMs ||
-      openedStats.ctimeMs !== finalStats.ctimeMs
-    ) {
-      return null;
-    }
-    return { bytes, canonicalPath };
-  } catch {
-    return null;
-  } finally {
-    await handle.close();
-  }
-}
-
-function sameFile(left: Stats, right: Stats): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
 function globalLockPath(environment: InventoryScanEnvironment): string {
   return environment.stateDirectory === undefined ||
     environment.stateDirectory === null
@@ -1000,13 +940,6 @@ function escapePointer(value: string): string {
   return value.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
-function digest(bytes: Buffer): Sha256Digest {
-  return {
-    algorithm: "sha256",
-    digest: createHash("sha256").update(bytes).digest("hex"),
-  };
-}
-
 function stringField(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
@@ -1054,18 +987,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasDuplicateKeys(node: JsonNode): boolean {
-  if (node.type === "object") {
-    const keys = new Set<string>();
-    for (const property of node.children ?? []) {
-      const key = property.children?.[0]?.value;
-      if (typeof key !== "string" || keys.has(key)) return true;
-      keys.add(key);
-    }
-  }
-  return (node.children ?? []).some(hasDuplicateKeys);
-}
-
 function isBroken(location: ArtifactLocation): boolean {
   return (
     (location.artifactType.kind === "symbolic-link" ||
@@ -1081,11 +1002,6 @@ function isMissing(error: unknown): boolean {
     "code" in error &&
     (error.code === "ENOENT" || error.code === "ENOTDIR")
   );
-}
-
-function pathKey(path: string): string {
-  const normalized = resolve(path);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function normalizeWindowsNamespacePath(path: string): string {

@@ -160,7 +160,7 @@ export function plan(
 
   const warnings = deduplicateAndSort([
     ...createSoftReferenceWarnings(inventory, states),
-    ...createPluginImpactWarnings(states),
+    ...createPluginImpactWarnings(inventory, states),
     ...actionWarnings,
   ]);
   const blocks = deduplicateAndSort(states.flatMap((state) => state.blocks));
@@ -1417,22 +1417,40 @@ function createSoftReferenceWarnings(
 }
 
 function createPluginImpactWarnings(
+  inventory: Inventory,
   states: readonly TargetState[],
 ): PlanWarning[] {
   return states.flatMap((state) => {
-    const plugin = state.resolved.plugin;
-    if (plugin === null) {
-      return [];
+    const plugins = new Map<string, PluginBoundary>();
+    if (state.resolved.plugin !== null) {
+      plugins.set(state.resolved.plugin.id, state.resolved.plugin);
     }
-    const affectedResources = [
-      ...state.resolved.installations.map(
-        (installation) =>
-          `skill:${installation.skill.name}:${installation.location.path}`,
-      ),
-      ...plugin.resources.map((resource) => `${resource.kind}:${resource.id}`),
-    ].sort(compareText);
-    return [
-      {
+    for (const installation of state.resolved.installations) {
+      if (
+        installation.ownership.kind !== "plugin" ||
+        installation.ownership.independentlySelectable ||
+        installation.pluginBoundaryId === null
+      ) {
+        continue;
+      }
+      const plugin = inventory.plugins.find(
+        (candidate) => candidate.id === installation.pluginBoundaryId,
+      );
+      if (plugin !== undefined) plugins.set(plugin.id, plugin);
+    }
+    return [...plugins.values()].map((plugin) => {
+      const affectedResources = [
+        ...plugin.installationIds.map((installationId) => {
+          const installation = inventory.installations.find(
+            (candidate) => candidate.id === installationId,
+          )!;
+          return `skill:${installation.skill.name}:${installation.location.path}`;
+        }),
+        ...plugin.resources.map(
+          (resource) => `${resource.kind}:${resource.id}`,
+        ),
+      ].sort(compareText);
+      return {
         kind: "plugin-impact" as const,
         target: state.resolved.target,
         pluginId: plugin.pluginId,
@@ -1440,8 +1458,8 @@ function createPluginImpactWarnings(
           affectedResources.length > 0
             ? affectedResources
             : [`plugin:${plugin.pluginId}`],
-      },
-    ];
+      };
+    });
   });
 }
 
