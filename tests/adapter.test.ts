@@ -197,12 +197,15 @@ describe("Adapter loading", () => {
     const second = await loadAdapters(request);
 
     expect(first).toEqual(second);
-    expect(first.adapters).toHaveLength(2);
+    expect(first.adapters).toHaveLength(3);
     const fixtureAdapter = first.adapters.find(
       (adapter) => adapter.id === "fixture.read-only",
     );
     const vercelAdapter = first.adapters.find(
       (adapter) => adapter.id === "vercel.skills",
+    );
+    const claudePluginAdapter = first.adapters.find(
+      (adapter) => adapter.id === "claude-code.plugins",
     );
     expect(fixtureAdapter).toMatchObject({
       id: "fixture.read-only",
@@ -217,6 +220,28 @@ describe("Adapter loading", () => {
       id: "vercel.skills",
       trust: { kind: "built-in" },
       commandCapable: true,
+    });
+    expect(claudePluginAdapter).toMatchObject({
+      id: "claude-code.plugins",
+      trust: { kind: "built-in" },
+      commandCapable: true,
+    });
+    expect(
+      claudePluginAdapter?.actions.find(
+        (action) => action.id === "uninstall-project-plugin",
+      ),
+    ).toMatchObject({
+      command: {
+        executable: "claude",
+        arguments: [
+          { kind: "literal", value: "plugin" },
+          { kind: "literal", value: "uninstall" },
+          { kind: "value", from: "externalId" },
+          { kind: "literal", value: "--scope" },
+          { kind: "literal", value: "project" },
+          { kind: "literal", value: "--yes" },
+        ],
+      },
     });
     expect(
       vercelAdapter?.actions.find(
@@ -302,18 +327,21 @@ describe("Adapter loading", () => {
       ...request,
       approvals: [{ adapterId: "fixture.command", contentHash }],
     });
-    expect(catalog.adapters[0]?.trust).toEqual({
+    const commandAdapter = catalog.adapters.find(
+      (adapter) => adapter.id === "fixture.command",
+    );
+    expect(commandAdapter?.trust).toEqual({
       kind: "approved",
       contentHash,
     });
-    expect(catalog.adapters[0]?.actions[0]).toMatchObject({
+    expect(commandAdapter?.actions[0]).toMatchObject({
       kind: "managed",
       verificationRules: ["path-gone", "record-gone"],
       command: { executable: "fixture-manager" },
     });
-    expect(catalog.adapters[0]?.actions[0]?.kind).toBe("managed");
-    if (catalog.adapters[0]?.actions[0]?.kind === "managed") {
-      expect(catalog.adapters[0].actions[0].command.arguments[1]).toEqual({
+    expect(commandAdapter?.actions[0]?.kind).toBe("managed");
+    if (commandAdapter?.actions[0]?.kind === "managed") {
+      expect(commandAdapter.actions[0].command.arguments[1]).toEqual({
         kind: "literal",
         value: "fish",
       });
@@ -379,12 +407,15 @@ describe("Adapter loading", () => {
       platform: "win32",
       pathBases: windowsBases,
     });
+    const variantsAdapter = catalog.adapters.find(
+      (adapter) => adapter.id === "fixture.read-only",
+    );
 
-    expect(catalog.adapters[0]?.probes[0]).toMatchObject({
+    expect(variantsAdapter?.probes[0]).toMatchObject({
       kind: "executable",
       executable: "fixture.exe",
     });
-    expect(catalog.adapters[0]?.roots[0]?.path).toBe(
+    expect(variantsAdapter?.roots[0]?.path).toBe(
       win32.join(windowsBases.home, "Fixture", "Skills"),
     );
   });
@@ -618,7 +649,10 @@ describe("Adapter loading", () => {
       pathBases: fixturePathBases(environment),
       approvals: [{ adapterId: "fixture.ephemeral", contentHash }],
     });
-    expect(catalog.adapters[0]?.actions[0]).toMatchObject({
+    const ephemeralAdapter = catalog.adapters.find(
+      (adapter) => adapter.id === "fixture.ephemeral",
+    );
+    expect(ephemeralAdapter?.actions[0]).toMatchObject({
       kind: "ephemeral-package",
       packageVersion: "1.2.3-beta.1+build.7",
       runner: "npx",
