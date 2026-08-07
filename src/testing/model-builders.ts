@@ -187,6 +187,8 @@ export function buildLogicalSkill(
       ],
     },
     installationIds: ["installation-1"],
+    groupId: null,
+    spansGroups: false,
     ...overrides,
   });
 }
@@ -202,6 +204,7 @@ export function buildPluginBoundary(
     otherFindings: [],
     logicalSkills: [],
     identityHints: [],
+    groups: [],
     plugins: [
       {
         id: "fixture-plugin",
@@ -258,6 +261,7 @@ export function buildInventory(
     otherFindings: [],
     logicalSkills: [],
     identityHints: [],
+    groups: [],
     plugins: [],
     dependencies: [],
     ...overrides,

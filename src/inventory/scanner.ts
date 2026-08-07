@@ -45,6 +45,10 @@ import { hashSkillDirectory } from "./content-hash.js";
 import { applyAdapterManifests } from "./adapter-runtime.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
+  assignGroupsToLogicalSkills,
+  buildInstallationGroups,
+} from "./groups.js";
+import {
   createWeakIdentityHints,
   groupInstallations,
   stableId,
@@ -268,7 +272,11 @@ async function scanWithOptions(
     adapterRoots.rootIds,
   );
   const installations = adapterEvidence.installations;
-  const logicalSkills = groupInstallations(installations);
+  const groups = buildInstallationGroups(installations);
+  const logicalSkills = assignGroupsToLogicalSkills(
+    groupInstallations(installations),
+    groups,
+  );
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
   const adapterPluginInstallationIds = new Set(
     [
@@ -299,6 +307,7 @@ async function scanWithOptions(
     ].sort(compareRecordPath),
     logicalSkills,
     identityHints,
+    groups,
     plugins,
     dependencies: adapterEvidence.dependencies,
   };

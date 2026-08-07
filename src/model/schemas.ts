@@ -213,6 +213,7 @@ export const removalTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("plugin"),
     pluginBoundaryId: nonEmptyString,
   }),
+  z.strictObject({ kind: z.literal("source-group"), groupId: modelId }),
 ]);
 
 const inventoryRecordReferenceSchema = z.discriminatedUnion("kind", [
@@ -481,6 +482,31 @@ export const logicalSkillSchema = z.strictObject({
   skill: skillDescriptorSchema,
   identity: logicalSkillIdentitySchema,
   installationIds: z.array(modelId).min(1),
+  groupId: modelId.nullable(),
+  spansGroups: z.boolean(),
+});
+
+const installationGroupEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    tier: z.literal("declared"),
+    kind: z.literal("manager-source"),
+    managerId: nonEmptyString,
+    sourceId: nonEmptyString,
+  }),
+  z.strictObject({
+    tier: z.literal("structural"),
+    kind: z.literal("repository-remote"),
+    remoteUrl: nonEmptyString,
+  }),
+]);
+
+const installationGroupSchema = z.strictObject({
+  id: modelId,
+  label: nonEmptyString,
+  tier: z.enum(["declared", "structural"]),
+  evidence: installationGroupEvidenceSchema,
+  scope: scopeSchema,
+  installationIds: z.array(modelId).min(1),
 });
 
 const weakIdentityHintSchema = z.strictObject({
@@ -516,6 +542,7 @@ export const inventorySchema = z.strictObject({
   otherFindings: z.array(nonInstallationFindingSchema),
   logicalSkills: z.array(logicalSkillSchema),
   identityHints: z.array(weakIdentityHintSchema),
+  groups: z.array(installationGroupSchema),
   plugins: z.array(pluginBoundarySchema),
   dependencies: z.array(dependencySchema),
 });

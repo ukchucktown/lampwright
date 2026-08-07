@@ -957,6 +957,8 @@ function targetExists(target: RemovalTarget, inventory: Inventory): boolean {
       return inventory.plugins.some(
         (item) => item.id === target.pluginBoundaryId,
       );
+    case "source-group":
+      return inventory.groups.some((item) => item.id === target.groupId);
   }
 }
 

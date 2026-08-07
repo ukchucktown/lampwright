@@ -127,6 +127,8 @@ function targetKey(target: RemovalTarget): string {
       return `logical-skill:${target.logicalSkillId}`;
     case "plugin":
       return `plugin:${target.pluginBoundaryId}`;
+    case "source-group":
+      return `source-group:${target.groupId}`;
   }
 }
 
@@ -760,6 +762,7 @@ function validateTargetExists(
   installationIds: ReadonlySet<string>,
   logicalSkillIds: ReadonlySet<string>,
   pluginIds: ReadonlySet<string>,
+  groupIds: ReadonlySet<string>,
   issues: MutableIssue[],
 ): void {
   const exists =
@@ -767,11 +770,89 @@ function validateTargetExists(
       ? installationIds.has(target.installationId)
       : target.kind === "logical-skill"
         ? logicalSkillIds.has(target.logicalSkillId)
-        : pluginIds.has(target.pluginBoundaryId);
+        : target.kind === "source-group"
+          ? groupIds.has(target.groupId)
+          : pluginIds.has(target.pluginBoundaryId);
 
   if (!exists) {
     addIssue(issues, path, `target ${targetKey(target)} does not exist`);
   }
+}
+
+function validateInstallationGroups(
+  inventory: Inventory,
+  installationsById: ReadonlyMap<string, Installation>,
+  issues: MutableIssue[],
+): void {
+  const claimed = new Set<string>();
+  const groupById = new Map<string, number>();
+
+  inventory.groups.forEach((group, groupIndex) => {
+    const path = ["groups", groupIndex];
+    if (groupById.has(group.id)) {
+      addIssue(issues, [...path, "id"], "duplicate installation group id");
+    }
+    groupById.set(group.id, groupIndex);
+
+    if (group.tier !== group.evidence.tier) {
+      addIssue(
+        issues,
+        [...path, "tier"],
+        "group tier must match its evidence tier",
+      );
+    }
+
+    duplicateIndexes(group.installationIds, String).forEach((index) => {
+      addIssue(
+        issues,
+        [...path, "installationIds", index],
+        "installation appears more than once in the group",
+      );
+    });
+
+    group.installationIds.forEach((installationId, installationIndex) => {
+      const installation = installationsById.get(installationId);
+      if (installation === undefined) {
+        addIssue(
+          issues,
+          [...path, "installationIds", installationIndex],
+          "installation does not exist",
+        );
+        return;
+      }
+      if (claimed.has(installationId)) {
+        addIssue(
+          issues,
+          [...path, "installationIds", installationIndex],
+          "installation already belongs to another group",
+        );
+      }
+      claimed.add(installationId);
+
+      if (installation.ownership.kind === "plugin") {
+        addIssue(
+          issues,
+          [...path, "installationIds", installationIndex],
+          "plugin-owned installations are represented by their plugin boundary",
+        );
+      }
+    });
+  });
+
+  inventory.logicalSkills.forEach((logicalSkill, logicalIndex) => {
+    const path = ["logicalSkills", logicalIndex];
+    if (logicalSkill.groupId !== null) {
+      if (!groupById.has(logicalSkill.groupId)) {
+        addIssue(issues, [...path, "groupId"], "group does not exist");
+      } else if (logicalSkill.spansGroups) {
+        addIssue(
+          issues,
+          [...path, "spansGroups"],
+          "a logical skill assigned to a group cannot also span groups",
+        );
+      }
+    }
+  });
 }
 
 function validateInventoryDependencies(
@@ -780,6 +861,7 @@ function validateInventoryDependencies(
   findingIds: ReadonlySet<string>,
   logicalSkillIds: ReadonlySet<string>,
   pluginIds: ReadonlySet<string>,
+  groupIds: ReadonlySet<string>,
   issues: MutableIssue[],
 ): void {
   inventory.dependencies.forEach((dependency, dependencyIndex) => {
@@ -791,6 +873,7 @@ function validateInventoryDependencies(
       installationIds,
       logicalSkillIds,
       pluginIds,
+      groupIds,
       issues,
     );
 
@@ -1018,9 +1101,11 @@ export function parseInventory(input: unknown): Inventory {
     inventory.logicalSkills.map((logicalSkill) => logicalSkill.id),
   );
   const pluginIds = new Set(inventory.plugins.map((plugin) => plugin.id));
+  const groupIds = new Set(inventory.groups.map((group) => group.id));
 
   validateLogicalSkills(inventory, installationsById, issues);
   validateWeakIdentityHints(inventory, installationsById, issues);
+  validateInstallationGroups(inventory, installationsById, issues);
   validatePluginBoundaries(inventory, installationsById, issues);
   validateGlobalRecordCleanupEvidence(inventory, issues);
   validateInventoryDependencies(
@@ -1029,6 +1114,7 @@ export function parseInventory(input: unknown): Inventory {
     findingIds,
     logicalSkillIds,
     pluginIds,
+    groupIds,
     issues,
   );
 

@@ -175,7 +175,8 @@ export interface ManagerReference {
 export type RemovalTarget =
   | { readonly kind: "installation"; readonly installationId: InstallationId }
   | { readonly kind: "logical-skill"; readonly logicalSkillId: LogicalSkillId }
-  | { readonly kind: "plugin"; readonly pluginBoundaryId: string };
+  | { readonly kind: "plugin"; readonly pluginBoundaryId: string }
+  | { readonly kind: "source-group"; readonly groupId: InstallationGroupId };
 
 export type InventoryRecordReference =
   | { readonly kind: "installation"; readonly installationId: InstallationId }
@@ -283,6 +284,52 @@ export interface LogicalSkill {
   readonly skill: SkillDescriptor;
   readonly identity: LogicalSkillIdentity;
   readonly installationIds: readonly [InstallationId, ...InstallationId[]];
+  /** The Group containing every Installation, or null when they disagree. */
+  readonly groupId: InstallationGroupId | null;
+  /** Whether Installations of one Skill belong to different Groups. */
+  readonly spansGroups: boolean;
+}
+
+export type InstallationGroupId = ModelId<"InstallationGroup">;
+
+/**
+ * How strongly a Group's shared origin is known.
+ *
+ * `declared` evidence comes from an Owner's own record, such as a Manager lock
+ * entry naming a source. `structural` is reserved for evidence derived from the
+ * filesystem, such as a shared repository remote; no discovery path emits it
+ * yet.
+ */
+export type InstallationGroupTier = "declared" | "structural";
+
+export type InstallationGroupEvidence =
+  | {
+      readonly tier: "declared";
+      readonly kind: "manager-source";
+      readonly managerId: string;
+      readonly sourceId: string;
+    }
+  | {
+      readonly tier: "structural";
+      readonly kind: "repository-remote";
+      readonly remoteUrl: string;
+    };
+
+/**
+ * Installations a single act of installation put in place together.
+ *
+ * A Group is navigational and selectable: it expands to its exact member
+ * Installations. It never merges Skill identities, and membership is not
+ * evidence that two Skills are the same Skill. Plugin bundles are represented
+ * by their `PluginBoundary` instead, so they are never also a Group.
+ */
+export interface InstallationGroup {
+  readonly id: InstallationGroupId;
+  readonly label: string;
+  readonly tier: InstallationGroupTier;
+  readonly evidence: InstallationGroupEvidence;
+  readonly scope: Scope;
+  readonly installationIds: readonly [InstallationId, ...InstallationId[]];
 }
 
 export interface WeakIdentityHint {
@@ -302,6 +349,7 @@ export interface Inventory {
   readonly otherFindings: readonly NonInstallationFinding[];
   readonly logicalSkills: readonly LogicalSkill[];
   readonly identityHints: readonly WeakIdentityHint[];
+  readonly groups: readonly InstallationGroup[];
   readonly plugins: readonly PluginBoundary[];
   readonly dependencies: readonly Dependency[];
 }

@@ -356,6 +356,25 @@ function resolveTarget(
     return { target, installations, plugin: null };
   }
 
+  if (target.kind === "source-group") {
+    const group = inventory.groups.find(
+      (candidate) => candidate.id === target.groupId,
+    );
+    if (group === undefined) {
+      throw targetNotFound(target);
+    }
+    const installations = group.installationIds.map((id) => {
+      const installation = inventory.installations.find(
+        (candidate) => candidate.id === id,
+      );
+      if (installation === undefined) {
+        throw targetNotFound(target);
+      }
+      return installation;
+    });
+    return { target, installations, plugin: null };
+  }
+
   const plugin = inventory.plugins.find(
     (candidate) => candidate.id === target.pluginBoundaryId,
   );
@@ -385,7 +404,12 @@ function compareResolvedTargetByBreadth(
   left: ResolvedTarget,
   right: ResolvedTarget,
 ): number {
-  const priority = { plugin: 0, "logical-skill": 1, installation: 2 } as const;
+  const priority = {
+    plugin: 0,
+    "source-group": 1,
+    "logical-skill": 2,
+    installation: 3,
+  } as const;
   return (
     priority[left.target.kind] - priority[right.target.kind] ||
     compareText(targetKey(left.target), targetKey(right.target))
@@ -649,9 +673,12 @@ function unitsAffectedByDependencyTarget(
   const requiredIds =
     target.kind === "installation"
       ? [target.installationId]
-      : (inventory.logicalSkills.find(
-          (logical) => logical.id === target.logicalSkillId,
-        )?.installationIds ?? []);
+      : target.kind === "source-group"
+        ? (inventory.groups.find((group) => group.id === target.groupId)
+            ?.installationIds ?? [])
+        : (inventory.logicalSkills.find(
+            (logical) => logical.id === target.logicalSkillId,
+          )?.installationIds ?? []);
   const selectedIds = new Set(
     states.flatMap((state) =>
       state.resolved.installations.map((installation) => installation.id),
@@ -1790,6 +1817,8 @@ function targetKey(target: RemovalTarget): string {
       return `logical-skill:${target.logicalSkillId}`;
     case "plugin":
       return `plugin:${target.pluginBoundaryId}`;
+    case "source-group":
+      return `source-group:${target.groupId}`;
   }
 }
 

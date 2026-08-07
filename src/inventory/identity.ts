@@ -90,6 +90,9 @@ export function groupInstallations(
         weakEvidence: commonWeakEvidence(members),
       },
       installationIds,
+      // Group membership is assigned once Groups exist; see groups.ts.
+      groupId: null,
+      spansGroups: false,
     });
   }
 

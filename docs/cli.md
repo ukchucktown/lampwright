@@ -6,10 +6,17 @@ skill paths themselves.
 
 ## Selectors and confirmation
 
-`remove` accepts `installation:<id>`, `logical-skill:<id>`,
-`source:<source-id>`, and `plugin:<boundary-id>`. Source selectors are
-resolved by Planning to the matching Installation targets. `--all` excludes
-Plugin boundaries unless `--include-plugins` is also supplied.
+`remove` accepts `installation:<id>`, `logical-skill:<id>`, `source:<source-id>`,
+`group:<group-id>`, and `plugin:<boundary-id>`.
+
+`source:<source-id>` resolves to the declared Group for that source, so removing
+a bundle is one target covering its exact members. When no Group declares the
+source it keeps its original meaning and expands to each matching Installation.
+A source present in more than one Scope is ambiguous and is rejected in favour
+of `group:<group-id>`, which names an exact Group from `scan --json`.
+
+`--all` excludes Plugin boundaries unless `--include-plugins` is also supplied,
+and never includes a Plugin the agent runtime ships with itself.
 
 `--dry-run` returns the full removal plan or Quarantine preview and performs
 no mutation. `--yes` grants only ordinary confirmation. `--brute-force`

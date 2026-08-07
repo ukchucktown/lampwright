@@ -86,6 +86,7 @@ Usage:
 Selectors:
   installation:<installation-id>  logical-skill:<logical-skill-id>
   source:<source-id>              plugin:<plugin-boundary-id>
+  group:<group-id>
 
 Exit codes: 0 succeeded; 1 operational failure; 2 invalid usage; 3 blocked or confirmation required.
 

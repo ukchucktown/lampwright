@@ -129,6 +129,28 @@ Frontmatter `name`, `description`, and string-array `tags` are normalized.
 Malformed frontmatter leaves the finding visible with fallback metadata and an
 `unresolved` Installation status.
 
+## Installation Groups
+
+`Inventory.groups` records Installations that one act of installation put in
+place together. Only declared evidence forms a Group: an Owner's own record
+naming both the Manager that installed a Skill and the source it came from,
+within one Scope. A shared name, a shared directory, or a shared install time is
+not evidence and forms nothing.
+
+Every Group carries a `tier`. `declared` is the evidence above. `structural` is
+reserved for evidence derived from the filesystem, such as a shared repository
+remote; the type exists so adding it later needs no schema change, and no
+discovery path emits it today. Plugin-owned Installations are never grouped,
+because their bundle is already a `PluginBoundary` and representing it twice
+would let one selection expand through two different boundaries.
+
+A Group is navigational and selectable, not an identity claim. Membership never
+merges Skills, and a Group expands to its exact member Installations when
+planned. A Logical Skill records the `groupId` that contains **every** one of
+its Installations, or `null` when they disagree, in which case `spansGroups` is
+set so presentation can surface the split rather than filing a Skill under one
+source it only partly came from.
+
 ## Protection and identity
 
 Every discovered path, including a Skill directory that is itself a worktree
