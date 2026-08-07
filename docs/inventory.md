@@ -29,12 +29,18 @@ const scanner = createInventoryScanner({
     nodeVersion: "22.20.0",
   },
   commandRunner: fakeCommandRunner,
+  adapterCatalog: compiledCatalog,
 });
 const inventory = await scanner.scan({ roots });
 ```
 
 The default `scan(request)` function uses the system clock, home, workspace,
 and a non-shell process runner. Both entry points run the same implementation.
+
+`adapterCatalog` is the already-compiled, trusted Adapter seam; Inventory
+evaluates its bounded roots, probes, manifests, and planner-ready evidence.
+Request roots cannot claim an Adapter ID present in that catalog, so callers
+cannot forge catalog provenance or bypass an Adapter root's probe requirements.
 
 ## Discovery roots
 

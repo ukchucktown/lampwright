@@ -415,6 +415,7 @@
         "pluginId": { "$ref": "#/$defs/selector" },
         "pluginVersion": { "$ref": "#/$defs/selector" },
         "managerId": { "$ref": "#/$defs/selector" },
+        "externalId": { "$ref": "#/$defs/selector" },
         "agentId": { "$ref": "#/$defs/selector" },
         "status": { "$ref": "#/$defs/selector" },
         "tags": { "$ref": "#/$defs/selector" }
@@ -423,10 +424,11 @@
     "manifest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "path", "format", "records", "fields"],
+      "required": ["id", "rootId", "path", "format", "records", "fields"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "platforms": { "$ref": "#/$defs/declarationPlatforms" },
+        "rootId": { "$ref": "#/$defs/id" },
         "path": { "$ref": "#/$defs/pathVariant" },
         "format": { "enum": ["json", "jsonc", "yaml"] },
         "requiresProbes": { "$ref": "#/$defs/idList" },
@@ -653,8 +655,44 @@
             "kind": { "const": "managed" },
             "ownerKind": { "enum": ["manager", "plugin"] },
             "operationId": { "$ref": "#/$defs/id" },
+            "source": { "$ref": "#/$defs/ruleSource" },
             "requiresProbes": { "$ref": "#/$defs/idList" },
             "verificationRules": { "$ref": "#/$defs/idList" },
+            "effects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "path"],
+                "properties": {
+                  "kind": { "enum": ["remove-path", "modify-path"] },
+                  "path": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["kind", "path"],
+                        "properties": {
+                          "kind": { "const": "static" },
+                          "path": { "$ref": "#/$defs/pathVariant" }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["kind", "from"],
+                        "properties": {
+                          "kind": { "const": "value" },
+                          "from": {
+                            "enum": ["installationPath", "manifestPath"]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
             "command": { "$ref": "#/$defs/commandVariant" }
           }
         },
@@ -678,8 +716,44 @@
             "kind": { "const": "ephemeral-package" },
             "ownerKind": { "enum": ["manager", "plugin"] },
             "operationId": { "$ref": "#/$defs/id" },
+            "source": { "$ref": "#/$defs/ruleSource" },
             "requiresProbes": { "$ref": "#/$defs/idList" },
             "verificationRules": { "$ref": "#/$defs/idList" },
+            "effects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "path"],
+                "properties": {
+                  "kind": { "enum": ["remove-path", "modify-path"] },
+                  "path": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["kind", "path"],
+                        "properties": {
+                          "kind": { "const": "static" },
+                          "path": { "$ref": "#/$defs/pathVariant" }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["kind", "from"],
+                        "properties": {
+                          "kind": { "const": "value" },
+                          "from": {
+                            "enum": ["installationPath", "manifestPath"]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
             "runner": { "const": "npx" },
             "packageName": {
               "type": "string",

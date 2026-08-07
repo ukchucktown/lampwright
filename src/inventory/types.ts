@@ -4,6 +4,7 @@ import type {
   Scope,
   SourceReference,
 } from "../model/types.js";
+import type { AdapterCatalog } from "../adapter/types.js";
 
 interface DiscoveryRootBase {
   readonly path: string;
@@ -59,6 +60,9 @@ export interface InventoryScannerOptions {
   readonly now: () => Date;
   readonly environment: InventoryScanEnvironment;
   readonly commandRunner: InventoryCommandRunner;
+  /** Already validated and trusted compiled adapter declarations. */
+  readonly adapterCatalog?: AdapterCatalog;
+  readonly executablePresent?: (executable: string) => Promise<boolean>;
 }
 
 export interface InventoryScanEnvironment {

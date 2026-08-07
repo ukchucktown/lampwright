@@ -20,6 +20,7 @@ import {
 } from "node:path";
 
 import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
+import type { CompiledAdapter, CompiledAdapterRoot } from "../adapter/types.js";
 import { stringifyModel } from "../model/json.js";
 import type {
   ArtifactLocation,
@@ -41,6 +42,7 @@ import type {
 } from "../model/types.js";
 import { parseInventory } from "../model/validation.js";
 import { hashSkillDirectory } from "./content-hash.js";
+import { applyAdapterManifests } from "./adapter-runtime.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
   createWeakIdentityHints,
@@ -119,7 +121,17 @@ async function scanWithOptions(
   request: ScanRequest,
   options: InventoryScannerOptions,
 ): Promise<Inventory> {
-  const roots = validateAndNormalizeRequest(request, options);
+  const requestRoots = validateAndNormalizeRequest(request, options);
+  if (
+    options.adapterCatalog?.adapters.some((adapter) =>
+      requestRoots.some((root) => root.adapterId === adapter.id),
+    )
+  ) {
+    throw new InventoryScanError(
+      "invalid-request",
+      "scan request roots cannot claim adapter catalog provenance",
+    );
+  }
   if (typeof options?.now !== "function") {
     throw new InventoryScanError(
       "invalid-request",
@@ -134,6 +146,11 @@ async function scanWithOptions(
     );
   }
   const scannedAt = scanDate.toISOString();
+  const adapterRoots = await adapterDiscoveryRoots(options);
+  const roots = validateAndNormalizeAdapterRoots(
+    [...requestRoots, ...adapterRoots.roots],
+    options,
+  );
 
   const candidatesByPath = new Map<string, Candidate>();
   for (const root of roots) {
@@ -220,16 +237,23 @@ async function scanWithOptions(
       ),
     ]),
   );
-  const installations = [
-    ...reconciledGenericInstallations.filter(
-      (installation) =>
-        !claimedPaths.has(pathComparisonKey(installation.location.path)),
-    ),
-    ...vercel.installations,
-    ...claudeCode.installations,
-    ...codex.installations,
-    ...geminiInstallations,
-  ].sort(compareRecordPath);
+  const adapterEvidence = await applyAdapterManifests(
+    [
+      ...reconciledGenericInstallations.filter(
+        (installation) =>
+          !claimedPaths.has(pathComparisonKey(installation.location.path)),
+      ),
+      ...vercel.installations,
+      ...claudeCode.installations,
+      ...codex.installations,
+      ...geminiInstallations,
+    ].sort(compareRecordPath),
+    options.adapterCatalog,
+    options.commandRunner,
+    adapterRoots.probes,
+    adapterRoots.rootIds,
+  );
+  const installations = adapterEvidence.installations;
   const logicalSkills = groupInstallations(installations);
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
   const adapterPluginInstallationIds = new Set(
@@ -262,7 +286,7 @@ async function scanWithOptions(
     logicalSkills,
     identityHints,
     plugins,
-    dependencies: [],
+    dependencies: adapterEvidence.dependencies,
   };
   const inventoryId = stableId(
     "inventory",
@@ -441,6 +465,272 @@ function defaultDiscoveryRoots(
       ? [workspaceRoot]
       : [userRoot, workspaceRoot];
   return [...genericRoots, codexRoot];
+}
+
+async function adapterDiscoveryRoots(
+  options: InventoryScannerOptions,
+): Promise<{
+  readonly roots: readonly DiscoveryRoot[];
+  readonly probes: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Roots admitted by probe and canonical-boundary checks. */
+  readonly rootIds: ReadonlyMap<string, ReadonlySet<string>>;
+}> {
+  const catalog = options.adapterCatalog;
+  if (catalog === undefined)
+    return { roots: [], probes: new Map(), rootIds: new Map() };
+  const roots: DiscoveryRoot[] = [];
+  const probeResults = new Map<string, ReadonlySet<string>>();
+  const activeRootIds = new Map<string, ReadonlySet<string>>();
+  const catalogRootPaths = new Set<string>();
+  const canonicalCatalogRootPaths = new Set<string>();
+  for (const adapter of catalog.adapters) {
+    const adapterRootIds = new Set<string>();
+    const probes = await adapterProbeResults(
+      adapter,
+      options.commandRunner,
+      options.executablePresent ?? executablePresent,
+    );
+    probeResults.set(adapter.id, probes);
+    for (const root of adapter.roots) {
+      if (!(root.requiresProbes ?? []).every((id) => probes.has(id))) continue;
+      const key = pathComparisonKey(root.path);
+      if (catalogRootPaths.has(key)) {
+        throw new InventoryScanError(
+          "invalid-request",
+          `duplicate adapter discovery root: ${root.path}`,
+          root.path,
+        );
+      }
+      catalogRootPaths.add(key);
+      // Preserve root.path for discovery and contextual command values, while
+      // rejecting a parent link/junction that takes this declared root outside
+      // of the path-template base selected at compilation time.
+      if (!(await canonicallyWithinAdapterBase(root.path, root.pathBase)))
+        continue;
+      const canonicalPath = pathComparisonKey(await realpath(root.path));
+      if (canonicalCatalogRootPaths.has(canonicalPath)) {
+        throw new InventoryScanError(
+          "invalid-request",
+          `duplicate canonical adapter discovery root: ${root.path}`,
+          root.path,
+        );
+      }
+      canonicalCatalogRootPaths.add(canonicalPath);
+      const converted = adapterRoot(root, adapter.id);
+      if (converted !== null) {
+        const overlap = roots.find(
+          (existing) =>
+            pathIsWithin(existing.path, converted.path) ||
+            pathIsWithin(converted.path, existing.path),
+        );
+        if (overlap !== undefined) {
+          throw new InventoryScanError(
+            "invalid-request",
+            `overlapping adapter discovery roots: ${overlap.path} and ${root.path}`,
+            root.path,
+          );
+        }
+        roots.push(converted);
+        adapterRootIds.add(root.id);
+      }
+    }
+    activeRootIds.set(adapter.id, adapterRootIds);
+  }
+  return { roots, probes: probeResults, rootIds: activeRootIds };
+}
+
+async function adapterProbeResults(
+  adapter: CompiledAdapter,
+  commandRunner: InventoryCommandRunner,
+  executableExists: (executable: string) => Promise<boolean>,
+): Promise<ReadonlySet<string>> {
+  const available = new Set<string>();
+  for (const probe of adapter.probes) {
+    if (probe.kind === "path") {
+      const stats = await lstatIfAvailable(probe.path);
+      if (
+        stats !== null &&
+        (probe.pathType === "directory" ? stats.isDirectory() : stats.isFile())
+      ) {
+        available.add(probe.id);
+      }
+      continue;
+    }
+    if (probe.kind === "executable") {
+      if (await executableExists(probe.executable)) available.add(probe.id);
+      continue;
+    }
+    // Probe commands cannot consume installation values. The adapter compiler
+    // has already rejected unsafe command structure; value placeholders remain
+    // unavailable in this pre-discovery context and therefore fail closed.
+    if (probe.command.arguments.some((argument) => argument.kind === "value")) {
+      continue;
+    }
+    const result = await commandRunner.run({
+      executable: probe.command.executable,
+      arguments: probe.command.arguments.map((argument) =>
+        argument.kind === "literal" ? argument.value : "",
+      ),
+    });
+    if (probe.successExitCodes.includes(result.exitCode ?? -1)) {
+      available.add(probe.id);
+    }
+  }
+  return available;
+}
+
+async function canonicallyWithinAdapterBase(
+  path: string,
+  base: string,
+): Promise<boolean> {
+  try {
+    return pathIsWithin(await realpath(base), await realpath(path));
+  } catch {
+    return false;
+  }
+}
+
+async function executablePresent(executable: string): Promise<boolean> {
+  const pathValue = process.env.PATH ?? process.env.Path ?? "";
+  const extensions =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")
+      : [""];
+  for (const directory of pathValue.split(
+    process.platform === "win32" ? ";" : ":",
+  )) {
+    if (directory.length === 0) continue;
+    for (const extension of extensions) {
+      try {
+        await access(
+          join(directory, `${executable}${extension}`),
+          constants.X_OK,
+        );
+        return true;
+      } catch {
+        /* continue */
+      }
+    }
+  }
+  return false;
+}
+
+function adapterRoot(
+  root: CompiledAdapterRoot,
+  adapterId: string,
+): DiscoveryRoot | null {
+  const scope = root.scope ?? null;
+  const agentId = root.agentId;
+  switch (root.kind) {
+    case "user":
+    case "agent":
+      return agentId === null || agentId === undefined
+        ? null
+        : { kind: root.kind, path: root.path, agentId, adapterId };
+    case "workspace":
+      return agentId === null ||
+        agentId === undefined ||
+        root.workspacePath === undefined
+        ? null
+        : {
+            kind: "workspace",
+            path: root.path,
+            workspacePath: root.workspacePath,
+            agentId,
+            adapterId,
+          };
+    case "plugin":
+      return agentId === null ||
+        agentId === undefined ||
+        root.plugin === undefined ||
+        scope === null
+        ? null
+        : {
+            kind: "plugin",
+            path: root.path,
+            agentId,
+            scope,
+            plugin: root.plugin,
+            independentlySelectable: root.independentlySelectable ?? false,
+            adapterId,
+          };
+    case "source":
+      return root.source === undefined
+        ? null
+        : {
+            kind: "source",
+            path: root.path,
+            agentId: agentId ?? null,
+            scope,
+            source: root.source,
+            adapterId,
+          };
+    case "cache-or-vendor":
+    case "unknown":
+      return {
+        kind: root.kind,
+        path: root.path,
+        agentId: agentId ?? null,
+        scope,
+        adapterId,
+      };
+    case "system":
+      return agentId === null || agentId === undefined
+        ? null
+        : { kind: "system", path: root.path, agentId, adapterId };
+  }
+}
+
+function validateAndNormalizeAdapterRoots(
+  roots: readonly DiscoveryRoot[],
+  options: InventoryScannerOptions,
+): readonly DiscoveryRoot[] {
+  const seen = new Map<string, DiscoveryRoot>();
+  for (const root of roots) {
+    const key = pathComparisonKey(root.path);
+    const existing = seen.get(key);
+    // An adapter may replace the equivalent generic default boundary. Keep the
+    // adapter root so its bounded manifest can strengthen the already-generic
+    // discovery; two adapters are still an explicit conflict.
+    if (
+      existing !== undefined &&
+      existing.adapterId === null &&
+      root.adapterId !== null &&
+      equivalentRootBoundary(existing, root)
+    ) {
+      seen.set(key, root);
+      continue;
+    }
+    if (
+      existing !== undefined &&
+      (rootClassificationKey(existing) !== rootClassificationKey(root) ||
+        (existing.adapterId !== null && root.adapterId !== null))
+    ) {
+      throw new InventoryScanError(
+        "invalid-request",
+        `conflicting adapter discovery root: ${root.path}`,
+        root.path,
+      );
+    }
+    if (existing === undefined) seen.set(key, root);
+  }
+  void options;
+  return [...seen.values()].sort((left, right) =>
+    compareText(
+      `${pathComparisonKey(left.path)}\0${left.kind}`,
+      `${pathComparisonKey(right.path)}\0${right.kind}`,
+    ),
+  );
+}
+
+function equivalentRootBoundary(
+  left: DiscoveryRoot,
+  right: DiscoveryRoot,
+): boolean {
+  return (
+    rootClassificationKey({ ...left, adapterId: null }) ===
+    rootClassificationKey({ ...right, adapterId: null })
+  );
 }
 
 function normalizeWorkspaceRoot(

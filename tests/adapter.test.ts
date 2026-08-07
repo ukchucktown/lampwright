@@ -75,6 +75,7 @@ function readOnlyDefinition(): AdapterDefinitionV1 {
     manifests: [
       {
         id: "registry",
+        rootId: "skills-root",
         path: {
           default: {
             base: "state",
