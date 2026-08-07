@@ -21,6 +21,7 @@ import type {
   RemovalPlan,
   RemovalTarget,
   StrongIdentityEvidence,
+  WeakIdentityEvidence,
 } from "./types.js";
 
 export interface ModelValidationIssue {
@@ -136,6 +137,24 @@ function hasSameStrongIdentity(
       );
     case "package":
       return right.kind === "package" && left.packageId === right.packageId;
+  }
+}
+
+function hasSameWeakIdentity(
+  left: WeakIdentityEvidence,
+  right: WeakIdentityEvidence,
+): boolean {
+  switch (left.kind) {
+    case "name":
+      return (
+        right.kind === "name" && left.normalizedName === right.normalizedName
+      );
+    case "content-hash":
+      return (
+        right.kind === "content-hash" &&
+        left.algorithm === right.algorithm &&
+        left.digest === right.digest
+      );
   }
 }
 
@@ -427,6 +446,45 @@ function validateLogicalSkills(
   });
 }
 
+function validateWeakIdentityHints(
+  inventory: Inventory,
+  installationsById: ReadonlyMap<string, Installation>,
+  issues: MutableIssue[],
+): void {
+  inventory.identityHints.forEach((hint, hintIndex) => {
+    duplicateIndexes(hint.installationIds, String).forEach((index) => {
+      addIssue(
+        issues,
+        ["identityHints", hintIndex, "installationIds", index],
+        "installation appears more than once in the identity hint",
+      );
+    });
+
+    hint.installationIds.forEach((installationId, installationIndex) => {
+      const installation = installationsById.get(installationId);
+      const path = [
+        "identityHints",
+        hintIndex,
+        "installationIds",
+        installationIndex,
+      ];
+      if (installation === undefined) {
+        addIssue(issues, path, "installation does not exist");
+      } else if (
+        !installation.identity.weakEvidence.some((evidence) =>
+          hasSameWeakIdentity(evidence, hint.evidence),
+        )
+      ) {
+        addIssue(
+          issues,
+          path,
+          `weak evidence is not present on installation ${installationId}`,
+        );
+      }
+    });
+  });
+}
+
 export function parseInstallation(input: unknown): Installation {
   const installation = parseSchema<Installation>(installationSchema, input);
   const issues: MutableIssue[] = [];
@@ -505,6 +563,7 @@ export function parseInventory(input: unknown): Inventory {
   );
 
   validateLogicalSkills(inventory, installationsById, issues);
+  validateWeakIdentityHints(inventory, installationsById, issues);
   validateInventoryDependencies(
     inventory,
     installationIds,

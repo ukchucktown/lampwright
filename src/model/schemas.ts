@@ -257,11 +257,18 @@ const ordinaryFindingSchema = z.strictObject({
   ]),
   skill: skillDescriptorSchema,
   identity: skillIdentitySchema,
+  source: sourceReferenceSchema.nullable(),
+  plugin: pluginReferenceSchema.nullable(),
+  manager: managerReferenceSchema.nullable(),
+  adapterId: nonEmptyString.nullable(),
   agentId: nonEmptyString.nullable(),
   scope: scopeSchema.nullable(),
   location: artifactLocationSchema,
+  contentHash: nonEmptyString.nullable(),
+  modifiedAt: timestamp.nullable(),
   ownership: ownershipSchema,
   protection: protectionStatusSchema,
+  tags: z.array(nonEmptyString),
   metadata: jsonObject,
 });
 
@@ -270,9 +277,15 @@ const systemFindingSchema = z.strictObject({
   classification: z.literal("system-skill"),
   skill: skillDescriptorSchema,
   identity: skillIdentitySchema,
+  source: sourceReferenceSchema.nullable(),
+  plugin: pluginReferenceSchema.nullable(),
+  manager: managerReferenceSchema.nullable(),
+  adapterId: nonEmptyString.nullable(),
   agentId: nonEmptyString,
   scope: scopeSchema.nullable(),
   location: artifactLocationSchema,
+  contentHash: nonEmptyString.nullable(),
+  modifiedAt: timestamp.nullable(),
   ownership: agentRuntimeOwnershipSchema,
   protection: z.strictObject({
     git: gitProtectionSchema,
@@ -282,6 +295,7 @@ const systemFindingSchema = z.strictObject({
     }),
     filesystem: filesystemProtectionSchema,
   }),
+  tags: z.array(nonEmptyString),
   metadata: jsonObject,
 });
 
@@ -297,6 +311,11 @@ export const logicalSkillSchema = z.strictObject({
   installationIds: z.array(modelId).min(1),
 });
 
+const weakIdentityHintSchema = z.strictObject({
+  evidence: weakIdentityEvidenceSchema,
+  installationIds: z.array(modelId).min(2),
+});
+
 export const inventorySchema = z.strictObject({
   schemaVersion: z.literal(1),
   id: modelId,
@@ -304,6 +323,7 @@ export const inventorySchema = z.strictObject({
   installations: z.array(installationSchema),
   otherFindings: z.array(nonInstallationFindingSchema),
   logicalSkills: z.array(logicalSkillSchema),
+  identityHints: z.array(weakIdentityHintSchema),
   dependencies: z.array(dependencySchema),
 });
 
