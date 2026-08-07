@@ -11,6 +11,7 @@ The project is currently in specification and planning. See:
 - [Inventory scanning](./docs/inventory.md)
 - [Adapter runtime](./docs/adapters.md)
 - [Removal planning](./docs/planning.md)
+- [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
 - [Implementation roadmap](./docs/roadmap.md)
 - [Architectural decisions](./docs/adr/)
@@ -38,9 +39,11 @@ npm test
 npm run build
 ```
 
-After building, inspect the executable scaffold with:
+After building, open the interactive inventory or inspect the automation
+interface with:
 
 ```console
+node dist/cli.js
 node dist/cli.js --help
 node dist/cli.js --version
 ```

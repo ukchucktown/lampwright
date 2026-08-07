@@ -628,7 +628,7 @@ describe("the built skill-cleaner executable", () => {
   it("prints help and exits successfully", async () => {
     const output = await runBuiltExecutable("--help");
 
-    expect(output).toContain("Usage:\n  skill-cleaner scan");
+    expect(output).toContain("Usage:\n  skill-cleaner\n  skill-cleaner scan");
     expect(output).toContain("--trust-adapter");
     expect(output).toContain("--version");
   });

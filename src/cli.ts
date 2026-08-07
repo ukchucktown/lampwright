@@ -40,6 +40,7 @@ import {
   createFileAdapterTrustStore,
   defaultLocalStateRoot,
 } from "./state/index.js";
+import { createNodeTuiTerminal, runTui } from "./tui/index.js";
 
 interface PackageMetadata {
   readonly version: string;
@@ -76,6 +77,7 @@ const help = `skill-cleaner ${readPackageMetadata().version}
 Discover and safely remove AI agent skills.
 
 Usage:
+  skill-cleaner
   skill-cleaner scan [--json] [--adapter <path>]
   skill-cleaner remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
   skill-cleaner restore <entry-id> [--dry-run] [--yes] [--json]
@@ -671,8 +673,27 @@ function failure(code: string, message: string, exitCode: number): CliResult {
 }
 
 async function main(): Promise<void> {
-  const result = await runCli(process.argv.slice(2));
-  const json = process.argv.slice(2).includes("--json");
+  const argv = process.argv.slice(2);
+  if (argv.length === 0) {
+    const outcome = await runTui(
+      {
+        scan: async () => (await scanWithContext([], [], {})).inventory,
+        plan,
+        execute: (removalPlan, approvals) =>
+          productionExecute(removalPlan, [], [], [], approvals),
+      },
+      createNodeTuiTerminal(),
+    );
+    if (outcome.status === "failed") {
+      process.stderr.write(`skill-cleaner: ${outcome.message}\n`);
+      process.exitCode = 1;
+    } else if (outcome.status === "completed") {
+      process.exitCode = executionExitCode(outcome.report);
+    } else process.exitCode = 0;
+    return;
+  }
+  const result = await runCli(argv);
+  const json = argv.includes("--json");
   const output = formatCliOutput(result.output, json);
   (json || result.exitCode === 0 ? process.stdout : process.stderr).write(
     output,
