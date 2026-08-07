@@ -469,6 +469,7 @@ async function materializeSkill(input: {
     adapterId: CLAUDE_CODE_PLUGIN_ADAPTER_ID,
     pluginBoundaryId: input.entry.boundaryId,
     agentId,
+    exposedTo: [agentId],
     scope: input.scope,
     location,
     contentHash,

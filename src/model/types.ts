@@ -227,7 +227,20 @@ export interface Installation {
   readonly manager: ManagerReference | null;
   readonly adapterId: string | null;
   readonly pluginBoundaryId: string | null;
+  /** The agent that owns this Installation's lifecycle location. */
   readonly agentId: string;
+  /**
+   * Every agent that can load this Skill at its discovered locations.
+   *
+   * Distinct from `agentId`: a Manager owns the Installation while placing
+   * agent-native copies or links that several agents read. Populated from each
+   * discovery path's declared evidence, never from the shape of a path.
+   *
+   * Empty only when no agent can currently load the Skill, as for a lock-only
+   * record whose artifacts are absent. An active Installation always names at
+   * least one agent.
+   */
+  readonly exposedTo: readonly string[];
   readonly scope: Scope;
   readonly location: ArtifactLocation;
   readonly contentHash: string | null;

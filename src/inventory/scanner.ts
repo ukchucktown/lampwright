@@ -1127,6 +1127,7 @@ function createInstallation(
     pluginBoundaryId:
       root.kind === "plugin" ? pluginBoundaryIdForRoot(root) : null,
     agentId: root.agentId,
+    exposedTo: [root.agentId],
     scope: scopeForInstallationRoot(root),
     location,
     contentHash,

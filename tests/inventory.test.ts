@@ -2861,4 +2861,20 @@ describe("Inventory scan", () => {
       "configured",
     ]);
   });
+  it("exposes a standalone Skill only to the agent whose root holds it", async () => {
+    const environment = await createTestEnvironment();
+    await createSkill(join(environment.home, ".claude", "skills", "solo"), {
+      name: "solo",
+    });
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({});
+
+    expect(inventory.installations[0]).toMatchObject({
+      agentId: "claude-code",
+      exposedTo: ["claude-code"],
+    });
+  });
 });

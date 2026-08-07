@@ -234,6 +234,18 @@ function validateInstallation(
     );
   }
 
+  if (installation.status === "active" && installation.exposedTo.length === 0) {
+    addIssue(
+      issues,
+      [...path, "exposedTo"],
+      "an active installation must name at least one agent that can load it",
+    );
+  }
+
+  if (new Set(installation.exposedTo).size !== installation.exposedTo.length) {
+    addIssue(issues, [...path, "exposedTo"], "exposed agents must be unique");
+  }
+
   if (ownership.kind === "plugin") {
     if (installation.plugin?.id !== ownership.pluginId) {
       addIssue(

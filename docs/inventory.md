@@ -129,6 +129,21 @@ Frontmatter `name`, `description`, and string-array `tags` are normalized.
 Malformed frontmatter leaves the finding visible with fallback metadata and an
 `unresolved` Installation status.
 
+## Agent exposure
+
+`Installation.agentId` names the agent that owns the lifecycle location.
+`exposedTo` names every agent that can actually load the Skill there. They
+differ whenever a Manager owns an Installation while placing agent-native
+copies or links that several agents read: a Vercel-managed Skill reports
+`vercel-skills` as its owner and `claude-code`, `codex`, and `universal` as its
+exposure.
+
+Each discovery path supplies its own declared evidence — a root's declared
+agent, the Manager's resolved agent-native locations, or a Plugin's owning
+agent. Exposure is never derived from the shape of a path. It is empty only
+when nothing can load the Skill, as for a lock-only record whose artifacts are
+absent; an active Installation always names at least one agent.
+
 ## Installation Groups
 
 `Inventory.groups` records Installations that one act of installation put in

@@ -248,6 +248,7 @@ function installationRow(installation: Installation, depth: 0 | 1): TuiRow {
         installation.id,
         installation.adapterId,
         installation.agentId,
+        ...installation.exposedTo,
         installation.location.path,
         installation.location.canonicalPath,
         installation.ownership.kind,
@@ -260,7 +261,8 @@ function installationRow(installation: Installation, depth: 0 | 1): TuiRow {
         ...metadata,
       ]),
       plugin,
-      agent: [installation.agentId],
+      // Filtering by agent means "which agent can load this", not who owns it.
+      agent: compact([installation.agentId, ...installation.exposedTo]),
       scope,
       source,
       manager,

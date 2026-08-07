@@ -335,6 +335,8 @@ async function materializeLockEntry(input: {
     adapterId: VERCEL_SKILLS_ADAPTER_ID,
     pluginBoundaryId: null,
     agentId: managerId,
+    // Every agent whose native location the Manager itself placed.
+    exposedTo: agents,
     scope: input.lock.scope,
     location: primaryLocation,
     contentHash,

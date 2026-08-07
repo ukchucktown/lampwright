@@ -974,4 +974,61 @@ describe("Vercel skills adapter", () => {
     };
     expect(Object.keys(remainingLock.skills)).toEqual(["keep-skill"]);
   });
+  it("records every agent that can load a manager-owned Skill, not the Manager", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const canonical = globalCanonicalPath(environment, "review-tools");
+    await writeSkill(canonical, "review-tools");
+    await createDirectoryLink(
+      canonical,
+      join(environment.homeDirectory, ".claude", "skills", "review-tools"),
+    );
+    await createDirectoryLink(
+      canonical,
+      join(environment.homeDirectory, ".codex", "skills", "review-tools"),
+    );
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        "review-tools": {
+          source: "acme/review-tools",
+          sourceType: "github",
+          skillPath: "skills/review-tools",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+
+    const installation = inventory.installations[0]!;
+    expect(installation.agentId).toBe("vercel-skills");
+    expect([...installation.exposedTo].sort()).toEqual([
+      "claude-code",
+      "codex",
+      "universal",
+    ]);
+  });
+
+  it("leaves a lock-only record exposed to nothing while keeping it visible", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        "absent-tools": {
+          source: "acme/absent-tools",
+          sourceType: "github",
+          skillPath: "skills/absent-tools",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+
+    expect(inventory.installations).toHaveLength(1);
+    expect(inventory.installations[0]).toMatchObject({
+      status: "broken",
+      exposedTo: [],
+    });
+  });
 });

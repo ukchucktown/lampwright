@@ -410,6 +410,7 @@ export const installationSchema = z.strictObject({
   adapterId: nonEmptyString.nullable(),
   pluginBoundaryId: nonEmptyString.nullable(),
   agentId: nonEmptyString,
+  exposedTo: z.array(nonEmptyString),
   scope: scopeSchema,
   location: artifactLocationSchema,
   contentHash: nonEmptyString.nullable(),

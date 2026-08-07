@@ -65,6 +65,7 @@ export function buildInstallation(
     adapterId: "fixture-adapter",
     pluginBoundaryId: null,
     agentId: "fixture-agent",
+    exposedTo: ["fixture-agent"],
     scope: { kind: "user" },
     location: {
       path: "/fixtures/skills/example-skill",

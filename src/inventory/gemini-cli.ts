@@ -327,6 +327,7 @@ export async function scanGeminiCli(
         adapterId: GEMINI_CLI_ADAPTER_ID,
         pluginBoundaryId: extension?.boundaryId ?? null,
         agentId,
+        exposedTo: [agentId],
         scope: entry.scope,
         location,
         contentHash,

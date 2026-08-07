@@ -552,6 +552,7 @@ async function materializeSkill(input: {
     adapterId: CODEX_PLUGIN_ADAPTER_ID,
     pluginBoundaryId: input.boundaryId,
     agentId,
+    exposedTo: [agentId],
     scope: { kind: "user" },
     location: input.skill.location,
     contentHash,
