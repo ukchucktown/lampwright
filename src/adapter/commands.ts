@@ -23,7 +23,12 @@ export function validateCommandSafety(
     if (action.kind === "managed") {
       validateCommandVariant(action.command, sourcePath, `action ${action.id}`);
     } else {
-      validateExecutable(action.runner, sourcePath, `action ${action.id}`);
+      validateExecutable(
+        action.runner,
+        sourcePath,
+        `action ${action.id}`,
+        true,
+      );
       validateArguments(action.arguments, sourcePath, `action ${action.id}`);
     }
   }
@@ -63,8 +68,9 @@ function validateExecutable(
   executable: string,
   sourcePath: string | null,
   context: string,
+  allowPackageRunner = false,
 ): void {
-  const issue = executableSafetyIssue(executable);
+  const issue = executableSafetyIssue(executable, { allowPackageRunner });
   if (issue !== null) {
     unsafe(sourcePath, `${context} ${issue}`);
   }

@@ -70,7 +70,8 @@ checks. It must not reopen an Adapter catalog to recover executable behavior.
 Interface:
 
 ```ts
-execute(plan: RemovalPlan, approvals: Approvals): Promise<ExecutionReport>
+const execution = createExecutionModule(options)
+execution.execute(plan: RemovalPlan, approvals: Approvals): Promise<ExecutionReport>
 ```
 
 The module owns:
@@ -83,6 +84,32 @@ The module owns:
 - Dependency-aware continuation
 - Final rescans and verification
 - Audit reporting
+
+`ExecutionModuleOptions` injects a fresh Inventory scan closure, pure replanner,
+Quarantine module, structured process runner, live Git inspector, package-trust
+store, audit writer, clock, local-state root, and optional concurrency bound.
+The module compares the full freshly replanned value excluding only its
+timestamp. It never reloads an Adapter or reconstructs an Owner command.
+
+Actions expose only approved plan authority. Managed commands run without a
+shell; exact `npx` packages use an isolated temporary working directory and
+cleaner-owned cache. Quarantine provenance is reconstructed from the fresh
+Inventory. Declarative record cleanup verifies the complete file and selected
+record hashes, captures its preimage in Quarantine, and fails closed on links,
+hard links, ambiguous documents, or changes. A bounded dependency scheduler
+continues independent branches and blocks dependents of failed or skipped
+actions.
+
+The final rescan drives concrete verification and any offerable fallback.
+Non-target checks are bound to their authorizing action and skipped unless it
+completed successfully. Managed actions retain the exact declaration evidence
+needed to validate that binding without reloading an Adapter. A post-mutation
+rescan failure is returned and audited as a typed report error; it cannot claim
+verification or fallback. A
+fallback is a new complete `brute-force` plan against the final Inventory, not
+an action hidden inside the managed plan. Audit and exact package-trust state
+are written lazily. See [Execution](./execution.md) and
+[ADR 0005](./adr/0005-treat-owner-processes-as-declared-mutation-boundaries.md).
 
 The external interface does not expose process spawning or filesystem primitives. Those are internal seams with production and test adapters.
 

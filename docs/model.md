@@ -118,7 +118,14 @@ Plugin action is approved.
 
 Verification checks are executable values: target and path absence, exact
 record absence, Owner state, or a structured command with accepted exit codes.
-No verification requires Execution to recover an Adapter definition by ID.
+Every non-target check is bound to the exact action that authorized it. A check
+must match verification evidence retained by its managed action, an exact
+remove-path effect, a Quarantine location, or a record-cleanup selector. It is
+skipped when that action did not complete successfully. Record cleanup
+checks also carry the removed record's exact hash so array index compaction
+cannot make an unrelated shifted record fail verification, while a changed
+object property still fails. No verification
+requires Execution to recover an Adapter definition by ID.
 
 Ephemeral package execution accepts exact Semantic Version values, including
 prerelease and build metadata. The v1 runner is the closed `npx` strategy and
@@ -126,11 +133,24 @@ package names must be valid exact npm package identifiers. Alternate runners,
 mutable tags, embedded versions, and version ranges are rejected at the model
 boundary before package trust can be approved. Package approval repeats the
 exact runner, package, version, and Adapter hash tuple.
+Generic direct commands and command verifications reject known package-runner
+executables, including Windows launcher suffixes, so they cannot bypass this
+typed route.
 
-`ExecutionReport` records action, target, and verification outcomes. Result IDs
-must be unique, completion timestamps cannot precede start timestamps, and the
-top-level status must agree with the contained failures, blocks, or incomplete
-outcomes.
+`ExecutionApprovals.grants` contains exact approval values and rejects duplicate
+grants. Force, Adapter trust, and package trust are separate variants, so force
+cannot be interpreted as new trust.
+
+`ExecutionReport` records action, target, and verification outcomes. It keeps
+the planned `inventoryId`, a nullable final rescan `finalInventoryId`, a typed
+`rescanError`, and complete offerable `fallbackPlans`. A failed post-mutation
+rescan is reported and audited rather than thrown, and cannot claim verification
+or fallback. Every fallback must use the final Inventory and a separately
+confirmed `brute-force` intent. Result IDs must be unique, completion timestamps
+cannot precede start timestamps, and the top-level status must agree with the
+contained failures, blocks, or incomplete outcomes. Target outcomes include an
+explicit `failed` state. A blocked action may name a prior failed, blocked, or
+skipped prerequisite.
 
 ## Deterministic JSON
 

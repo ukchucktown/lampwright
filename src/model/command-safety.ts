@@ -50,6 +50,9 @@ const commandDispatchers = new Set([
   "xargs.exe",
 ]);
 
+const packageRunners = new Set(["bunx", "npm", "npx", "pnpm", "pnpx", "yarn"]);
+const windowsExecutableSuffix = /\.(?:bat|cmd|com|exe|ps1)$/i;
+
 const shellControlTokens = new Set([
   "&",
   "&&",
@@ -68,7 +71,10 @@ const shellControlTokens = new Set([
 const interpolationPattern =
   /`|\$\(|\$\{|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|![A-Za-z_][A-Za-z0-9_]*!/;
 
-export function executableSafetyIssue(executable: string): string | null {
+export function executableSafetyIssue(
+  executable: string,
+  options: { readonly allowPackageRunner?: boolean } = {},
+): string | null {
   if (containsUnsafeCharacters(executable)) {
     return "executable contains shell interpolation";
   }
@@ -88,17 +94,27 @@ export function executableSafetyIssue(executable: string): string | null {
   }
 
   const executableName = executable.replaceAll("\\", "/").split("/").at(-1);
+  const normalizedExecutableName = executableName?.toLowerCase();
   if (
     executableName !== undefined &&
-    shells.has(executableName.toLowerCase())
+    shells.has(normalizedExecutableName ?? "")
   ) {
     return "cannot invoke a shell executable";
   }
   if (
     executableName !== undefined &&
-    commandDispatchers.has(executableName.toLowerCase())
+    commandDispatchers.has(normalizedExecutableName ?? "")
   ) {
     return "cannot invoke a command dispatcher";
+  }
+  if (
+    options.allowPackageRunner !== true &&
+    normalizedExecutableName !== undefined &&
+    packageRunners.has(
+      normalizedExecutableName.replace(windowsExecutableSuffix, ""),
+    )
+  ) {
+    return "package runners require exact ephemeral package execution";
   }
   return null;
 }

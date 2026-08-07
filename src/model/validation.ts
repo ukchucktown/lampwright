@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   executionReportSchema,
+  executionApprovalsSchema,
   installationSchema,
   inventorySchema,
   logicalSkillSchema,
@@ -13,6 +14,7 @@ import { physicalPathKey } from "./paths.js";
 import type {
   ApprovalRequirement,
   ExecutionReport,
+  ExecutionApprovals,
   Installation,
   Inventory,
   InventoryRecordReference,
@@ -25,8 +27,25 @@ import type {
   RemovalPlan,
   RemovalTarget,
   StrongIdentityEvidence,
+  VerificationCheck,
   WeakIdentityEvidence,
 } from "./types.js";
+
+function approvalKey(approval: ApprovalRequirement): string {
+  return stringifyModel(approval, 0);
+}
+
+export function parseExecutionApprovals(input: unknown): ExecutionApprovals {
+  const approvals = parseSchema<ExecutionApprovals>(
+    executionApprovalsSchema,
+    input,
+  );
+  const issues: MutableIssue[] = [];
+  duplicateIndexes(approvals.grants, approvalKey).forEach((index) => {
+    addIssue(issues, ["grants", index], "duplicate execution approval");
+  });
+  return finish(approvals, issues);
+}
 
 export interface ModelValidationIssue {
   readonly path: readonly (number | string)[];
@@ -1100,6 +1119,15 @@ function validateAction(
         );
       },
     );
+    duplicateIndexes(action.verifications, (verification) =>
+      stringifyModel(verification, 0),
+    ).forEach((index) => {
+      addIssue(
+        issues,
+        [...path, "verifications", index],
+        "duplicate managed verification",
+      );
+    });
     action.effects.forEach((effect, index) => {
       if (
         effect.protection.git.kind === "protected" ||
@@ -1246,10 +1274,12 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
 
   const targetKeys = new Set(plan.targets.map(targetKey));
   const actionsByTarget = new Map<string, RemovalAction[]>();
+  const actionsById = new Map<string, RemovalAction>();
   const priorActionIds = new Set<string>();
   plan.actions.forEach((action, index) => {
     validateAction(action, index, priorActionIds, targetKeys, issues);
     priorActionIds.add(action.id);
+    actionsById.set(action.id, action);
     for (const target of actionTargets(action)) {
       const key = targetKey(target);
       actionsByTarget.set(key, [...(actionsByTarget.get(key) ?? []), action]);
@@ -1299,6 +1329,25 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
       );
     }
     if (
+      check.kind !== "target-unavailable" &&
+      !priorActionIds.has(check.actionId)
+    ) {
+      addIssue(
+        issues,
+        ["verificationChecks", index, "actionId"],
+        "verification action does not exist in the plan",
+      );
+    } else if (check.kind !== "target-unavailable") {
+      const action = actionsById.get(check.actionId);
+      if (action !== undefined && !verificationBelongsToAction(check, action)) {
+        addIssue(
+          issues,
+          ["verificationChecks", index, "actionId"],
+          "verification check is not authorized by its owning action",
+        );
+      }
+    }
+    if (
       check.kind === "command-succeeds" &&
       new Set(check.successExitCodes).size !== check.successExitCodes.length
     ) {
@@ -1311,6 +1360,72 @@ export function parseRemovalPlan(input: unknown): RemovalPlan {
   });
 
   return finish(plan, issues);
+}
+
+function verificationBelongsToAction(
+  check: Exclude<VerificationCheck, { kind: "target-unavailable" }>,
+  action: RemovalAction,
+): boolean {
+  if (action.kind === "quarantine") {
+    return check.kind === "path-absent" && check.path === action.location.path;
+  }
+  if (action.kind === "record-cleanup") {
+    return (
+      check.kind === "record-absent" &&
+      check.path === action.location.path &&
+      check.format === action.format &&
+      action.records.some(
+        (record) =>
+          record.recordPointer === check.recordPointer &&
+          stringifyModel(record.expectedRecordHash, 0) ===
+            stringifyModel(check.expectedRecordHash, 0),
+      )
+    );
+  }
+
+  switch (check.kind) {
+    case "path-absent":
+      return (
+        action.effects.some(
+          (effect) =>
+            effect.kind === "remove-path" && effect.path === check.path,
+        ) ||
+        action.verifications.some(
+          (verification) =>
+            verification.kind === "path-absent" &&
+            verification.path === check.path,
+        )
+      );
+    case "record-absent":
+      return (
+        check.expectedRecordHash === null &&
+        action.verifications.some(
+          (verification) =>
+            verification.kind === "record-absent" &&
+            verification.path === check.path &&
+            verification.format === check.format &&
+            verification.recordPointer === check.recordPointer,
+        )
+      );
+    case "owner-state-absent":
+      return (
+        stringifyModel(check.owner, 0) === stringifyModel(action.owner, 0) &&
+        action.verifications.some(
+          (verification) =>
+            verification.kind === "owner-state-absent" &&
+            verification.externalId === check.externalId,
+        )
+      );
+    case "command-succeeds":
+      return action.verifications.some(
+        (verification) =>
+          verification.kind === "command-succeeds" &&
+          stringifyModel(verification.command, 0) ===
+            stringifyModel(check.command, 0) &&
+          stringifyModel(verification.successExitCodes, 0) ===
+            stringifyModel(check.successExitCodes, 0),
+      );
+  }
 }
 
 function validateCompletedAfterStarted(
@@ -1330,7 +1445,9 @@ function validateExecutionStatus(
 ): void {
   const failed =
     report.actionResults.some((result) => result.status === "failed") ||
-    report.verificationResults.some((result) => result.status === "failed");
+    report.verificationResults.some((result) => result.status === "failed") ||
+    report.targetResults.some((result) => result.status === "failed") ||
+    report.rescanError !== null;
   const blocked =
     report.actionResults.some((result) => result.status === "blocked") ||
     report.targetResults.some((result) => result.status === "blocked");
@@ -1401,6 +1518,20 @@ export function parseExecutionReport(input: unknown): ExecutionReport {
     ["completedAt"],
     issues,
   );
+  if ((report.finalInventoryId === null) !== (report.rescanError !== null)) {
+    addIssue(
+      issues,
+      ["finalInventoryId"],
+      "final Inventory ID and rescan error must describe one rescan outcome",
+    );
+  }
+  if (report.rescanError !== null && report.verificationResults.length > 0) {
+    addIssue(
+      issues,
+      ["verificationResults"],
+      "a failed final rescan cannot claim verification results",
+    );
+  }
   report.actionResults.forEach((result, index) => {
     validateCompletedAfterStarted(
       result.startedAt,
@@ -1443,12 +1574,13 @@ export function parseExecutionReport(input: unknown): ExecutionReport {
         addIssue(issues, path, "blocking action result must appear earlier");
       } else if (
         blocking.result.status !== "failed" &&
-        blocking.result.status !== "blocked"
+        blocking.result.status !== "blocked" &&
+        blocking.result.status !== "skipped"
       ) {
         addIssue(
           issues,
           path,
-          "blocking action must have failed or been blocked",
+          "blocking action must have failed, been blocked, or been skipped",
         );
       }
     });
@@ -1473,6 +1605,76 @@ export function parseExecutionReport(input: unknown): ExecutionReport {
     });
   });
   validateExecutionStatus(report, issues);
+
+  report.fallbackPlans.forEach((fallbackPlan, index) => {
+    try {
+      parseRemovalPlan(fallbackPlan);
+    } catch (error: unknown) {
+      if (error instanceof ModelValidationError) {
+        for (const issue of error.issues) {
+          addIssue(
+            issues,
+            ["fallbackPlans", index, ...issue.path],
+            issue.message,
+          );
+        }
+      } else {
+        throw error;
+      }
+    }
+    if (
+      report.finalInventoryId === null ||
+      fallbackPlan.inventoryId !== report.finalInventoryId
+    ) {
+      addIssue(
+        issues,
+        ["fallbackPlans", index, "inventoryId"],
+        "fallback plan must be built from the final Inventory",
+      );
+    }
+    if (fallbackPlan.intent.mode !== "brute-force") {
+      addIssue(
+        issues,
+        ["fallbackPlans", index, "intent", "mode"],
+        "fallback offer must be a separately confirmed brute-force plan",
+      );
+    }
+    if (fallbackPlan.actions.length === 0) {
+      addIssue(
+        issues,
+        ["fallbackPlans", index, "actions"],
+        "fallback offer must contain an executable action",
+      );
+    }
+    const reportTargets = new Set(
+      report.targetResults.map((result) => targetKey(result.target)),
+    );
+    fallbackPlan.targets.forEach((target, targetIndex) => {
+      if (!reportTargets.has(targetKey(target))) {
+        addIssue(
+          issues,
+          ["fallbackPlans", index, "targets", targetIndex],
+          "fallback target is not an execution target",
+        );
+      }
+    });
+  });
+  duplicateIndexes(report.fallbackPlans, (fallbackPlan) =>
+    stringifyModel(fallbackPlan.targets, 0),
+  ).forEach((index) => {
+    addIssue(issues, ["fallbackPlans", index], "duplicate fallback offer");
+  });
+  if (
+    report.fallbackPlans.length > 0 &&
+    report.status !== "failed" &&
+    report.status !== "partial"
+  ) {
+    addIssue(
+      issues,
+      ["fallbackPlans"],
+      "fallback offers require a failed or partial execution",
+    );
+  }
 
   return finish(report, issues);
 }
