@@ -58,12 +58,22 @@ different filesystem-owned Installation.
 
 Managed operations disclose a complete invocation plus expected remove-path and
 modify-path effects with Inventory-time protection evidence. Direct invocation
-uses an executable and argument array. Ephemeral invocation is a separate
+uses an executable and argument array and may pin an absolute working directory
+or request a fresh isolated temporary directory. Ephemeral invocation is a separate
 package-runner value containing an exact package tuple and only package
 arguments; it is not an arbitrary runner command. Protected effects block the
 entire target even with force. Successful remove-path effects receive
 path-absent verification; modify-path effects are disclosed but are not
 incorrectly verified as absent.
+
+Brute-force planning treats every present primary Installation location and
+every `supplementalArtifacts` entry as one removal unit. A stale manager record
+may mark its expected primary path absent and proceed directly to exact record
+cleanup. Planning checks every artifact's Git,
+System Skill, and filesystem protection before creating actions, and emits one
+Quarantine action per distinct physical artifact before the shared declarative
+record cleanup. This lets an adapter remove all known copies and links without
+duplicating them as false independent Installations.
 
 Declarative record cleanup includes its format, fully resolved RFC 6901 record
 pointer, expected file and record SHA-256 digests, Adapter provenance, and

@@ -356,6 +356,10 @@ export type ManagedRemovalInvocation =
   | {
       readonly kind: "direct";
       readonly command: ExecutableCommand;
+      readonly workingDirectory?:
+        | { readonly kind: "exact"; readonly path: string }
+        | { readonly kind: "isolated-temporary" }
+        | null;
     }
   | {
       readonly kind: "ephemeral-package";
@@ -431,9 +435,16 @@ export interface DeclarativeRecordCleanup {
   readonly protection: ProtectionStatus;
 }
 
+export interface SupplementalRemovalArtifact {
+  readonly location: ArtifactLocation;
+  readonly protection: ProtectionStatus;
+}
+
 export interface RemovalEvidence {
   readonly managed: ManagedRemovalEvidence | null;
   readonly fallback: FallbackAvailability;
+  readonly primaryArtifactPresent?: boolean;
+  readonly supplementalArtifacts?: readonly SupplementalRemovalArtifact[];
   readonly recordCleanups: readonly DeclarativeRecordCleanup[];
 }
 

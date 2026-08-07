@@ -66,6 +66,14 @@ declarative record cleanup with exact document selectors and hashes. Managed
 operations also carry protected expected remove-path and modify-path effects
 and concrete Adapter verification rules. Inventory materializes these facts;
 Planning never interprets Adapter templates or probes the machine.
+`supplementalArtifacts` records additional exact paths owned by the same
+Installation, such as manager-created agent links or copied installations.
+Each carries its own protection evidence and is quarantined alongside the
+primary location only in an explicitly confirmed brute-force plan.
+`primaryArtifactPresent: false` distinguishes a manager record whose expected
+primary path is already absent. It is valid only with exact record-cleanup
+evidence, allowing a stale lock record to be cleaned without inventing a
+Quarantine source.
 
 An Installation owned by a Plugin carries a scan-unique `pluginBoundaryId`.
 `PluginBoundary.id` is that physical ownership identity, while
@@ -99,7 +107,8 @@ Actions identify the Installation IDs they affect even when their selected
 target is a Logical Skill or Plugin; Plugin collateral actions may explicitly
 use an empty affected-Installation list. Managed actions disclose their
 resolved invocation and protected expected effects. Direct invocations are
-structured executable/argument arrays. Ephemeral invocation remains a distinct
+structured executable/argument arrays and may carry an exact absolute working
+directory or request a fresh isolated temporary working directory. Ephemeral invocation remains a distinct
 exact package-runner envelope with package arguments. Record-cleanup actions
 carry a document format, fully resolved RFC 6901 pointer, expected file and
 record SHA-256 digests, Adapter provenance, and protection. All pointers for

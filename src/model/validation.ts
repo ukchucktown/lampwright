@@ -10,7 +10,7 @@ import {
   removalPlanSchema,
 } from "./schemas.js";
 import { stringifyModel } from "./json.js";
-import { physicalPathKey } from "./paths.js";
+import { artifactPathKey, physicalPathKey } from "./paths.js";
 import type {
   ApprovalRequirement,
   ExecutionReport,
@@ -293,6 +293,33 @@ function validateInstallation(
     );
   }
 
+  (installation.removal.supplementalArtifacts ?? []).forEach(
+    (artifact, index) => {
+      if (
+        artifactPathKey(artifact.location) ===
+        artifactPathKey(installation.location)
+      ) {
+        addIssue(
+          issues,
+          [...path, "removal", "supplementalArtifacts", index, "location"],
+          "supplemental removal artifact duplicates the primary location",
+        );
+      }
+    },
+  );
+
+  if (
+    installation.removal.primaryArtifactPresent === false &&
+    installation.removal.fallback.kind === "available" &&
+    installation.removal.recordCleanups.length === 0
+  ) {
+    addIssue(
+      issues,
+      [...path, "removal", "primaryArtifactPresent"],
+      "an absent primary artifact requires exact record cleanup evidence",
+    );
+  }
+
   validateRemovalEvidence(
     installation.removal,
     ownership,
@@ -368,6 +395,15 @@ function validateRemovalEvidence(
     });
   }
 
+  duplicateIndexes(removal.supplementalArtifacts ?? [], (artifact) =>
+    artifactPathKey(artifact.location),
+  ).forEach((index) => {
+    addIssue(
+      issues,
+      [...path, "supplementalArtifacts", index, "location"],
+      "duplicate supplemental removal artifact",
+    );
+  });
   duplicateIndexes(removal.recordCleanups, (cleanup) => cleanup.id).forEach(
     (index) => {
       addIssue(

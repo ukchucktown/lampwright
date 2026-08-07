@@ -6,7 +6,13 @@ operation only after a fresh plan confirms every declared remove-path and
 modify-path effect remains outside Git and System Skill protection. Ephemeral
 `npx` acquisition runs from cleaner-owned local state with an isolated npm
 cache, never from the user's project, and uses the exact approved package
-version.
+version. Direct and ephemeral Owner invocations receive cleaner-owned
+`DO_NOT_TRACK=1` and `DISABLE_TELEMETRY=1` values so supported managers do not
+transmit removal metadata; Adapters cannot supply or override process
+environment values.
+When an Owner's current-directory detection could expand the operation beyond
+declared effects, the invocation runs from a fresh temporary directory instead
+of the user's project.
 
 Node.js does not expose a filesystem sandbox that can confine an arbitrary
 child process portably across macOS, Linux, and Windows. Operating-system

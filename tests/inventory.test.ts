@@ -912,5 +912,20 @@ describe("Inventory scan", () => {
       code: "invalid-request",
       message: "inventory scanner clock returned an invalid date",
     });
+
+    await expect(
+      createInventoryScanner({
+        now: () => fixedTime,
+        environment: {
+          ...unusedDefaultEnvironment(environment),
+          stateDirectory: "relative-state",
+        },
+        commandRunner: unavailableCommandRunner,
+      }).scan({ roots: [] }),
+    ).rejects.toMatchObject({
+      code: "invalid-request",
+      message:
+        "inventory scanner requires absolute configured environment directories",
+    });
   });
 });

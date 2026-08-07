@@ -44,16 +44,28 @@ Owner processes are the declared mutation boundary described by
 Commands are always structured executable/argument values and the production
 runner sets `shell: false`. Exact-version `npx` runs from a fresh operating
 system temporary directory with a cleaner-owned npm cache, so acquisition does
-not operate from or add dependencies to the user's project. Generic direct and
-verification commands reject `npx`, `npm`, `yarn`, `pnpm`, and `bunx` names,
-including case-insensitive Windows launcher suffixes, so a package runner cannot
-bypass the exact ephemeral-package trust path.
+not operate from or add dependencies to the user's project. Every direct and
+ephemeral Owner invocation receives cleaner-owned `DO_NOT_TRACK=1` and
+`DISABLE_TELEMETRY=1` environment values; Adapters cannot override them.
+Generic direct and verification commands reject `npx`, `npm`, `yarn`, `pnpm`,
+`pnpx`, and `bunx` names, including case-insensitive Windows launcher suffixes,
+so a package runner cannot bypass the exact ephemeral-package trust path.
+When a direct invocation declares an exact working directory, Execution passes
+that directory to the structured process runner. A direct invocation may
+instead request a fresh operating-system temporary directory, which Execution
+removes afterward. Both choices are part of the approved plan and freshness
+comparison; neither is inferred from Execution's own process directory.
+Ephemeral packages likewise run only from a fresh cleaner-owned temporary
+directory.
 
 ## Scheduling and fallback
 
 The bounded scheduler starts only actions whose `dependsOn` results are
 complete. Independent ready actions may run concurrently. A failed, blocked,
 or unapproved action blocks its dependents while other branches continue.
+Ready managed actions declaring the same `modify-path` resource are serialized
+without turning that resource constraint into a failure dependency; this
+prevents concurrent Owner processes from losing updates to a shared manifest.
 Managed failure never dispatches Quarantine or record cleanup from the same
 plan. After the final rescan, Execution asks Planning for a new `brute-force`
 plan only when the failed action advertised fallback availability and the live

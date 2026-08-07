@@ -195,7 +195,21 @@ describe("Execution", () => {
     const target = installationTarget("installation-1");
     const removalPlan = planWithActions(
       [target],
-      [managedAction("action-1", target)],
+      [
+        managedAction("action-1", target, {
+          invocation: {
+            kind: "direct",
+            command: {
+              executable: "fixture-manager",
+              arguments: ["remove", "action-1"],
+            },
+            workingDirectory: {
+              kind: "exact",
+              path: "/fixtures/project",
+            },
+          },
+        }),
+      ],
     );
     const run = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const options = harness({
@@ -211,6 +225,11 @@ describe("Execution", () => {
       command: {
         executable: "fixture-manager",
         arguments: ["remove", "action-1"],
+      },
+      cwd: "/fixtures/project",
+      environment: {
+        DISABLE_TELEMETRY: "1",
+        DO_NOT_TRACK: "1",
       },
     });
     expect(report).toMatchObject({
@@ -346,6 +365,8 @@ describe("Execution", () => {
       },
       cwd: expect.stringContaining("skill-cleaner-execution-"),
       environment: expect.objectContaining({
+        DISABLE_TELEMETRY: "1",
+        DO_NOT_TRACK: "1",
         npm_config_cache: join(root, "execution", "v1", "npm-cache"),
         npm_config_global: "false",
       }),

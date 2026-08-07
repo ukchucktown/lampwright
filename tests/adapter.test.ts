@@ -197,20 +197,39 @@ describe("Adapter loading", () => {
     const second = await loadAdapters(request);
 
     expect(first).toEqual(second);
-    expect(first.adapters).toHaveLength(1);
-    expect(first.adapters[0]).toMatchObject({
+    expect(first.adapters).toHaveLength(2);
+    const fixtureAdapter = first.adapters.find(
+      (adapter) => adapter.id === "fixture.read-only",
+    );
+    const vercelAdapter = first.adapters.find(
+      (adapter) => adapter.id === "vercel.skills",
+    );
+    expect(fixtureAdapter).toMatchObject({
       id: "fixture.read-only",
       trust: { kind: "read-only" },
       commandCapable: false,
     });
-    expect(first.adapters[0]?.platforms).toEqual(["darwin", "linux", "win32"]);
-    expect(first.adapters[0]?.roots[0]?.path).toBe(
+    expect(fixtureAdapter?.platforms).toEqual(["darwin", "linux", "win32"]);
+    expect(fixtureAdapter?.roots[0]?.path).toBe(
       join(environment.home, ".fixture-agent", "skills"),
     );
+    expect(vercelAdapter).toMatchObject({
+      id: "vercel.skills",
+      trust: { kind: "built-in" },
+      commandCapable: true,
+    });
+    expect(
+      vercelAdapter?.actions.find(
+        (action) => action.id === "remove-global-ephemeral",
+      ),
+    ).toMatchObject({
+      runner: "npx",
+      packageName: "skills",
+      packageVersion: "1.5.22",
+      mayDownload: true,
+    });
     expect(Object.isFrozen(first)).toBe(true);
-    expect(Object.isFrozen(first.adapters[0]?.manifests[0]?.metadata)).toBe(
-      true,
-    );
+    expect(Object.isFrozen(fixtureAdapter?.manifests[0]?.metadata)).toBe(true);
     expect(
       await Promise.all(
         [environment.config, environment.state, environment.cache].map((path) =>

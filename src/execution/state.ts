@@ -122,6 +122,19 @@ export async function prepareEphemeralExecutionState(
   };
 }
 
+export async function prepareIsolatedExecutionWorkingDirectory(): Promise<{
+  readonly cwd: string;
+  cleanup(): Promise<void>;
+}> {
+  const cwd = await mkdtemp(join(tmpdir(), "skill-cleaner-owner-"));
+  return {
+    cwd,
+    async cleanup() {
+      await rm(cwd, { recursive: true, force: true });
+    },
+  };
+}
+
 function sameValues(
   left: readonly unknown[],
   right: readonly unknown[],

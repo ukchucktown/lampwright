@@ -509,6 +509,41 @@ describe("core model boundary validation", () => {
     ).toThrow(/duplicate managed removal effect path/);
   });
 
+  it("requires direct Owner working directories to be absolute", () => {
+    const installation = buildInstallation();
+    expect(() =>
+      parseInstallation({
+        ...installation,
+        adapterId: "fixture-adapter",
+        manager: { id: "fixture-manager" },
+        ownership: {
+          kind: "manager",
+          managerId: "fixture-manager",
+          confidence: "declared",
+        },
+        removal: {
+          ...installation.removal,
+          managed: {
+            adapterId: "fixture-adapter",
+            operationId: "remove",
+            availability: { kind: "available" },
+            trust: { kind: "trusted" },
+            externalId: "fixture-skill",
+            invocation: {
+              ...directInvocation,
+              workingDirectory: {
+                kind: "exact",
+                path: "relative/project",
+              },
+            },
+            effects: [],
+            verifications: [],
+          },
+        },
+      }),
+    ).toThrow(/absolute filesystem path/);
+  });
+
   it("requires plugin-owned installations to have one consistent boundary", () => {
     const child = buildInstallation({
       classification: "managed-plugin-resource",
