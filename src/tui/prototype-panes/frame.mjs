@@ -35,8 +35,8 @@ function fit(text, n) {
   return characters.slice(0, Math.max(0, n - 1)).join("") + "…";
 }
 
-/** Rows above the panes: title, filter, top rule. */
-const PANE_TOP = 3;
+/** Rows above the panes: title, hints, filter, top rule. */
+const PANE_TOP = 4;
 
 function scrollMark(pane, row) {
   if (pane.total <= pane.height) return " ";
@@ -98,21 +98,35 @@ function skillLine(state, view, section, row, rightWidth) {
 
   const index = view.skills.offset + row - 1;
   const focused = index === state.skillIndex && state.focus === "skills";
-  const box = state.selected.includes(entry.key) ? "[x]" : "[ ]";
+  // An empty checkbox on a row that refuses selection is a lie.
+  const box =
+    section !== null && !section.selectable
+      ? " - "
+      : state.selected.includes(entry.key)
+        ? "[x]"
+        : "[ ]";
   const paths = entry.paths.length > 1 ? `${entry.paths.length}p` : "  ";
   const shared = section === null ? null : sharedExposure(section);
   const differs = shared === null || entry.exposedTo.join(" ") !== shared;
-  // Columns are responsive: a fixed name width overflows a narrow pane, and the
-  // overflow lands past the terminal edge where it wraps and shifts the frame.
-  const nameWidth = Math.max(6, Math.min(30, rightWidth - 12));
-  const headWidth = nameWidth + 5;
+  // Descriptions live in the detail pane, where there is room to read them.
+  // A row carries identity only: name, whether its exposure departs from the
+  // section's, and how many physical paths it has.
   const endWidth = 3;
+  const nameWidth = Math.max(6, Math.min(44, rightWidth - endWidth - 22));
+  const headWidth = nameWidth + 5;
   const tailWidth = Math.max(0, rightWidth - headWidth - endWidth);
   const head = `${box} ${fit(entry.name, nameWidth)} `;
-  const tail = fit(
-    differs ? entry.exposedTo.join(" ") : entry.description,
-    tailWidth,
-  );
+  // The column earns its width only when there is something unusual to say.
+  const note = differs
+    ? entry.exposedTo.join(" ")
+    : entry.protectedSkill
+      ? "protected"
+      : entry.pluginOwned
+        ? "plugin-owned"
+        : entry.spansGroups
+          ? "spans groups"
+          : "";
+  const tail = fit(note, tailWidth);
   const end = fit(` ${paths}`, endWidth);
 
   if (focused)
@@ -120,9 +134,26 @@ function skillLine(state, view, section, row, rightWidth) {
   // Style the tail separately so a truncated description dims like a short one.
   return [
     { text: fit(head, headWidth), style: PLAIN },
-    { text: tail, style: differs ? PLAIN : D },
+    { text: tail, style: D },
     { text: end, style: PLAIN },
   ];
+}
+
+/** Greedy word wrap, so a long description reads instead of being cut off. */
+function wrap(text, width) {
+  if (!text || width <= 0) return [];
+  const lines = [];
+  let line = "";
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    if (line === "") line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines;
 }
 
 function paint(segments) {
@@ -145,6 +176,14 @@ export function renderLines(state) {
       D("prototype") +
       "  " +
       (selected > 0 ? ACCENT(`${selected} selected`) : D("nothing selected")),
+  );
+  out.push(
+    D(
+      fit(
+        "arrows move · click/wheel/drag · space select · S section · ^a clear · enter review · esc back · ^c quit",
+        usable,
+      ),
+    ),
   );
   out.push(
     state.query === ""
@@ -182,15 +221,15 @@ export function renderLines(state) {
       style: D,
     });
   } else if (skill) {
-    detail.push({ text: skill.name, style: B });
     detail.push({
-      text: `  ${skill.owner} · ${skill.bundle}${skill.spansGroups ? " · SPANS GROUPS" : ""}`,
-      style: D,
+      text: `${skill.name}   ${skill.owner} · ${skill.bundle}${skill.spansGroups ? " · SPANS GROUPS" : ""}`,
+      style: B,
     });
-    if (skill.description)
-      detail.push({ text: `  ${skill.description}`, style: D });
+    for (const line of wrap(skill.description, usable - 2))
+      detail.push({ text: `  ${line}`, style: PLAIN });
+    if (skill.paths.length > 0) detail.push({ text: "", style: PLAIN });
     for (const path of skill.paths)
-      detail.push({ text: `  ${path}`, style: PLAIN });
+      detail.push({ text: `  ${path}`, style: D });
   }
   for (let row = 0; row < detailRows; row += 1) {
     const entry = detail[row];
@@ -201,14 +240,6 @@ export function renderLines(state) {
     );
   }
 
-  out.push(
-    D(
-      fit(
-        "arrows move · click/wheel/drag · space select · S section · ^a clear · enter review · esc back · ^c quit",
-        usable,
-      ),
-    ),
-  );
   out.push(
     state.notice
       ? ACCENT(fit(`! ${state.notice}`, usable))

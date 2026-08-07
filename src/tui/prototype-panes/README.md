@@ -37,6 +37,11 @@ reflows.
 
 ## Layout
 
+Key hints sit at the top, above the panes. Skill rows carry identity only —
+name, path count, and a note when something is unusual (exposure departing from
+the section's, protected, plugin-owned, spanning groups). Descriptions are too
+long to read in a row, so they live in the detail pane below, word-wrapped.
+
 The frame is a fixed grid, Yazi-style. Panes never grow to fit their contents:
 each owns a viewport that scrolls under a stationary border, so the detail area
 below never moves. Paging steps by exactly one viewport rather than jumping to
