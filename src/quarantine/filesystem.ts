@@ -21,6 +21,28 @@ import type {
   QuarantineLink,
 } from "./types.js";
 
+interface SyncFileHandle {
+  sync(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export type OpenSyncFile = (
+  path: string,
+  flags: "r" | "r+",
+) => Promise<SyncFileHandle>;
+
+export async function syncRegularFile(
+  path: string,
+  openFile: OpenSyncFile = open,
+): Promise<void> {
+  const handle = await openFile(path, "r+");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 export const nodeQuarantineFileSystem: QuarantineFileSystem = {
   async lstat(path): Promise<QuarantineFileStats> {
     const stats = await lstat(path);
@@ -80,12 +102,7 @@ export const nodeQuarantineFileSystem: QuarantineFileSystem = {
     await symlink(target, path, type);
   },
   async syncFile(path) {
-    const handle = await open(path, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    await syncRegularFile(path);
   },
   async syncDirectory(path) {
     if (process.platform === "win32") {

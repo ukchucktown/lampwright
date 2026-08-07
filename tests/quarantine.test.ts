@@ -30,10 +30,38 @@ import {
   type RemovalActionId,
   type Sha256Digest,
 } from "../src/index.js";
+import { syncRegularFile } from "../src/quarantine/filesystem.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
 const createTestEnvironment = createIsolatedTestEnvironmentFixture();
 const retentionMilliseconds = 30 * 24 * 60 * 60 * 1000;
+
+it("opens regular files with write access before syncing for Windows", async () => {
+  let openedWith: "r" | "r+" | undefined;
+  let synced = false;
+  let closed = false;
+
+  await syncRegularFile("C:\\state\\manifest.json", async (_path, flags) => {
+    openedWith = flags;
+    if (flags === "r") {
+      throw Object.assign(new Error("operation not permitted, fsync"), {
+        code: "EPERM",
+      });
+    }
+    return {
+      async sync() {
+        synced = true;
+      },
+      async close() {
+        closed = true;
+      },
+    };
+  });
+
+  expect(openedWith).toBe("r+");
+  expect(synced).toBe(true);
+  expect(closed).toBe(true);
+});
 
 function createHarness(
   stateRoot: string,
