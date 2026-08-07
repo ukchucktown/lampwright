@@ -1,4 +1,8 @@
-export { createInventoryScanner, scan } from "./scanner.js";
+export {
+  createInventoryScanner,
+  defaultInventoryScanEnvironment,
+  scan,
+} from "./scanner.js";
 export { InventoryScanError } from "./types.js";
 export type {
   DiscoveryRoot,

@@ -14,7 +14,10 @@ import {
   systemExecutionProcessRunner,
 } from "./execution/index.js";
 import { inspectGitProtection } from "./inventory/git-protection.js";
-import { createInventoryScanner } from "./inventory/index.js";
+import {
+  createInventoryScanner,
+  defaultInventoryScanEnvironment,
+} from "./inventory/index.js";
 import { systemCommandRunner } from "./inventory/process.js";
 import { stringifyModel } from "./model/json.js";
 import type {
@@ -506,14 +509,7 @@ async function scanWithContext(
   }
   const inventory = await createInventoryScanner({
     now: () => new Date(),
-    environment: {
-      homeDirectory: home,
-      workspaceDirectory: workspace,
-      configDirectory: process.env.XDG_CONFIG_HOME || join(home, ".config"),
-      stateDirectory:
-        process.env.XDG_STATE_HOME || join(home, ".local", "state"),
-      nodeVersion: process.versions.node,
-    },
+    environment: defaultInventoryScanEnvironment(),
     commandRunner: systemCommandRunner,
     adapterCatalog: catalog,
   }).scan({});

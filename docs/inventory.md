@@ -117,9 +117,13 @@ state, cache, quarantine, or temporary files.
 
 When either `<workspace>/skills-lock.json` or the global Vercel lock exists,
 Inventory reads the regular JSON file and reconciles every lock key against
-the bounded path registry pinned to `skills@1.5.22`. The global lock is
-`$XDG_STATE_HOME/skills/.skill-lock.json` when a state directory is supplied,
-and `~/.agents/.skill-lock.json` otherwise. Global and project canonical
+the bounded path registry pinned to `skills@1.5.22`. There is exactly one
+global lock location, resolved as the manager itself resolves it: when
+`XDG_STATE_HOME` is set, `$XDG_STATE_HOME/skills/.skill-lock.json`, and when it
+is unset, `~/.agents/.skill-lock.json`. `InventoryScanEnvironment.stateDirectory`
+therefore carries the environment variable itself and is `null` when unset;
+substituting a conventional default such as `~/.local/state` would make the
+unset branch unreachable and hide real installations. Global and project canonical
 installations are respectively under `~/.agents/skills` and
 `<workspace>/.agents/skills`. Known agent-native copies, links, legacy
 universal paths, and bounded Eve subagent directories are inspected without
