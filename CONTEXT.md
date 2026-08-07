@@ -19,6 +19,10 @@ _Avoid_: Skill, copy
 A group of Installations known through strong evidence to share one Skill Identity.
 _Avoid_: Duplicate, package
 
+**Source Group**:
+A navigational group of Installations known to share declared Manager, source, and Scope evidence. A Source Group does not establish shared Skill Identity or a common Removal Target.
+_Avoid_: Package, install batch
+
 **System Skill**:
 A Skill supplied as an inseparable part of an agent runtime and outside the cleaner's removal boundary.
 _Avoid_: Installed skill, managed skill

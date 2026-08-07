@@ -37,6 +37,7 @@
     "lint": "eslint . --max-warnings 0",
     "pack:check": "npm run build && node scripts/verify-package.mjs",
     "prepack": "npm run build",
+    "prototype:tui": "node src/tui/prototype-navigation/run.mjs",
     "release:candidate": "npm run pack:check && node scripts/create-release-candidate.mjs",
     "test": "npm run build && vitest run",
     "typecheck": "tsc --project tsconfig.json"
