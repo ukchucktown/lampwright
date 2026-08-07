@@ -32,6 +32,7 @@ import {
 } from "../src/index.js";
 import { syncRegularFile } from "../src/quarantine/filesystem.js";
 import { junctionTargetForCreation } from "../src/quarantine/integrity.js";
+import { parseWindowsReparseKind } from "../src/filesystem/windows-reparse.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
 const createTestEnvironment = createIsolatedTestEnvironmentFixture();
@@ -85,6 +86,64 @@ it("removes Windows namespaces before asking Node to create a junction", () => {
   );
   expect(junctionTargetForCreation("\\??\\Volume{guid}\\skills\\target")).toBe(
     "\\\\?\\Volume{guid}\\skills\\target",
+  );
+});
+
+it("classifies Windows links from their reparse tags", () => {
+  expect(parseWindowsReparseKind("Reparse Tag Value : 0xA0000003")).toBe(
+    "junction",
+  );
+  expect(parseWindowsReparseKind("Reparse Tag Value : 0xA000000C")).toBe(
+    "symbolic-link",
+  );
+  expect(parseWindowsReparseKind("unrecognized output")).toBeNull();
+  expect(
+    parseWindowsReparseKind(
+      [
+        "Reparse Tag Value : 0xA000000C",
+        "Print Name: C:\\skills\\0xA0000003",
+      ].join("\n"),
+    ),
+  ).toBe("symbolic-link");
+  expect(
+    parseWindowsReparseKind("Print Name: C:\\skills\\0xA0000003"),
+  ).toBeNull();
+});
+
+it("distinguishes and recreates Windows junctions across supported Node versions", async () => {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const environment = await createTestEnvironment();
+  const target = join(environment.workspace, "junction-target");
+  const original = join(environment.home, "original-junction");
+  const recreated = join(environment.home, "recreated-junction");
+  const symbolic = join(environment.home, "directory-symbolic-link");
+  const symbolicTrailing = join(
+    environment.home,
+    "trailing-directory-symbolic-link",
+  );
+  await mkdir(target, { recursive: true });
+  await symlink(target, original, "junction");
+  await symlink(target, symbolic, "dir");
+  await symlink(`${target}\\`, symbolicTrailing, "dir");
+  const originalLink = await nodeQuarantineFileSystem.readLink(original);
+  expect(originalLink.kind).toBe("junction");
+  await expect(
+    nodeQuarantineFileSystem.readLink(symbolic),
+  ).resolves.toMatchObject({ kind: "symbolic-link" });
+  await expect(
+    nodeQuarantineFileSystem.readLink(symbolicTrailing),
+  ).resolves.toMatchObject({ kind: "symbolic-link" });
+
+  await nodeQuarantineFileSystem.symlink(
+    junctionTargetForCreation(originalLink.target),
+    recreated,
+    "junction",
+  );
+
+  await expect(nodeQuarantineFileSystem.readLink(recreated)).resolves.toEqual(
+    originalLink,
   );
 });
 

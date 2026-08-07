@@ -19,6 +19,7 @@ import {
   win32,
 } from "node:path";
 
+import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
 import { stringifyModel } from "../model/json.js";
 import type {
   ArtifactLocation,
@@ -433,12 +434,16 @@ async function linkedArtifactType(
     executable: "fsutil",
     arguments: ["reparsepoint", "query", linkPath],
   });
+  const reparseKind =
+    result.exitCode === 0 ? parseWindowsReparseKind(result.stdout) : null;
+  if (reparseKind !== null) {
+    return { kind: reparseKind, target };
+  }
   const junction =
-    result.stdout.toLowerCase().includes("0xa0000003") ||
-    (result.exitCode !== 0 &&
-      (target.startsWith("\\\\?\\") ||
-        target.startsWith("\\??\\") ||
-        win32.isAbsolute(target)));
+    result.exitCode !== 0 &&
+    (target.startsWith("\\\\?\\") ||
+      target.startsWith("\\??\\") ||
+      win32.isAbsolute(target));
   return junction
     ? { kind: "junction", target }
     : { kind: "symbolic-link", target };
