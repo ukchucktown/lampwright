@@ -6,7 +6,7 @@ plan, execute, quarantine, or persist anything.
 ## The question
 
 Candidate B was chosen from three static frames rendered against a live
-Inventory. A static frame cannot answer whether the *interaction* works, and
+Inventory. A static frame cannot answer whether the _interaction_ works, and
 interaction is what makes the current terminal UI unpleasant. This prototype
 exists to settle four things by hand:
 
@@ -27,9 +27,21 @@ exists to settle four things by hand:
 npm run prototype:panes
 ```
 
-Keys: `↑↓` move · `←→` switch pane · `space` select · `S` take the whole
-section · `ctrl-a` clear selection · `enter` review · `esc` back · `ctrl-c`
-quit. Typing filters; backspace edits the query.
+Keys: `↑↓` move · `←→` switch pane · `PgUp`/`PgDn` page · `space` select · `S`
+take the whole section · `ctrl-a` clear selection · `enter` review · `esc` back
+· `ctrl-c` quit. Typing filters; backspace edits the query.
+
+Resize: `shift-←` / `shift-→` moves the pane split, `shift-↑` / `shift-↓`
+changes the detail height. The terminal can be resized freely and the frame
+reflows.
+
+## Layout
+
+The frame is a fixed grid, Yazi-style. Panes never grow to fit their contents:
+each owns a viewport that scrolls under a stationary border, so the detail area
+below never moves. Paging steps by exactly one viewport rather than jumping to
+an edge, and the cursor keeps a one-row margin from the top and bottom before
+the pane scrolls.
 
 The bottom line prints the complete interaction state after every keystroke, so
 assumptions about focus, indices, and selection are visible while you drive.

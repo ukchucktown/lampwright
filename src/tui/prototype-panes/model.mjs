@@ -5,6 +5,10 @@
 // across bundles or scoped to one; does typing filter everything or only the
 // focused pane; and what happens when a section holds nothing selectable.
 //
+// The layout is fixed: panes never grow to fit their contents. Each pane owns a
+// viewport that scrolls under a stationary frame, so the detail area below stays
+// where it is. Pane width and detail height are user-resizable.
+//
 // Pure: no I/O, no terminal codes. The shell calls in; nothing flows back out.
 
 export const SECTION_KINDS = {
@@ -14,18 +18,65 @@ export const SECTION_KINDS = {
   system: "system",
 };
 
-export function createState(sections) {
+const CHROME_ROWS = 6; // header, search, rules, hints, state line
+const MIN_PANE_ROWS = 3;
+const SCROLL_MARGIN = 1;
+
+export function createState(sections, viewport = { rows: 30, columns: 100 }) {
   return {
     sections,
+    viewport,
     focus: "sections", // "sections" | "skills"
     sectionIndex: 0,
     skillIndex: 0,
+    sectionScroll: 0,
+    skillScroll: 0,
+    leftPercent: 32,
+    detailRows: 6,
     query: "",
-    typing: false,
-    selected: [], // skill keys, deliberately global across sections
+    selected: [],
     notice: "",
     reviewOpen: false,
   };
+}
+
+// ── layout ─────────────────────────────────────────────────────────────────
+
+export function layout(state) {
+  const rows = Math.max(12, state.viewport.rows);
+  const columns = Math.max(60, state.viewport.columns);
+  const detailRows = Math.min(
+    Math.max(3, state.detailRows),
+    Math.max(3, rows - CHROME_ROWS - MIN_PANE_ROWS),
+  );
+  const paneRows = Math.max(MIN_PANE_ROWS, rows - CHROME_ROWS - detailRows);
+  const leftWidth = Math.round(
+    (columns * clampPercent(state.leftPercent)) / 100,
+  );
+  return {
+    rows,
+    columns,
+    paneRows,
+    detailRows,
+    leftWidth,
+    rightWidth: Math.max(20, columns - leftWidth - 3),
+  };
+}
+
+function clampPercent(percent) {
+  return Math.min(55, Math.max(18, percent));
+}
+
+/** Keeps the cursor inside its viewport without recentring on every step. */
+function scrollFor(offset, index, height, length) {
+  if (length <= height) return 0;
+  const margin = height > 2 * SCROLL_MARGIN + 1 ? SCROLL_MARGIN : 0;
+  const low = Math.max(0, index - margin);
+  const high = Math.min(length - 1, index + margin);
+  let next = offset;
+  if (low < next) next = low;
+  if (high > next + height - 1) next = high - height + 1;
+  return Math.min(Math.max(0, next), Math.max(0, length - height));
 }
 
 // ── derived ────────────────────────────────────────────────────────────────
@@ -82,37 +133,88 @@ export function selectionSummary(state) {
   return [...bySection.entries()].map(([label, count]) => ({ label, count }));
 }
 
+/** The right pane spends its first row on the section header. */
+export function skillRows(state) {
+  return Math.max(1, layout(state).paneRows - 1);
+}
+
+/** What each pane should draw, already scrolled. */
+export function panes(state) {
+  const { paneRows } = layout(state);
+  const rows = skillRows(state);
+  const sections = visibleSections(state);
+  const skills = currentSkills(state);
+  return {
+    sections: {
+      items: sections.slice(
+        state.sectionScroll,
+        state.sectionScroll + paneRows,
+      ),
+      offset: state.sectionScroll,
+      total: sections.length,
+      height: paneRows,
+    },
+    skills: {
+      items: skills.slice(state.skillScroll, state.skillScroll + rows),
+      offset: state.skillScroll,
+      total: skills.length,
+      height: rows,
+    },
+  };
+}
+
 // ── reducer ────────────────────────────────────────────────────────────────
 
 export function reduce(state, action) {
   const next = { ...state, notice: "" };
   switch (action.type) {
+    case "viewport":
+      return settle({ ...next, viewport: action.viewport });
+    case "resize-panes":
+      return settle({
+        ...next,
+        leftPercent: clampPercent(next.leftPercent + action.delta),
+      });
+    case "resize-detail":
+      return settle({
+        ...next,
+        detailRows: Math.max(3, next.detailRows + action.delta),
+      });
     case "focus-sections":
-      return clamp({ ...next, focus: "sections", reviewOpen: false });
+      return settle({ ...next, focus: "sections", reviewOpen: false });
     case "focus-skills": {
       const section = currentSection(next);
       if (section && section.skills.length === 0)
         return { ...next, notice: "That section is empty." };
-      return clamp({ ...next, focus: "skills", reviewOpen: false });
+      return settle({ ...next, focus: "skills", reviewOpen: false });
     }
     case "move":
-      return clamp(move(next, action.delta));
+      return settle(move(next, action.delta));
+    case "page":
+      return settle(
+        move(
+          next,
+          action.delta *
+            (next.focus === "sections"
+              ? layout(next).paneRows
+              : skillRows(next)),
+        ),
+      );
     case "type":
-      return clamp({
+      return settle({
         ...next,
-        typing: true,
         query: next.query + action.value,
         skillIndex: 0,
+        skillScroll: 0,
         reviewOpen: false,
       });
     case "backspace":
-      return clamp({
+      return settle({
         ...next,
         query: [...next.query].slice(0, -1).join(""),
         skillIndex: 0,
+        skillScroll: 0,
       });
-    case "clear-query":
-      return clamp({ ...next, query: "", typing: false, skillIndex: 0 });
     case "toggle-select":
       return toggleSelect(next);
     case "toggle-select-section":
@@ -126,7 +228,12 @@ export function reduce(state, action) {
     case "escape":
       if (next.reviewOpen) return { ...next, reviewOpen: false };
       if (next.query !== "")
-        return clamp({ ...next, query: "", typing: false, skillIndex: 0 });
+        return settle({
+          ...next,
+          query: "",
+          skillIndex: 0,
+          skillScroll: 0,
+        });
       if (next.focus === "skills") return { ...next, focus: "sections" };
       return next;
     default:
@@ -139,14 +246,15 @@ function move(state, delta) {
     const sections = visibleSections(state);
     return {
       ...state,
-      sectionIndex: wrap(state.sectionIndex, sections.length, delta),
+      sectionIndex: step(state.sectionIndex, sections.length, delta),
       skillIndex: 0,
+      skillScroll: 0,
       reviewOpen: false,
     };
   }
   return {
     ...state,
-    skillIndex: wrap(state.skillIndex, currentSkills(state).length, delta),
+    skillIndex: step(state.skillIndex, currentSkills(state).length, delta),
     reviewOpen: false,
   };
 }
@@ -189,20 +297,36 @@ function toggleSection(state) {
   };
 }
 
-function clamp(state) {
+/** Clamps indices to current contents, then brings both viewports into range. */
+function settle(state) {
+  const { paneRows } = layout(state);
   const sections = visibleSections(state);
   const sectionIndex = clampIndex(state.sectionIndex, sections.length);
   const skills = sections[sectionIndex]?.skills ?? [];
+  const skillIndex = clampIndex(state.skillIndex, skills.length);
   return {
     ...state,
     sectionIndex,
-    skillIndex: clampIndex(state.skillIndex, skills.length),
+    skillIndex,
     focus: skills.length === 0 ? "sections" : state.focus,
+    sectionScroll: scrollFor(
+      state.sectionScroll,
+      sectionIndex,
+      paneRows,
+      sections.length,
+    ),
+    skillScroll: scrollFor(
+      state.skillScroll,
+      skillIndex,
+      Math.max(1, paneRows - 1),
+      skills.length,
+    ),
   };
 }
 
-function wrap(index, length, delta) {
-  return length === 0 ? 0 : (index + delta + length) % length;
+function step(index, length, delta) {
+  if (length === 0) return 0;
+  return Math.min(Math.max(index + delta, 0), length - 1);
 }
 
 function clampIndex(index, length) {
