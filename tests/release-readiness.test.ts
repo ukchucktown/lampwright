@@ -21,13 +21,19 @@ describe("release readiness", () => {
       REPOSITORY_PRIVATE: "false",
     };
 
-    await expect(
-      execFileAsync(process.execPath, [command], { env: authority }),
-    ).resolves.toMatchObject({
-      stdout: expect.stringContaining(
-        "Release authority verified for skill-cleaner@0.1.0",
-      ),
+    const exactAuthority = execFileAsync(process.execPath, [command], {
+      env: authority,
     });
+    if (supportsTrustedPublishingRuntime())
+      await expect(exactAuthority).resolves.toMatchObject({
+        stdout: expect.stringContaining(
+          "Release authority verified for skill-cleaner@0.1.0",
+        ),
+      });
+    else
+      await expect(exactAuthority).rejects.toMatchObject({
+        stderr: expect.stringContaining("Node.js 22.14.0 or newer"),
+      });
     await expect(
       execFileAsync(process.execPath, [command], {
         env: { ...authority, REPOSITORY_PRIVATE: "true" },
@@ -100,4 +106,11 @@ async function sourceFiles(root: string): Promise<readonly string[]> {
     else if (entry.isFile() && entry.name.endsWith(".ts")) paths.push(path);
   }
   return paths;
+}
+
+function supportsTrustedPublishingRuntime(): boolean {
+  const [major = 0, minor = 0] = process.versions.node
+    .split(".")
+    .map((part) => Number(part));
+  return major > 22 || (major === 22 && minor >= 14);
 }
