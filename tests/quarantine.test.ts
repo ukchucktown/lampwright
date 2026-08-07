@@ -96,9 +96,36 @@ it("recreates the same junction target across supported Windows versions", async
   const target = join(environment.workspace, "junction-target");
   const original = join(environment.home, "original-junction");
   const recreated = join(environment.home, "recreated-junction");
+  const symbolic = join(environment.home, "directory-symbolic-link");
   await mkdir(target, { recursive: true });
   await symlink(target, original, "junction");
+  await symlink(target, symbolic, "dir");
   const originalLink = await nodeQuarantineFileSystem.readLink(original);
+
+  if (process.versions.node.startsWith("20.")) {
+    const junctionStats = await lstat(original);
+    const symbolicStats = await lstat(symbolic);
+    console.info(
+      "Windows link diagnostics",
+      JSON.stringify({
+        node: process.version,
+        junction: {
+          rawTarget: await readlink(original),
+          classified: originalLink,
+          mode: junctionStats.mode,
+          size: junctionStats.size,
+          blocks: junctionStats.blocks,
+        },
+        symbolic: {
+          rawTarget: await readlink(symbolic),
+          classified: await nodeQuarantineFileSystem.readLink(symbolic),
+          mode: symbolicStats.mode,
+          size: symbolicStats.size,
+          blocks: symbolicStats.blocks,
+        },
+      }),
+    );
+  }
 
   await nodeQuarantineFileSystem.symlink(
     junctionTargetForCreation(originalLink.target),
