@@ -2762,4 +2762,103 @@ describe("Inventory scan", () => {
     ]);
     expect(inventory.otherFindings).toEqual([]);
   });
+
+  it("discovers standalone Claude Skills in user and workspace roots", async () => {
+    const environment = await createTestEnvironment();
+    await createSkill(join(environment.home, ".claude", "skills", "graphify"), {
+      name: "graphify",
+    });
+    await createSkill(
+      join(environment.workspace, ".claude", "skills", "project-helper"),
+      { name: "project-helper" },
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: environment.workspace,
+    }).scan({});
+
+    expect(
+      inventory.installations.map((item) => ({
+        name: item.skill.name,
+        agentId: item.agentId,
+        scope: item.scope.kind,
+        classification: item.classification,
+      })),
+    ).toEqual([
+      {
+        name: "graphify",
+        agentId: "claude-code",
+        scope: "agent",
+        classification: "active-installation",
+      },
+      {
+        name: "project-helper",
+        agentId: "claude-code",
+        scope: "workspace",
+        classification: "standalone-project-skill",
+      },
+    ]);
+  });
+
+  it("groups a Claude link with its unmanaged target instead of duplicating the Skill", async () => {
+    const environment = await createTestEnvironment();
+    const canonical = join(environment.home, ".agents", "skills", "shared");
+    await createSkill(canonical, { name: "shared" });
+    await mkdir(join(environment.home, ".claude", "skills"), {
+      recursive: true,
+    });
+    await createDirectoryLink(
+      canonical,
+      join(environment.home, ".claude", "skills", "shared"),
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({});
+
+    expect(inventory.installations).toHaveLength(2);
+    expect(inventory.logicalSkills).toHaveLength(1);
+    expect(inventory.logicalSkills[0]?.installationIds).toHaveLength(2);
+    expect(inventory.logicalSkills[0]?.identity.strongEvidence).toContainEqual({
+      strength: "strong",
+      kind: "canonical-target",
+      canonicalPath: canonical,
+    });
+  });
+
+  it("honors a configured Claude config directory and ignores plugin cache content", async () => {
+    const environment = await createTestEnvironment();
+    const claudeConfig = join(environment.root, "configured-claude");
+    await createSkill(join(claudeConfig, "skills", "configured"), {
+      name: "configured",
+    });
+    await createSkill(
+      join(
+        claudeConfig,
+        "plugins",
+        "cache",
+        "marketplace",
+        "bundle",
+        "1.0.0",
+        "skills",
+        "bundled",
+      ),
+      { name: "bundled" },
+    );
+    await createSkill(join(environment.home, ".claude", "skills", "default"), {
+      name: "default",
+    });
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+      agentHomeDirectories: { "claude-code": claudeConfig },
+    }).scan({});
+
+    expect(inventory.installations.map((item) => item.skill.name)).toEqual([
+      "configured",
+    ]);
+  });
 });

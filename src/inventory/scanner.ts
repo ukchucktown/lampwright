@@ -540,6 +540,22 @@ async function defaultDiscoveryRoots(
     agentId: "codex",
     adapterId: null,
   };
+  const claudeConfigDirectory =
+    environment.agentHomeDirectories?.["claude-code"] ??
+    join(environment.homeDirectory, ".claude");
+  const claudeUserRoot: DiscoveryRoot = {
+    kind: "agent",
+    path: join(claudeConfigDirectory, "skills"),
+    agentId: "claude-code",
+    adapterId: null,
+  };
+  const claudeWorkspaceRoot: DiscoveryRoot = {
+    kind: "workspace",
+    path: join(environment.workspaceDirectory, ".claude", "skills"),
+    workspacePath: environment.workspaceDirectory,
+    agentId: "claude-code",
+    adapterId: null,
+  };
   const codexSystemPath = join(codexRoot.path, codexSystemSkillsDirectoryName);
   const codexSystemRoots: readonly DiscoveryRoot[] = (await isRegularFile(
     join(codexSystemPath, codexSystemSkillsMarkerName),
@@ -557,7 +573,13 @@ async function defaultDiscoveryRoots(
     pathComparisonKey(userRoot.path) === pathComparisonKey(workspaceRoot.path)
       ? [workspaceRoot]
       : [userRoot, workspaceRoot];
-  return [...genericRoots, codexRoot, ...codexSystemRoots];
+  return [
+    ...genericRoots,
+    codexRoot,
+    ...codexSystemRoots,
+    claudeUserRoot,
+    claudeWorkspaceRoot,
+  ];
 }
 
 /**

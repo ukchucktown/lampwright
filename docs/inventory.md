@@ -7,8 +7,10 @@ scan(request: ScanRequest): Promise<Inventory>
 ```
 
 The normal scanner resolves the bounded generic `.agents/skills` roots under
-the current user's home and current workspace and Codex's standalone
-`<CODEX_HOME>/skills` root. Callers may add explicit, absolute discovery roots.
+the current user's home and current workspace, Codex's standalone
+`<CODEX_HOME>/skills` root, and Claude's standalone `<CLAUDE_CONFIG_DIR>/skills`
+and `<workspace>/.claude/skills` roots. Callers may add explicit, absolute
+discovery roots.
 The module owns root resolution, traversal, metadata parsing, hashing,
 classification, Git inspection, identity grouping, and result validation. It
 never scans the home or workspace itself.
@@ -68,6 +70,17 @@ protection, so a nested Adapter root can never widen what is removable inside a
 `source`, `cache-or-vendor`, `system`, or `unknown` root. A root the caller
 supplied for the current invocation may narrow in either direction, because the
 caller named that absolute path deliberately.
+
+Claude's standalone Skill roots are bounded to `<CLAUDE_CONFIG_DIR>/skills` and
+`<workspace>/.claude/skills`, defaulting to `~/.claude` when the variable is
+unset. Plugin caches, marketplaces, and source checkouts live elsewhere under
+the config directory and are never swept by these roots. Where a Manager or
+Plugin already claims a path, that stronger ownership wins: an agent-native
+copy or link the Vercel reconciliation records as supplemental removal
+collateral is not materialized again as a separate Installation. A link to an
+unmanaged target stays a distinct Installation at its own path and joins its
+target's Logical Skill through canonical-target evidence, so removing the Skill
+covers both while removing one Installation removes only that entry.
 
 Codex marks the Skills shipped with its own runtime. When
 `<CODEX_HOME>/skills/.system/.codex-system-skills.marker` is a regular file,
