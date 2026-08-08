@@ -657,7 +657,7 @@ describe("terminal pane navigation", () => {
     ]);
   });
 
-  it("retains terminal resizes received during plan and report screens", async () => {
+  it("retains terminal resizes received during plan, execution, and report screens", async () => {
     const inventory = groupedInventory();
     const controller = new TuiController(
       {
@@ -698,11 +698,19 @@ describe("terminal pane navigation", () => {
     await reportController.start();
     await reportController.dispatch({ kind: "select" });
     await reportController.dispatch({ kind: "confirm" });
-    expect(reportController.state.screen).toBe("report");
+    expect(reportController.state.screen).toBe("executing");
     await reportController.dispatch({
       kind: "viewport",
       viewport: { rows: 20, columns: 84 },
     });
+    const resizedExecution = reportController.state as TuiState;
+    if (resizedExecution.screen !== "executing")
+      throw new Error("expected execution feedback");
+    expect(resizedExecution.browse.model.viewport).toEqual({
+      rows: 20,
+      columns: 84,
+    });
+    await reportController.waitForExecution();
     const resizedReport = reportController.state as TuiState;
     if (resizedReport.screen !== "report") throw new Error("expected report");
     expect(resizedReport.browse.model.viewport).toEqual({
@@ -1417,6 +1425,86 @@ describe("terminal removal interactions", () => {
     expect(confirmedTerminal.frames.join("\n")).toContain(
       "Execution succeeded",
     );
+  });
+
+  it("renders execution feedback before a delayed executor resolves", async () => {
+    const inventory = buildInventory();
+    let resolveExecution: ((report: ExecutionReport) => void) | undefined;
+    let submittedPlan: RemovalPlan | undefined;
+    const execute = vi.fn((removalPlan: RemovalPlan) => {
+      submittedPlan = removalPlan;
+      return new Promise<ExecutionReport>((resolve) => {
+        resolveExecution = resolve;
+      });
+    });
+    class FeedbackTerminal extends ScriptedTerminal {
+      override render(state: TuiState): void {
+        if (state.screen === "executing")
+          expect(execute).not.toHaveBeenCalled();
+        super.render(state);
+      }
+    }
+    const terminal = new FeedbackTerminal([
+      { kind: "select" },
+      { kind: "confirm" },
+      { kind: "quit" },
+    ]);
+
+    const outcome = runTui(
+      { scan: async () => inventory, plan, execute },
+      terminal,
+    );
+
+    await vi.waitFor(() =>
+      expect(terminal.frames.join("\n")).toContain(
+        "The approved removal is running",
+      ),
+    );
+    const feedback = terminal.frames.join("\n");
+    expect(feedback).toContain("Removing example-skill");
+    expect(feedback).toContain("1 approved target · 1 approved action");
+    expect(feedback).toContain(
+      "Verification and the final inventory scan must finish before results appear",
+    );
+    expect(feedback).not.toMatch(/\d+%/u);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(resolveExecution).toBeDefined();
+    expect(submittedPlan).toBeDefined();
+    resolveExecution!(
+      buildExecutionReport({
+        planId: submittedPlan!.id,
+        inventoryId: submittedPlan!.inventoryId,
+        finalInventoryId: submittedPlan!.inventoryId,
+      }),
+    );
+
+    await expect(outcome).resolves.toMatchObject({ status: "completed" });
+    expect(terminal.frames.join("\n")).toContain("Execution succeeded");
+  });
+
+  it("renders the existing error outcome when execution throws synchronously", async () => {
+    const inventory = buildInventory();
+    const execute = vi.fn(() => {
+      throw new Error("executor unavailable");
+    });
+    const terminal = new ScriptedTerminal([
+      { kind: "select" },
+      { kind: "confirm" },
+    ]);
+
+    const outcome = await runTui(
+      { scan: async () => inventory, plan, execute },
+      terminal,
+    );
+
+    expect(outcome).toEqual({
+      status: "failed",
+      message: "executor unavailable",
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const frames = terminal.frames.join("\n");
+    expect(frames).toContain("The approved removal is running");
+    expect(frames).toContain("Unable to continue: executor unavailable");
   });
 
   it("requires a separate review and confirmation for a managed-removal fallback", async () => {

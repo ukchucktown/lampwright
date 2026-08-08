@@ -27,6 +27,7 @@ import {
 } from "./theme.js";
 import type {
   TuiBrowseState,
+  TuiExecutingState,
   TuiEntry,
   TuiPaneView,
   TuiPlanState,
@@ -49,7 +50,39 @@ export function renderTui(
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
+  if (state.screen === "executing") return renderExecuting(state, style);
   return renderReport(state, style);
+}
+
+function renderExecuting(state: TuiExecutingState, style: TuiPaint): string {
+  const width = Math.max(0, state.browse.model.viewport.columns - 1);
+  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
+  const lines = [
+    { text: "skill-cleaner — Removing", paint: style.title },
+    { text: "", paint: style.muted },
+    { text: `Removing ${state.label}`, paint: style.active },
+    {
+      text: `${countLabel(state.plan.targets.length, "approved target")} · ${countLabel(state.plan.actions.length, "approved action")}`,
+      paint: style.muted,
+    },
+    { text: "", paint: style.muted },
+    { text: "The approved removal is running.", paint: style.info },
+    {
+      text: "Verification and the final inventory scan must finish before results appear.",
+      paint: style.muted,
+    },
+  ];
+  return `${lines
+    .flatMap(({ text, paint }) =>
+      wrapPlanLine(text, Math.max(1, width)).map((line) => ({ line, paint })),
+    )
+    .slice(0, rows)
+    .map(({ line, paint }) => paint(fit(line, width)))
+    .join("\n")}\n`;
+}
+
+function countLabel(count: number, noun: string): string {
+  return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
