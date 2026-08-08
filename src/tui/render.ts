@@ -31,7 +31,7 @@ export function renderTui(state: TuiState): string {
   if (state.screen === "loading")
     return "skill-cleaner\n\nScanning known skill roots…\n";
   if (state.screen === "error")
-    return `skill-cleaner\n\nUnable to continue: ${state.message}\n\nPress Esc or Ctrl-C to exit.\n`;
+    return `skill-cleaner\n\nUnable to continue: ${state.message}\n\nPress q or Ctrl-C to exit.\n`;
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state);
   if (state.screen === "plan") return renderPlan(state);
@@ -53,7 +53,10 @@ function renderBrowse(state: TuiBrowseState): string {
 
 export function renderBrowseLines(state: TuiBrowseState): readonly string[] {
   const model = state.model;
-  const { usable, paneRows, detailRows, leftWidth, rightWidth } = layout(model);
+  const grid = layout(model);
+  const { rows, columns, usable, paneRows, detailRows, leftWidth, rightWidth } =
+    grid;
+  if (rows < 7 || columns < 4) return renderCompactBrowse(rows, usable);
   const view = panes(model);
   const section = currentSection(model);
   const entry = currentEntry(model);
@@ -70,7 +73,7 @@ export function renderBrowseLines(state: TuiBrowseState): readonly string[] {
   out.push(
     dim(
       fit(
-        "arrows/click/wheel move · space select (a section takes all) · enter review · esc back · ^c quit",
+        "arrows/click/wheel move · space select (a section takes all) · enter review · esc back · q quit",
         usable,
       ),
     ),
@@ -167,6 +170,7 @@ function entryCell(
   row: number,
   width: number,
 ): string {
+  if (width <= 0) return "";
   if (row === 0) {
     if (section === null) return " ".repeat(width);
     const exposure = sharedExposure(section);
@@ -193,6 +197,10 @@ function entryCell(
       : model.selected.has(entry.key)
         ? "[x]"
         : "[ ]";
+  if (width < 11) {
+    const compact = fit(`${marker} ${entry.name}`, width);
+    return focused ? inverse(compact) : compact;
+  }
   const exposure = section === null ? null : sharedExposure(section);
   const differs = exposure === null || entry.exposedTo.join(" ") !== exposure;
   const note = entry.note ?? (differs ? entry.exposedTo.join(" ") : "");
@@ -201,6 +209,11 @@ function entryCell(
   const tail = fit(note, Math.max(0, width - nameWidth - 5));
   if (focused) return inverse(fit(head + tail, width));
   return `${fit(head, nameWidth + 5)}${dim(tail)}`;
+}
+
+function renderCompactBrowse(rows: number, usable: number): readonly string[] {
+  const lines = ["skill-cleaner", "Resize the terminal", "q quit"];
+  return lines.slice(0, Math.max(0, rows - 1)).map((line) => fit(line, usable));
 }
 
 function scrollMark(pane: TuiPaneView<unknown>, row: number): string {
@@ -278,17 +291,17 @@ function renderPlan(state: TuiPlanState): string {
       removalPlan.intent.mode === "brute-force"
         ? "This brute-force action quarantines files and is separate from the failed managed removal."
         : "A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately.",
-      "y confirm   n/Esc cancel   Ctrl-C quit",
+      "y confirm   n/Esc cancel   q/Ctrl-C quit",
     );
   } else if (removalPlan.blocks.every((block) => block.overridable)) {
     lines.push(
       "This plan is blocked and cannot execute as shown.",
-      "f create a force-override plan   n/Esc cancel   Ctrl-C quit",
+      "f create a force-override plan   n/Esc cancel   q/Ctrl-C quit",
     );
   } else {
     lines.push(
       "This plan contains a non-overridable block and cannot execute.",
-      "n/Esc return to inventory   Ctrl-C quit",
+      "n/Esc return to inventory   q/Ctrl-C quit",
     );
   }
   return `${lines.join("\n")}\n`;

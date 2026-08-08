@@ -53,6 +53,10 @@ export class TuiController {
         this.stateValue = { screen: "done", report: null };
       return;
     }
+    if (action.kind === "viewport") {
+      this.stateValue = resizeState(state, action.viewport);
+      return;
+    }
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "plan") await this.planAction(state, action);
@@ -223,6 +227,40 @@ export class TuiController {
       message: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function resizeState(
+  state: TuiBrowseState | TuiPlanState | TuiReportState,
+  viewport: TuiBrowseState["model"]["viewport"],
+): TuiBrowseState | TuiPlanState | TuiReportState {
+  if (state.screen === "browse")
+    return {
+      ...state,
+      model: reduceBrowse(state.model, { kind: "viewport", viewport }),
+    };
+  if (state.screen === "report")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  return {
+    ...state,
+    browse: resizeBrowse(state.browse, viewport),
+    returnReport:
+      state.returnReport === null
+        ? null
+        : {
+            ...state.returnReport,
+            browse: resizeBrowse(state.returnReport.browse, viewport),
+          },
+  };
+}
+
+function resizeBrowse(
+  browse: TuiPlanState["browse"],
+  viewport: TuiBrowseState["model"]["viewport"],
+): TuiPlanState["browse"] {
+  return {
+    ...browse,
+    model: reduceBrowse(browse.model, { kind: "viewport", viewport }),
+  };
 }
 
 export function approvalGrants(

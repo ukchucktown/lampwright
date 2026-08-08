@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { renderTui } from "./render.js";
-import type { TuiAction, TuiState, TuiTerminal } from "./types.js";
+import type { TuiAction, TuiState, TuiTerminal, TuiViewport } from "./types.js";
 
 /**
  * The alternate screen, then click, drag, and SGR coordinate reporting.
@@ -217,10 +217,15 @@ class RawTuiTerminal implements TuiTerminal {
   private readonly mouse: MouseReport[] = [];
   private readonly mouseFramer = new MouseReportFramer();
   private readonly pending: { readonly text: string; readonly key: Key }[] = [];
+  private resized: TuiViewport | null = null;
   private waiter: (() => void) | null = null;
   private readonly onKeypress = (text: string, key: Key): void => {
     if (this.ignoringKeys) return;
     this.pending.push({ text, key });
+    this.wake();
+  };
+  private readonly onResize = (): void => {
+    this.resized = viewportOf(this.output);
     this.wake();
   };
 
@@ -241,6 +246,7 @@ class RawTuiTerminal implements TuiTerminal {
     input.on("data", this.onData);
     emitKeypressEvents(input);
     input.on("keypress", this.onKeypress);
+    output.on("resize", this.onResize);
     input.setRawMode(true);
     input.resume();
     output.write(`${SCREEN_ON}\u001B[?25l${MOUSE_ON}`);
@@ -269,6 +275,12 @@ class RawTuiTerminal implements TuiTerminal {
 
   async readAction(state: TuiState): Promise<TuiAction> {
     for (;;) {
+      const resized = this.resized;
+      if (resized !== null) {
+        this.resized = null;
+        return { kind: "viewport", viewport: resized };
+      }
+
       const report = this.mouse.shift();
       if (report !== undefined) {
         const doubleClick = this.registerClick(report);
@@ -305,6 +317,7 @@ class RawTuiTerminal implements TuiTerminal {
   }
 
   close(): void {
+    this.output.off("resize", this.onResize);
     this.input.off("keypress", this.onKeypress);
     this.input.setRawMode(false);
     this.input.pause();
@@ -342,6 +355,7 @@ class LineTuiTerminal implements TuiTerminal {
 
 function keyAction(state: TuiState, text: string, key: Key): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
+  if (!key.ctrl && !key.meta && text === "q") return { kind: "quit" };
   if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
   if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
   if (state.screen === "browse") {
@@ -382,4 +396,20 @@ function keyAction(state: TuiState, text: string, key: Key): TuiAction {
   }
   if (state.screen === "error") return { kind: "quit" };
   return { kind: "noop" };
+}
+
+function viewportOf(output: TerminalOutput): TuiViewport {
+  return {
+    rows: positiveDimension(output.rows, 30),
+    columns: positiveDimension(output.columns, 100),
+  };
+}
+
+function positiveDimension(
+  value: number | undefined,
+  fallback: number,
+): number {
+  return value === undefined || !Number.isFinite(value) || value < 1
+    ? fallback
+    : Math.floor(value);
 }

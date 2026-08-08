@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
@@ -232,6 +233,49 @@ describe("terminal pane navigation", () => {
     }
   });
 
+  it("keeps every divider intact through repeated terminal and pane resizing", () => {
+    const inventory = groupedInventory();
+    let model = createBrowseModel(createTuiSections(inventory), viewport);
+    const commands = [
+      { kind: "viewport", viewport: { rows: 16, columns: 72 } },
+      { kind: "set-left-percent", percent: 55 },
+      { kind: "resize-detail", delta: 3 },
+      { kind: "viewport", viewport: { rows: 32, columns: 140 } },
+      { kind: "resize-panes", delta: -12 },
+      { kind: "resize-detail", delta: -4 },
+    ] as const;
+
+    for (const command of commands) {
+      model = reduceBrowse(model, command);
+      const lines = renderBrowseLines({ screen: "browse", inventory, model });
+      const grid = layout(model);
+      const plain = lines.map((line) => line.replace(ansi, ""));
+
+      expect(lines).toHaveLength(model.viewport.rows - 1);
+      expect(plain[3]?.[grid.leftWidth]).toBe("┬");
+      for (let row = 4; row < 4 + grid.paneRows; row += 1)
+        expect(plain[row]?.[grid.leftWidth]).toBe("│");
+      expect(plain[4 + grid.paneRows]?.[grid.leftWidth]).toBe("┴");
+      for (const line of lines) expect(visibleWidth(line)).toBe(grid.usable);
+    }
+  });
+
+  it("never draws beyond a terminal that is temporarily too small", () => {
+    const inventory = groupedInventory();
+    const base = createBrowseModel(createTuiSections(inventory), viewport);
+    for (const size of [
+      { rows: 8, columns: 40 },
+      { rows: 12, columns: 20 },
+      { rows: 4, columns: 2 },
+    ]) {
+      const model = reduceBrowse(base, { kind: "viewport", viewport: size });
+      const lines = renderBrowseLines({ screen: "browse", inventory, model });
+      expect(lines.length).toBeLessThanOrEqual(size.rows - 1);
+      for (const line of lines)
+        expect(visibleWidth(line)).toBeLessThanOrEqual(size.columns - 1);
+    }
+  });
+
   it("advances one row at a time and scrolls only at the viewport margin", () => {
     const sections = createTuiSections(groupedInventory());
     let model = reduceBrowse(
@@ -308,6 +352,60 @@ describe("terminal pane navigation", () => {
     expect(planned[0]).toEqual([
       { kind: "source-group", groupId: "installation-group-1" },
     ]);
+  });
+
+  it("retains terminal resizes received during plan and report screens", async () => {
+    const inventory = groupedInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      viewport,
+    );
+
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    expect(controller.state.screen).toBe("plan");
+
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 18, columns: 76 },
+    });
+    if (controller.state.screen !== "plan") throw new Error("expected plan");
+    expect(controller.state.browse.model.viewport).toEqual({
+      rows: 18,
+      columns: 76,
+    });
+
+    await controller.dispatch({ kind: "cancel" });
+    const returned = controller.state as TuiState;
+    if (returned.screen !== "browse") throw new Error("expected browse");
+    expect(returned.model.viewport).toEqual({ rows: 18, columns: 76 });
+
+    const reportController = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      viewport,
+    );
+    await reportController.start();
+    await reportController.dispatch({ kind: "select" });
+    await reportController.dispatch({ kind: "confirm" });
+    expect(reportController.state.screen).toBe("report");
+    await reportController.dispatch({
+      kind: "viewport",
+      viewport: { rows: 20, columns: 84 },
+    });
+    const resizedReport = reportController.state as TuiState;
+    if (resizedReport.screen !== "report") throw new Error("expected report");
+    expect(resizedReport.browse.model.viewport).toEqual({
+      rows: 20,
+      columns: 84,
+    });
   });
 });
 
@@ -622,12 +720,64 @@ describe("raw terminal pointer input", () => {
     input.isTTY = true;
     input.setRawMode = () => undefined;
     const written: string[] = [];
-    const output = {
+    const output = Object.assign(new EventEmitter(), {
       isTTY: true,
-      write: (value: string) => written.push(value),
-    };
+      rows: 24,
+      columns: 100,
+      write: (value: string) => {
+        written.push(value);
+        return true;
+      },
+    });
     return { input, output, written };
   }
+
+  it("delivers terminal resizes immediately so the controller can repaint", async () => {
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+    expect(output.listenerCount("resize")).toBe(1);
+
+    const action = terminal.readAction({ screen: "loading" });
+    output.rows = 16;
+    output.columns = 72;
+    output.emit("resize");
+
+    await expect(
+      Promise.race([
+        action,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 30)),
+      ]),
+    ).resolves.toEqual({
+      kind: "viewport",
+      viewport: { rows: 16, columns: 72 },
+    });
+    terminal.close();
+    expect(output.listenerCount("resize")).toBe(0);
+  });
+
+  it("uses q to quit from the inventory instead of adding it to the filter", async () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    input.write("q");
+    await expect(terminal.readAction(state)).resolves.toEqual({ kind: "quit" });
+    terminal.close();
+  });
 
   it("takes every report in one read, including a wheel burst", () => {
     expect(

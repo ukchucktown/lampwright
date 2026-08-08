@@ -47,17 +47,24 @@ export function createBrowseModel(
 }
 
 export function layout(model: TuiBrowseModel): TuiLayout {
-  const rows = Math.max(12, model.viewport.rows);
-  const columns = Math.max(60, model.viewport.columns);
+  const rows = dimension(model.viewport.rows);
+  const columns = dimension(model.viewport.columns);
+  const availableRows = Math.max(0, rows - CHROME_ROWS);
+  const reservedPaneRows = Math.min(MIN_PANE_ROWS, availableRows);
   const detailRows = Math.min(
     Math.max(MIN_DETAIL_ROWS, model.detailRows),
-    Math.max(MIN_DETAIL_ROWS, rows - CHROME_ROWS - MIN_PANE_ROWS),
+    Math.max(0, availableRows - reservedPaneRows),
   );
-  const paneRows = Math.max(MIN_PANE_ROWS, rows - CHROME_ROWS - detailRows);
-  const leftWidth = Math.round(
-    (columns * clampPercent(model.leftPercent)) / 100,
+  const paneRows = Math.max(0, availableRows - detailRows);
+  const usable = Math.max(0, columns - 1);
+  const maximumLeft = Math.max(0, usable - 2);
+  const leftWidth = Math.min(
+    maximumLeft,
+    Math.max(
+      maximumLeft === 0 ? 0 : 1,
+      Math.round((columns * clampPercent(model.leftPercent)) / 100),
+    ),
   );
-  const usable = columns - 1;
   return {
     rows,
     columns,
@@ -66,8 +73,12 @@ export function layout(model: TuiBrowseModel): TuiLayout {
     entryRows: Math.max(1, paneRows - 1),
     detailRows,
     leftWidth,
-    rightWidth: Math.max(10, usable - leftWidth - 2),
+    rightWidth: Math.max(0, usable - leftWidth - 2),
   };
+}
+
+function dimension(value: number): number {
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
 }
 
 /**

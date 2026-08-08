@@ -26,6 +26,11 @@ viewport; shift with left or right moves the pane split and with up or down
 changes the detail height. A pointer can click a row to focus it, double-click to select it, wheel over
 either pane, and drag the divider to resize. The wheel moves the cursor rather
 than only the viewport, so the focused row cannot scroll out from under it.
+Terminal resize events update the viewport immediately, including while a plan
+or report is open. Every terminal or pane-size change redraws the complete
+frame from the new dimensions. If the window becomes too small for the grid,
+the UI draws only a clipped resize prompt until the grid fits again; it never
+draws beyond the real terminal or relies on wrapping to hide stale content.
 The interactive terminal runs on the alternate screen. That is not decoration:
 on the normal buffer a terminal treats the wheel as its own scrollback and never
 forwards it, so a pane could not scroll however the application asked. Leaving
@@ -83,7 +88,8 @@ than a list of its members; a partial selection stays a list of Logical Skill
 targets; a Plugin row is its own boundary. With nothing selected, `enter`
 reviews the row under the cursor.
 
-`esc` unwinds the narrowest thing first — the filter, then the pane, then the
+`q` exits the TUI immediately from every screen; Ctrl-C remains an alternate
+exit. `esc` unwinds the narrowest thing first — the filter, then the pane, then the
 selection — and only leaves once there is nothing left to undo, so a stray
 keypress cannot discard a selection.
 
