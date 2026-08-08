@@ -23,16 +23,22 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "") return { kind: "select" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
     if (value === "down" || value === "j") return { kind: "move", delta: 1 };
-    if (value === "expand" || value === "e") return { kind: "toggle-expand" };
-    if (value === "select" || value === "open") return { kind: "select" };
-    if (value === "clear") return { kind: "set-query", value: "" };
+    if (value === "in" || value === "l")
+      return { kind: "focus", pane: "entries" };
+    if (value === "out" || value === "h")
+      return { kind: "focus", pane: "sections" };
+    if (value === "take" || value === "space") return { kind: "toggle-select" };
+    if (value === "none") return { kind: "clear-selection" };
+    if (value === "select" || value === "open" || value === "review")
+      return { kind: "select" };
+    if (value === "clear") return { kind: "clear-selection" };
     if (value === "backspace") return { kind: "delete-query" };
     if (value === "quit" || value === "q") return { kind: "quit" };
     if (value.startsWith("search "))
-      return { kind: "set-query", value: value.slice("search ".length) };
+      return { kind: "append-query", value: value.slice("search ".length) };
     if (value.startsWith("/"))
-      return { kind: "set-query", value: value.slice(1) };
-    return { kind: "set-query", value };
+      return { kind: "append-query", value: value.slice(1) };
+    return { kind: "append-query", value };
   }
   if (state.screen === "plan") {
     if (value === "yes" || value === "y") return { kind: "confirm" };
@@ -131,16 +137,29 @@ class LineTuiTerminal implements TuiTerminal {
 
 function keyAction(state: TuiState, text: string, key: Key): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
-  if (key.name === "up") return { kind: "move", delta: -1 };
-  if (key.name === "down") return { kind: "move", delta: 1 };
+  if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
+  if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
   if (state.screen === "browse") {
-    if (key.name === "escape") return { kind: "quit" };
+    if (key.name === "escape") return { kind: "cancel" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
+    if (key.name === "right" && key.shift)
+      return { kind: "resize-panes", delta: 2 };
+    if (key.name === "left" && key.shift)
+      return { kind: "resize-panes", delta: -2 };
+    if (key.name === "up" && key.shift)
+      return { kind: "resize-detail", delta: -1 };
+    if (key.name === "down" && key.shift)
+      return { kind: "resize-detail", delta: 1 };
     if (key.name === "right" || key.name === "tab")
-      return { kind: "toggle-expand" };
+      return { kind: "focus", pane: "entries" };
+    if (key.name === "left") return { kind: "focus", pane: "sections" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
+    if (key.name === "space" || text === " ") return { kind: "toggle-select" };
+    if (key.ctrl && key.name === "a") return { kind: "clear-selection" };
     if (key.name === "backspace") return { kind: "delete-query" };
-    if (key.ctrl && key.name === "u") return { kind: "set-query", value: "" };
+    if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (!key.ctrl && !key.meta && text.length > 0)
       return { kind: "append-query", value: text };
     return { kind: "noop" };

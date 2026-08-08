@@ -1,3 +1,5 @@
+import process from "node:process";
+
 import { TuiController } from "./controller.js";
 import { createNodeTuiTerminal } from "./terminal.js";
 import type {
@@ -10,8 +12,12 @@ import type {
 export async function runTui(
   dependencies: TuiDependencies,
   terminal: TuiTerminal = createNodeTuiTerminal(),
+  viewport = {
+    rows: process.stdout.rows ?? 30,
+    columns: process.stdout.columns ?? 100,
+  },
 ): Promise<TuiOutcome> {
-  const controller = new TuiController(dependencies);
+  const controller = new TuiController(dependencies, viewport);
   try {
     terminal.render(controller.state);
     await controller.start();
