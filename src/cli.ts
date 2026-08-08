@@ -14,7 +14,10 @@ import {
   systemExecutionProcessRunner,
 } from "./execution/index.js";
 import { inspectGitProtection } from "./inventory/git-protection.js";
-import { createInventoryScanner } from "./inventory/index.js";
+import {
+  createInventoryScanner,
+  defaultInventoryScanEnvironment,
+} from "./inventory/index.js";
 import { systemCommandRunner } from "./inventory/process.js";
 import { stringifyModel } from "./model/json.js";
 import type {
@@ -86,6 +89,7 @@ Usage:
 Selectors:
   installation:<installation-id>  logical-skill:<logical-skill-id>
   source:<source-id>              plugin:<plugin-boundary-id>
+  group:<group-id>
 
 Exit codes: 0 succeeded; 1 operational failure; 2 invalid usage; 3 blocked or confirmation required.
 
@@ -506,14 +510,7 @@ async function scanWithContext(
   }
   const inventory = await createInventoryScanner({
     now: () => new Date(),
-    environment: {
-      homeDirectory: home,
-      workspaceDirectory: workspace,
-      configDirectory: process.env.XDG_CONFIG_HOME || join(home, ".config"),
-      stateDirectory:
-        process.env.XDG_STATE_HOME || join(home, ".local", "state"),
-      nodeVersion: process.versions.node,
-    },
+    environment: defaultInventoryScanEnvironment(),
     commandRunner: systemCommandRunner,
     adapterCatalog: catalog,
   }).scan({});

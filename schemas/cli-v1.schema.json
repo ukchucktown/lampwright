@@ -24,6 +24,7 @@
         "otherFindings",
         "logicalSkills",
         "identityHints",
+        "groups",
         "plugins",
         "dependencies"
       ],
@@ -35,6 +36,7 @@
         "otherFindings": { "type": "array", "items": { "type": "object" } },
         "logicalSkills": { "type": "array", "items": { "type": "object" } },
         "identityHints": { "type": "array", "items": { "type": "object" } },
+        "groups": { "type": "array", "items": { "type": "object" } },
         "plugins": { "type": "array", "items": { "type": "object" } },
         "dependencies": { "type": "array", "items": { "type": "object" } }
       },

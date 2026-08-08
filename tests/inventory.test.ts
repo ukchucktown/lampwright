@@ -2554,16 +2554,26 @@ describe("Inventory scan", () => {
 
     await expect(
       scanner.scan({
-        roots: [sourceRoot, nestedSourceRoot].map((path) => ({
-          kind: "source" as const,
-          path,
-          agentId: null,
-          scope: null,
-          source: { id: "same-source", url: null },
-          adapterId: null,
-        })),
+        roots: [
+          {
+            kind: "source" as const,
+            path: sourceRoot,
+            agentId: null,
+            scope: null,
+            source: { id: "same-source", url: null },
+            adapterId: null,
+          },
+          {
+            kind: "source" as const,
+            path: sourceRoot,
+            agentId: null,
+            scope: null,
+            source: { id: "other-source", url: null },
+            adapterId: null,
+          },
+        ],
       }),
-    ).rejects.toThrow(/overlapping discovery roots/);
+    ).rejects.toThrow(/duplicate discovery root/);
 
     await expect(
       createInventoryScanner({
@@ -2589,6 +2599,282 @@ describe("Inventory scan", () => {
       code: "invalid-request",
       message:
         "inventory scanner requires absolute configured environment directories",
+    });
+  });
+
+  it("treats a marked Codex runtime subtree as System Skills without touching the rest of the root", async () => {
+    const environment = await createTestEnvironment();
+    const codexHome = join(environment.home, ".codex");
+    const codexSkills = join(codexHome, "skills");
+    const systemRoot = join(codexSkills, ".system");
+    await createSkill(join(codexSkills, "user-installed"), {
+      name: "user-installed",
+    });
+    await createSkill(join(systemRoot, "imagegen"), { name: "imagegen" });
+    await writeFile(
+      join(systemRoot, ".codex-system-skills.marker"),
+      "marker\n",
+      "utf8",
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({});
+
+    expect(inventory.installations.map((item) => item.skill.name)).toEqual([
+      "user-installed",
+    ]);
+    const finding = inventory.otherFindings.find(
+      (item) => item.skill.name === "imagegen",
+    );
+    expect(finding).toMatchObject({
+      classification: "system-skill",
+      ownership: { kind: "agent-runtime", agentId: "codex" },
+      protection: { system: { kind: "system-skill", agentId: "codex" } },
+    });
+  });
+
+  it("leaves a Codex subtree ordinary when the marker is absent or is a link", async () => {
+    const environment = await createTestEnvironment();
+    const systemRoot = join(environment.home, ".codex", "skills", ".system");
+    const decoy = join(environment.home, "decoy-marker");
+    await createSkill(join(systemRoot, "imagegen"), { name: "imagegen" });
+    await writeFile(decoy, "marker\n", "utf8");
+    const scanRoot = {
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    };
+
+    const withoutMarker = await createScanner(scanRoot).scan({});
+    expect(withoutMarker.installations.map((item) => item.skill.name)).toEqual([
+      "imagegen",
+    ]);
+    expect(withoutMarker.otherFindings).toEqual([]);
+
+    await symlink(decoy, join(systemRoot, ".codex-system-skills.marker"));
+    const withLinkedMarker = await createScanner(scanRoot).scan({});
+    expect(
+      withLinkedMarker.installations.map((item) => item.skill.name),
+    ).toEqual(["imagegen"]);
+    expect(withLinkedMarker.otherFindings).toEqual([]);
+  });
+
+  it("honors a configured Codex home when locating the marked runtime subtree", async () => {
+    const environment = await createTestEnvironment();
+    const codexHome = join(environment.root, "configured-codex");
+    const systemRoot = join(codexHome, "skills", ".system");
+    await createSkill(join(systemRoot, "imagegen"), { name: "imagegen" });
+    await writeFile(
+      join(systemRoot, ".codex-system-skills.marker"),
+      "marker\n",
+      "utf8",
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+      agentHomeDirectories: { codex: codexHome },
+    }).scan({});
+
+    expect(inventory.installations).toEqual([]);
+    expect(inventory.otherFindings).toHaveLength(1);
+    expect(inventory.otherFindings[0]).toMatchObject({
+      skill: { name: "imagegen" },
+      classification: "system-skill",
+    });
+  });
+
+  it("refuses a declared root that would widen removal inside a protective root", async () => {
+    const environment = await createTestEnvironment();
+    const vendorRoot = join(environment.home, "vendor");
+    await createSkill(join(vendorRoot, "inner", "vendored"), {
+      name: "vendored",
+    });
+    const catalog = await loadAdapters({
+      localAdapterPaths: [
+        await writeAdapter(environment, {
+          schemaVersion: 1,
+          id: "fixture.promoting-root",
+          name: "Promoting root",
+          platforms: [supportedPlatform()],
+          roots: [
+            {
+              id: "root",
+              kind: "user",
+              agentId: "fixture",
+              path: {
+                default: { base: "home", segments: ["vendor", "inner"] },
+              },
+            },
+          ],
+        }),
+      ],
+      platform: supportedPlatform(),
+      pathBases: adapterBases(environment),
+    });
+
+    await expect(
+      createInventoryScanner({
+        now: () => fixedTime,
+        environment: unusedDefaultEnvironment(environment),
+        commandRunner: unavailableCommandRunner,
+        adapterCatalog: catalog,
+      }).scan({
+        roots: [
+          {
+            kind: "source",
+            path: vendorRoot,
+            agentId: null,
+            scope: null,
+            source: { id: "vendored-source", url: null },
+            adapterId: null,
+          },
+        ],
+      }),
+    ).rejects.toThrow(/overlapping discovery roots/);
+  });
+
+  it("lets an explicitly supplied root reclassify a subtree of a protective root", async () => {
+    const environment = await createTestEnvironment();
+    const vendorRoot = join(environment.home, "vendor");
+    const innerRoot = join(vendorRoot, "inner");
+    await createSkill(join(innerRoot, "reclaimed"), { name: "reclaimed" });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+    ).scan({
+      roots: [
+        {
+          kind: "source",
+          path: vendorRoot,
+          agentId: null,
+          scope: null,
+          source: { id: "vendored-source", url: null },
+          adapterId: null,
+        },
+        { kind: "user", path: innerRoot, agentId: "fixture", adapterId: null },
+      ],
+    });
+
+    expect(inventory.installations.map((item) => item.skill.name)).toEqual([
+      "reclaimed",
+    ]);
+    expect(inventory.otherFindings).toEqual([]);
+  });
+
+  it("discovers standalone Claude Skills in user and workspace roots", async () => {
+    const environment = await createTestEnvironment();
+    await createSkill(join(environment.home, ".claude", "skills", "graphify"), {
+      name: "graphify",
+    });
+    await createSkill(
+      join(environment.workspace, ".claude", "skills", "project-helper"),
+      { name: "project-helper" },
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: environment.workspace,
+    }).scan({});
+
+    expect(
+      inventory.installations.map((item) => ({
+        name: item.skill.name,
+        agentId: item.agentId,
+        scope: item.scope.kind,
+        classification: item.classification,
+      })),
+    ).toEqual([
+      {
+        name: "graphify",
+        agentId: "claude-code",
+        scope: "agent",
+        classification: "active-installation",
+      },
+      {
+        name: "project-helper",
+        agentId: "claude-code",
+        scope: "workspace",
+        classification: "standalone-project-skill",
+      },
+    ]);
+  });
+
+  it("groups a Claude link with its unmanaged target instead of duplicating the Skill", async () => {
+    const environment = await createTestEnvironment();
+    const canonical = join(environment.home, ".agents", "skills", "shared");
+    await createSkill(canonical, { name: "shared" });
+    await mkdir(join(environment.home, ".claude", "skills"), {
+      recursive: true,
+    });
+    await createDirectoryLink(
+      canonical,
+      join(environment.home, ".claude", "skills", "shared"),
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({});
+
+    expect(inventory.installations).toHaveLength(2);
+    expect(inventory.logicalSkills).toHaveLength(1);
+    expect(inventory.logicalSkills[0]?.installationIds).toHaveLength(2);
+    expect(inventory.logicalSkills[0]?.identity.strongEvidence).toContainEqual({
+      strength: "strong",
+      kind: "canonical-target",
+      canonicalPath: canonical,
+    });
+  });
+
+  it("honors a configured Claude config directory and ignores plugin cache content", async () => {
+    const environment = await createTestEnvironment();
+    const claudeConfig = join(environment.root, "configured-claude");
+    await createSkill(join(claudeConfig, "skills", "configured"), {
+      name: "configured",
+    });
+    await createSkill(
+      join(
+        claudeConfig,
+        "plugins",
+        "cache",
+        "marketplace",
+        "bundle",
+        "1.0.0",
+        "skills",
+        "bundled",
+      ),
+      { name: "bundled" },
+    );
+    await createSkill(join(environment.home, ".claude", "skills", "default"), {
+      name: "default",
+    });
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+      agentHomeDirectories: { "claude-code": claudeConfig },
+    }).scan({});
+
+    expect(inventory.installations.map((item) => item.skill.name)).toEqual([
+      "configured",
+    ]);
+  });
+  it("exposes a standalone Skill only to the agent whose root holds it", async () => {
+    const environment = await createTestEnvironment();
+    await createSkill(join(environment.home, ".claude", "skills", "solo"), {
+      name: "solo",
+    });
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({});
+
+    expect(inventory.installations[0]).toMatchObject({
+      agentId: "claude-code",
+      exposedTo: ["claude-code"],
     });
   });
 });

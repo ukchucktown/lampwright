@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PlanningError,
   plan,
+  resolveTargetSelectors,
   stringifyModel,
   type HardDependency,
   type Installation,
@@ -10,6 +11,7 @@ import {
   type PluginBoundary,
   type RemovalEvidence,
   type RemovalTarget,
+  type Scope,
 } from "../src/index.js";
 import {
   buildInstallation,
@@ -142,6 +144,7 @@ function pluginBoundary(
     pluginId,
     version: "1.0.0",
     adapterId: "fixture-adapter",
+    runtimeDefault: false,
     ownership: {
       kind: "plugin",
       pluginId,
@@ -457,6 +460,28 @@ describe("pure removal planner", () => {
         "configuration:settings",
       ]),
     });
+
+    const runtimeInventory = inventoryWith([ordinary, child], {
+      plugins: [{ ...boundary, runtimeDefault: true }],
+    });
+    const runtimeAll = plan(runtimeInventory, {
+      kind: "all",
+      includePlugins: true,
+      force: false,
+      mode: "managed-first",
+    });
+    expect(runtimeAll.targets).toEqual([target("ordinary")]);
+
+    const namedRuntimePlugin = plan(runtimeInventory, {
+      kind: "targets",
+      targets: [{ kind: "plugin", pluginBoundaryId: "plugin-a-boundary" }],
+      force: false,
+      mode: "managed-first",
+    });
+    expect(namedRuntimePlugin.targets).toEqual([
+      { kind: "plugin", pluginBoundaryId: "plugin-a-boundary" },
+    ]);
+    expect(namedRuntimePlugin.actions).not.toHaveLength(0);
   });
 
   it("resolves Plugin targets by physical boundary rather than external ID", () => {
@@ -1818,5 +1843,130 @@ describe("pure removal planner", () => {
         mode: "managed-first",
       }),
     ).toThrow(PlanningError);
+  });
+  it("resolves a declared source to its Group and expands the Group to exact members", () => {
+    const members = ["a", "b"].map((id) =>
+      buildInstallation({
+        id,
+        manager: { id: "vercel-skills" },
+        source: { id: "acme/toolkit", url: null },
+        ownership: {
+          kind: "manager",
+          managerId: "vercel-skills",
+          confidence: "declared",
+        },
+        location: {
+          path: `/fixtures/skills/${id}`,
+          canonicalPath: `/fixtures/skills/${id}`,
+          artifactType: { kind: "directory" },
+        },
+        removal: {
+          managed: null,
+          fallback: availableFallback,
+          recordCleanups: [],
+        },
+      }),
+    );
+    const inventory = buildInventory({
+      installations: members,
+      groups: [
+        {
+          id: "installation-group-1",
+          label: "acme/toolkit",
+          tier: "declared",
+          evidence: {
+            tier: "declared",
+            kind: "manager-source",
+            managerId: "vercel-skills",
+            sourceId: "acme/toolkit",
+          },
+          scope: { kind: "user" },
+          installationIds: ["a", "b"],
+        },
+      ],
+    });
+
+    const bySource = resolveTargetSelectors(inventory, ["source:acme/toolkit"]);
+    const byId = resolveTargetSelectors(inventory, [
+      "group:installation-group-1",
+    ]);
+    expect(bySource).toEqual([
+      { kind: "source-group", groupId: "installation-group-1" },
+    ]);
+    expect(byId).toEqual(bySource);
+
+    const result = plan(inventory, {
+      kind: "targets",
+      targets: bySource,
+      force: false,
+      mode: "brute-force",
+    });
+    expect(result.targets).toEqual(bySource);
+    expect(
+      result.actions.flatMap((action) => action.affectedInstallationIds).sort(),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("keeps the source selector expanding to Installations when no Group declares it", () => {
+    const inventory = buildInventory({
+      installations: [
+        buildInstallation({ source: { id: "loose-source", url: null } }),
+      ],
+    });
+
+    expect(resolveTargetSelectors(inventory, ["source:loose-source"])).toEqual([
+      { kind: "installation", installationId: "installation-1" },
+    ]);
+  });
+
+  it("refuses an ambiguous source selector that matches more than one Group", () => {
+    const group = (id: string, scope: Scope, installationIds: string[]) => ({
+      id,
+      label: "acme/toolkit",
+      tier: "declared" as const,
+      evidence: {
+        tier: "declared" as const,
+        kind: "manager-source" as const,
+        managerId: "vercel-skills",
+        sourceId: "acme/toolkit",
+      },
+      scope,
+      installationIds,
+    });
+    const member = (id: string, scope: Scope) =>
+      buildInstallation({
+        id,
+        manager: { id: "vercel-skills" },
+        source: { id: "acme/toolkit", url: null },
+        scope,
+        ownership: {
+          kind: "manager",
+          managerId: "vercel-skills",
+          confidence: "declared",
+        },
+        location: {
+          path: `/fixtures/skills/${id}`,
+          canonicalPath: `/fixtures/skills/${id}`,
+          artifactType: { kind: "directory" },
+        },
+      });
+    const inventory = buildInventory({
+      installations: [
+        member("a", { kind: "user" }),
+        member("b", { kind: "workspace", workspacePath: "/work" }),
+      ],
+      groups: [
+        group("installation-group-1", { kind: "user" }, ["a"]),
+        group(
+          "installation-group-2",
+          { kind: "workspace", workspacePath: "/work" },
+          ["b"],
+        ),
+      ],
+    });
+
+    expect(() =>
+      resolveTargetSelectors(inventory, ["source:acme/toolkit"]),
+    ).toThrow(/use group:<id>/);
   });
 });

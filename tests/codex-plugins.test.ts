@@ -44,6 +44,7 @@ interface PluginListEntry {
   readonly installed: true;
   readonly enabled: boolean;
   readonly source: Record<string, unknown>;
+  readonly marketplaceSource?: Record<string, unknown>;
   readonly installPolicy: string;
   readonly authPolicy: string;
 }
@@ -1052,5 +1053,106 @@ describe("Codex plugin adapter", () => {
       kind: "unavailable",
       reason: expect.stringContaining("manifest"),
     });
+  });
+
+  it("flags a Plugin from a runtime-managed marketplace without withholding removal", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await createPluginRoot(activeRoot(environment));
+    await mkdir(codexHome(environment), { recursive: true });
+    const runner = commandRunner({
+      environment,
+      installed: () => [
+        listEntry(
+          { source: "local", path: join(fixture.home, "runtime", "plugin") },
+          {
+            marketplaceSource: {
+              sourceType: "local",
+              source: join(
+                fixture.home,
+                ".cache",
+                "codex-runtimes",
+                "codex-primary-runtime",
+                "plugins",
+                "acme-marketplace",
+              ),
+            },
+          },
+        ),
+      ],
+    });
+
+    const inventory = await scanner(environment, runner).scan({});
+
+    expect(inventory.plugins).toHaveLength(1);
+    expect(inventory.plugins[0]).toMatchObject({
+      pluginId: "quality-suite@acme-marketplace",
+      runtimeDefault: true,
+    });
+    expect(inventory.plugins[0]?.removal.managed?.availability).toEqual({
+      kind: "available",
+    });
+  });
+
+  it("flags a Plugin staged in the runtime's bundled marketplace directory", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await createPluginRoot(activeRoot(environment));
+    await mkdir(codexHome(environment), { recursive: true });
+    const runner = commandRunner({
+      environment,
+      installed: () => [
+        listEntry(
+          { source: "local", path: join(fixture.home, "bundled", "plugin") },
+          {
+            marketplaceSource: {
+              sourceType: "local",
+              source: join(
+                codexHome(environment),
+                ".tmp",
+                "bundled-marketplaces",
+                "acme-marketplace",
+              ),
+            },
+          },
+        ),
+      ],
+    });
+
+    const inventory = await scanner(environment, runner).scan({});
+
+    expect(inventory.plugins[0]?.runtimeDefault).toBe(true);
+  });
+
+  it("never flags a user marketplace, including one whose name collides or reports no source", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await createPluginRoot(activeRoot(environment));
+    await mkdir(codexHome(environment), { recursive: true });
+    const marketplaceSources = [
+      { sourceType: "local", source: join(fixture.home, "my-marketplaces") },
+      {
+        sourceType: "local",
+        source: join(fixture.home, ".cache", "codex-runtimes-sibling"),
+      },
+      undefined,
+    ];
+
+    for (const marketplaceSource of marketplaceSources) {
+      const runner = commandRunner({
+        environment,
+        installed: () => [
+          listEntry(
+            { source: "local", path: join(fixture.home, "mine") },
+            marketplaceSource === undefined ? {} : { marketplaceSource },
+          ),
+        ],
+      });
+
+      const inventory = await scanner(environment, runner).scan({});
+
+      expect(inventory.plugins).toHaveLength(1);
+      expect(inventory.plugins[0]?.runtimeDefault).toBe(false);
+    }
   });
 });

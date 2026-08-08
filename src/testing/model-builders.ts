@@ -65,6 +65,7 @@ export function buildInstallation(
     adapterId: "fixture-adapter",
     pluginBoundaryId: null,
     agentId: "fixture-agent",
+    exposedTo: ["fixture-agent"],
     scope: { kind: "user" },
     location: {
       path: "/fixtures/skills/example-skill",
@@ -187,6 +188,8 @@ export function buildLogicalSkill(
       ],
     },
     installationIds: ["installation-1"],
+    groupId: null,
+    spansGroups: false,
     ...overrides,
   });
 }
@@ -202,6 +205,7 @@ export function buildPluginBoundary(
     otherFindings: [],
     logicalSkills: [],
     identityHints: [],
+    groups: [],
     plugins: [
       {
         id: "fixture-plugin",
@@ -214,6 +218,7 @@ export function buildPluginBoundary(
           independentlySelectable: false,
           confidence: "declared",
         },
+        runtimeDefault: false,
         installationIds: [],
         resources: [],
         removal: {
@@ -257,6 +262,7 @@ export function buildInventory(
     otherFindings: [],
     logicalSkills: [],
     identityHints: [],
+    groups: [],
     plugins: [],
     dependencies: [],
     ...overrides,

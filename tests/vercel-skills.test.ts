@@ -974,4 +974,186 @@ describe("Vercel skills adapter", () => {
     };
     expect(Object.keys(remainingLock.skills)).toEqual(["keep-skill"]);
   });
+
+  it("reconciles the home-relative global lock when XDG_STATE_HOME is unset", async () => {
+    const fixture = await createTestEnvironment();
+    const environment: InventoryScanEnvironment = {
+      ...scanEnvironment(fixture),
+      stateDirectory: null,
+    };
+    const canonical = join(
+      environment.homeDirectory,
+      ".agents",
+      "skills",
+      "review-tools",
+    );
+    await writeSkill(canonical, "review-tools");
+    await writeJson(
+      join(environment.homeDirectory, ".agents", ".skill-lock.json"),
+      {
+        version: 3,
+        skills: {
+          "review-tools": {
+            source: "acme/review-tools",
+            sourceType: "github",
+            sourceUrl: "https://github.com/acme/review-tools.git",
+            skillPath: "skills/review-tools",
+          },
+        },
+      },
+    );
+
+    const inventory = await createInventoryScanner({
+      now: () => fixedTime,
+      environment,
+      commandRunner: commandRunner(true),
+    }).scan({});
+
+    expect(inventory.installations).toHaveLength(1);
+    expect(inventory.installations[0]).toMatchObject({
+      manager: { id: "vercel-skills" },
+      source: { id: "acme/review-tools" },
+      ownership: { kind: "manager", managerId: "vercel-skills" },
+      removal: { managed: { availability: { kind: "available" } } },
+    });
+  });
+
+  it("discovers a global lock the manager cannot resolve but withholds managed removal", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const canonical = globalCanonicalPath(environment, "review-tools");
+    await writeSkill(canonical, "review-tools");
+    await writeJson(
+      join(environment.homeDirectory, ".agents", ".skill-lock.json"),
+      {
+        version: 3,
+        skills: {
+          "review-tools": {
+            source: "acme/review-tools",
+            sourceType: "github",
+            sourceUrl: "https://github.com/acme/review-tools.git",
+            skillPath: "skills/review-tools",
+          },
+        },
+      },
+    );
+
+    const inventory = await scanner(environment, true).scan({});
+
+    expect(inventory.installations).toHaveLength(1);
+    const installation = inventory.installations[0]!;
+    expect(installation).toMatchObject({
+      manager: { id: "vercel-skills" },
+      source: { id: "acme/review-tools" },
+      removal: {
+        managed: {
+          availability: {
+            kind: "unavailable",
+            reason:
+              "the global lock is not the location skills@1.5.22 resolves in this environment",
+          },
+        },
+        fallback: { kind: "available" },
+      },
+    });
+    expect(installation.removal.recordCleanups).not.toHaveLength(0);
+  });
+
+  it("prefers the manager-resolved global lock when both locations exist", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await writeSkill(globalCanonicalPath(environment, "resolved"), "resolved");
+    await writeSkill(globalCanonicalPath(environment, "shadowed"), "shadowed");
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        resolved: {
+          source: "acme/resolved",
+          sourceType: "github",
+          skillPath: "skills/resolved",
+        },
+      },
+    });
+    await writeJson(
+      join(environment.homeDirectory, ".agents", ".skill-lock.json"),
+      {
+        version: 3,
+        skills: {
+          shadowed: {
+            source: "acme/shadowed",
+            sourceType: "github",
+            skillPath: "skills/shadowed",
+          },
+        },
+      },
+    );
+
+    const inventory = await scanner(environment, true).scan({});
+
+    const managed = inventory.installations.filter(
+      (installation) => installation.manager !== null,
+    );
+    expect(managed).toHaveLength(1);
+    expect(managed[0]).toMatchObject({
+      skill: { name: "resolved" },
+      removal: { managed: { availability: { kind: "available" } } },
+    });
+  });
+  it("records every agent that can load a manager-owned Skill, not the Manager", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const canonical = globalCanonicalPath(environment, "review-tools");
+    await writeSkill(canonical, "review-tools");
+    await createDirectoryLink(
+      canonical,
+      join(environment.homeDirectory, ".claude", "skills", "review-tools"),
+    );
+    await createDirectoryLink(
+      canonical,
+      join(environment.homeDirectory, ".codex", "skills", "review-tools"),
+    );
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        "review-tools": {
+          source: "acme/review-tools",
+          sourceType: "github",
+          skillPath: "skills/review-tools",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+
+    const installation = inventory.installations[0]!;
+    expect(installation.agentId).toBe("vercel-skills");
+    expect([...installation.exposedTo].sort()).toEqual([
+      "claude-code",
+      "codex",
+      "universal",
+    ]);
+  });
+
+  it("leaves a lock-only record exposed to nothing while keeping it visible", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        "absent-tools": {
+          source: "acme/absent-tools",
+          sourceType: "github",
+          skillPath: "skills/absent-tools",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+
+    expect(inventory.installations).toHaveLength(1);
+    expect(inventory.installations[0]).toMatchObject({
+      status: "broken",
+      exposedTo: [],
+    });
+  });
 });

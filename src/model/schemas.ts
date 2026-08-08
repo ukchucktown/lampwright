@@ -213,6 +213,7 @@ export const removalTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("plugin"),
     pluginBoundaryId: nonEmptyString,
   }),
+  z.strictObject({ kind: z.literal("source-group"), groupId: modelId }),
 ]);
 
 const inventoryRecordReferenceSchema = z.discriminatedUnion("kind", [
@@ -409,6 +410,7 @@ export const installationSchema = z.strictObject({
   adapterId: nonEmptyString.nullable(),
   pluginBoundaryId: nonEmptyString.nullable(),
   agentId: nonEmptyString,
+  exposedTo: z.array(nonEmptyString),
   scope: scopeSchema,
   location: artifactLocationSchema,
   contentHash: nonEmptyString.nullable(),
@@ -481,6 +483,31 @@ export const logicalSkillSchema = z.strictObject({
   skill: skillDescriptorSchema,
   identity: logicalSkillIdentitySchema,
   installationIds: z.array(modelId).min(1),
+  groupId: modelId.nullable(),
+  spansGroups: z.boolean(),
+});
+
+const installationGroupEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    tier: z.literal("declared"),
+    kind: z.literal("manager-source"),
+    managerId: nonEmptyString,
+    sourceId: nonEmptyString,
+  }),
+  z.strictObject({
+    tier: z.literal("structural"),
+    kind: z.literal("repository-remote"),
+    remoteUrl: nonEmptyString,
+  }),
+]);
+
+const installationGroupSchema = z.strictObject({
+  id: modelId,
+  label: nonEmptyString,
+  tier: z.enum(["declared", "structural"]),
+  evidence: installationGroupEvidenceSchema,
+  scope: scopeSchema,
+  installationIds: z.array(modelId).min(1),
 });
 
 const weakIdentityHintSchema = z.strictObject({
@@ -502,6 +529,7 @@ const pluginBoundarySchema = z.strictObject({
   version: nonEmptyString.nullable(),
   adapterId: nonEmptyString.nullable(),
   ownership: pluginOwnershipSchema,
+  runtimeDefault: z.boolean(),
   installationIds: z.array(modelId),
   resources: z.array(pluginResourceSchema),
   removal: removalEvidenceSchema,
@@ -515,6 +543,7 @@ export const inventorySchema = z.strictObject({
   otherFindings: z.array(nonInstallationFindingSchema),
   logicalSkills: z.array(logicalSkillSchema),
   identityHints: z.array(weakIdentityHintSchema),
+  groups: z.array(installationGroupSchema),
   plugins: z.array(pluginBoundarySchema),
   dependencies: z.array(dependencySchema),
 });

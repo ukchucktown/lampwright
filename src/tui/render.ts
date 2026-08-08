@@ -370,6 +370,7 @@ function describeTarget(target: RemovalTarget): string {
     return `Installation ${target.installationId}`;
   if (target.kind === "logical-skill")
     return `Logical Skill ${target.logicalSkillId}`;
+  if (target.kind === "source-group") return `Source Group ${target.groupId}`;
   return `Plugin ${target.pluginBoundaryId}`;
 }
 

@@ -39,7 +39,36 @@ export function resolveTargetSelectors(
       case "plugin":
         targets.push({ kind: "plugin", pluginBoundaryId: id });
         break;
+      case "group": {
+        const group = inventory.groups.find((candidate) => candidate.id === id);
+        if (group === undefined) {
+          throw new PlanningError(
+            "target-not-found",
+            `group selector did not match a Group: ${id}`,
+          );
+        }
+        targets.push({ kind: "source-group", groupId: group.id });
+        break;
+      }
       case "source": {
+        // A declared Group is the source, so name it directly. Without one the
+        // selector keeps its original meaning and expands to each Installation.
+        const groups = inventory.groups.filter(
+          (candidate) =>
+            candidate.evidence.kind === "manager-source" &&
+            candidate.evidence.sourceId === id,
+        );
+        if (groups.length > 1) {
+          throw new PlanningError(
+            "invalid-intent",
+            `source selector matches ${String(groups.length)} groups; use group:<id>: ${id}`,
+          );
+        }
+        const group = groups[0];
+        if (group !== undefined) {
+          targets.push({ kind: "source-group", groupId: group.id });
+          break;
+        }
         const matches = inventory.installations.filter(
           (installation) => installation.source?.id === id,
         );

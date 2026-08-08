@@ -45,6 +45,10 @@ import { hashSkillDirectory } from "./content-hash.js";
 import { applyAdapterManifests } from "./adapter-runtime.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
+  assignGroupsToLogicalSkills,
+  buildInstallationGroups,
+} from "./groups.js";
+import {
   createWeakIdentityHints,
   groupInstallations,
   stableId,
@@ -60,6 +64,7 @@ import {
   InventoryScanError,
   type DiscoveryRoot,
   type InventoryCommandRunner,
+  type InventoryScanEnvironment,
   type InventoryScanner,
   type InventoryScannerOptions,
   type ScanRequest,
@@ -87,32 +92,44 @@ export function createInventoryScanner(
   };
 }
 
-export async function scan(request: ScanRequest = {}): Promise<Inventory> {
+/**
+ * Resolves the scan environment from the current process.
+ *
+ * Every caller that scans real machine state must use this rather than
+ * assembling an environment of its own, so command-line and library scans
+ * cannot disagree about where an agent, manager, or lock file lives.
+ */
+export function defaultInventoryScanEnvironment(): InventoryScanEnvironment {
   const homeDirectory = homedir();
+  return {
+    homeDirectory,
+    workspaceDirectory: process.cwd(),
+    configDirectory:
+      process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
+    stateDirectory: process.env.XDG_STATE_HOME || null,
+    cacheDirectory: process.env.XDG_CACHE_HOME || join(homeDirectory, ".cache"),
+    nodeVersion: process.versions.node,
+    agentHomeDirectories: Object.fromEntries(
+      [
+        ["autohand-code", process.env.AUTOHAND_HOME],
+        ["claude-code", process.env.CLAUDE_CONFIG_DIR],
+        ["codex", process.env.CODEX_HOME],
+        ["grok", process.env.GROK_HOME],
+        ["hermes-agent", process.env.HERMES_HOME],
+        ["mistral-vibe", process.env.VIBE_HOME],
+      ].flatMap(([agentId, path]) =>
+        typeof path === "string" && path.trim().length > 0
+          ? [[agentId, path]]
+          : [],
+      ),
+    ),
+  };
+}
+
+export async function scan(request: ScanRequest = {}): Promise<Inventory> {
   return scanWithOptions(request, {
     now: () => new Date(),
-    environment: {
-      homeDirectory,
-      workspaceDirectory: process.cwd(),
-      configDirectory:
-        process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
-      stateDirectory: process.env.XDG_STATE_HOME || null,
-      nodeVersion: process.versions.node,
-      agentHomeDirectories: Object.fromEntries(
-        [
-          ["autohand-code", process.env.AUTOHAND_HOME],
-          ["claude-code", process.env.CLAUDE_CONFIG_DIR],
-          ["codex", process.env.CODEX_HOME],
-          ["grok", process.env.GROK_HOME],
-          ["hermes-agent", process.env.HERMES_HOME],
-          ["mistral-vibe", process.env.VIBE_HOME],
-        ].flatMap(([agentId, path]) =>
-          typeof path === "string" && path.trim().length > 0
-            ? [[agentId, path]]
-            : [],
-        ),
-      ),
-    },
+    environment: defaultInventoryScanEnvironment(),
     commandRunner: systemCommandRunner,
   });
 }
@@ -121,7 +138,8 @@ async function scanWithOptions(
   request: ScanRequest,
   options: InventoryScannerOptions,
 ): Promise<Inventory> {
-  const requestRoots = validateAndNormalizeRequest(request, options);
+  const { roots: requestRoots, explicitRootKeys } =
+    await validateAndNormalizeRequest(request, options);
   if (
     options.adapterCatalog?.adapters.some((adapter) =>
       requestRoots.some((root) => root.adapterId === adapter.id),
@@ -162,11 +180,22 @@ async function scanWithOptions(
         existing !== undefined &&
         !(await rootsDescribeSameBoundary(existing.root, candidate.root))
       ) {
-        throw new InventoryScanError(
-          "invalid-request",
-          `overlapping discovery roots classify ${candidate.path} differently`,
-          candidate.path,
+        const preferred = moreSpecificRoot(
+          existing.root,
+          candidate.root,
+          explicitRootKeys,
         );
+        if (preferred === null) {
+          throw new InventoryScanError(
+            "invalid-request",
+            `overlapping discovery roots classify ${candidate.path} differently`,
+            candidate.path,
+          );
+        }
+        if (preferred === candidate.root) {
+          candidatesByPath.set(key, candidate);
+        }
+        continue;
       }
       if (existing === undefined) {
         candidatesByPath.set(key, candidate);
@@ -254,7 +283,11 @@ async function scanWithOptions(
     adapterRoots.rootIds,
   );
   const installations = adapterEvidence.installations;
-  const logicalSkills = groupInstallations(installations);
+  const groups = buildInstallationGroups(installations);
+  const logicalSkills = assignGroupsToLogicalSkills(
+    groupInstallations(installations),
+    groups,
+  );
   const identityHints = createWeakIdentityHints(installations, logicalSkills);
   const adapterPluginInstallationIds = new Set(
     [
@@ -285,6 +318,7 @@ async function scanWithOptions(
     ].sort(compareRecordPath),
     logicalSkills,
     identityHints,
+    groups,
     plugins,
     dependencies: adapterEvidence.dependencies,
   };
@@ -326,6 +360,52 @@ function blockForInvalidVercelLock(installation: Installation): Installation {
   };
 }
 
+/**
+ * Resolves two roots that classify one path differently.
+ *
+ * A root declared strictly inside another describes a narrower boundary and
+ * wins, which is how a marked runtime subtree overrides the ordinary agent root
+ * containing it. Roots that do not contain one another remain a contradiction
+ * the caller must fix, so the overlap check keeps its meaning.
+ */
+function moreSpecificRoot(
+  left: DiscoveryRoot,
+  right: DiscoveryRoot,
+  explicitRootKeys: ReadonlySet<string>,
+): DiscoveryRoot | null {
+  if (pathComparisonKey(left.path) === pathComparisonKey(right.path)) {
+    return null;
+  }
+  const [outer, inner] = pathIsWithin(left.path, right.path)
+    ? ([left, right] as const)
+    : pathIsWithin(right.path, left.path)
+      ? ([right, left] as const)
+      : ([null, null] as const);
+  if (outer === null || inner === null) {
+    return null;
+  }
+  // A declared root may narrow only toward protection. Widening what is
+  // removable requires a root the caller supplied for this invocation.
+  if (
+    !explicitRootKeys.has(pathComparisonKey(inner.path)) &&
+    rootWithholdsRemoval(outer) &&
+    !rootWithholdsRemoval(inner)
+  ) {
+    return null;
+  }
+  return inner;
+}
+
+/** Whether a root's findings are kept outside ordinary removal candidates. */
+function rootWithholdsRemoval(root: DiscoveryRoot): boolean {
+  return (
+    root.kind === "source" ||
+    root.kind === "cache-or-vendor" ||
+    root.kind === "system" ||
+    root.kind === "unknown"
+  );
+}
+
 function pathIsWithin(rootPath: string, candidatePath: string): boolean {
   const relativePath = relative(rootPath, candidatePath);
   return (
@@ -336,10 +416,16 @@ function pathIsWithin(rootPath: string, candidatePath: string): boolean {
   );
 }
 
-function validateAndNormalizeRequest(
+interface NormalizedRequestRoots {
+  readonly roots: readonly DiscoveryRoot[];
+  /** Paths the caller supplied for this invocation, not declared evidence. */
+  readonly explicitRootKeys: ReadonlySet<string>;
+}
+
+async function validateAndNormalizeRequest(
   request: ScanRequest,
   options: InventoryScannerOptions,
-): readonly DiscoveryRoot[] {
+): Promise<NormalizedRequestRoots> {
   let parsedRequest: ScanRequest;
   try {
     parsedRequest = parseScanRequest(request);
@@ -352,7 +438,7 @@ function validateAndNormalizeRequest(
 
   validateEnvironment(options);
   const declaredRoots = [
-    ...defaultDiscoveryRoots(options.environment),
+    ...(await defaultDiscoveryRoots(options.environment)),
     ...(parsedRequest.roots ?? []),
   ];
   const seen = new Map<string, DiscoveryRoot>();
@@ -399,12 +485,17 @@ function validateAndNormalizeRequest(
     return [normalized];
   });
 
-  return roots.sort((left, right) =>
-    compareText(
-      `${pathComparisonKey(left.path)}\0${left.kind}`,
-      `${pathComparisonKey(right.path)}\0${right.kind}`,
+  return {
+    roots: roots.sort((left, right) =>
+      compareText(
+        `${pathComparisonKey(left.path)}\0${left.kind}`,
+        `${pathComparisonKey(right.path)}\0${right.kind}`,
+      ),
     ),
-  );
+    explicitRootKeys: new Set(
+      (parsedRequest.roots ?? []).map((root) => pathComparisonKey(root.path)),
+    ),
+  };
 }
 
 function validateEnvironment(options: InventoryScannerOptions): void {
@@ -417,6 +508,8 @@ function validateEnvironment(options: InventoryScannerOptions): void {
     (options.environment.stateDirectory !== undefined &&
       options.environment.stateDirectory !== null &&
       !isAbsolute(options.environment.stateDirectory)) ||
+    (options.environment.cacheDirectory !== undefined &&
+      !isAbsolute(options.environment.cacheDirectory)) ||
     Object.values(options.environment.agentHomeDirectories ?? {}).some(
       (path) => !isAbsolute(path),
     )
@@ -434,9 +527,20 @@ function validateEnvironment(options: InventoryScannerOptions): void {
   }
 }
 
-function defaultDiscoveryRoots(
+/**
+ * Skills that Codex ships with its own runtime.
+ *
+ * Codex marks the subtree itself, so the boundary is declared by the runtime
+ * rather than inferred from a directory name. Without the marker the subtree
+ * stays an ordinary part of the agent root: a missing marker must never hide a
+ * user's own Skills.
+ */
+const codexSystemSkillsDirectoryName = ".system";
+const codexSystemSkillsMarkerName = ".codex-system-skills.marker";
+
+async function defaultDiscoveryRoots(
   environment: InventoryScannerOptions["environment"],
-): readonly DiscoveryRoot[] {
+): Promise<readonly DiscoveryRoot[]> {
   const userRoot: DiscoveryRoot = {
     kind: "user",
     path: join(environment.homeDirectory, ".agents", "skills"),
@@ -460,11 +564,58 @@ function defaultDiscoveryRoots(
     agentId: "codex",
     adapterId: null,
   };
+  const claudeConfigDirectory =
+    environment.agentHomeDirectories?.["claude-code"] ??
+    join(environment.homeDirectory, ".claude");
+  const claudeUserRoot: DiscoveryRoot = {
+    kind: "agent",
+    path: join(claudeConfigDirectory, "skills"),
+    agentId: "claude-code",
+    adapterId: null,
+  };
+  const claudeWorkspaceRoot: DiscoveryRoot = {
+    kind: "workspace",
+    path: join(environment.workspaceDirectory, ".claude", "skills"),
+    workspacePath: environment.workspaceDirectory,
+    agentId: "claude-code",
+    adapterId: null,
+  };
+  const codexSystemPath = join(codexRoot.path, codexSystemSkillsDirectoryName);
+  const codexSystemRoots: readonly DiscoveryRoot[] = (await isRegularFile(
+    join(codexSystemPath, codexSystemSkillsMarkerName),
+  ))
+    ? [
+        {
+          kind: "system",
+          path: codexSystemPath,
+          agentId: "codex",
+          adapterId: null,
+        },
+      ]
+    : [];
   const genericRoots =
     pathComparisonKey(userRoot.path) === pathComparisonKey(workspaceRoot.path)
       ? [workspaceRoot]
       : [userRoot, workspaceRoot];
-  return [...genericRoots, codexRoot];
+  return [
+    ...genericRoots,
+    codexRoot,
+    ...codexSystemRoots,
+    claudeUserRoot,
+    claudeWorkspaceRoot,
+  ];
+}
+
+/**
+ * A marker must be a regular file, never a link, so a planted link cannot make
+ * the scanner treat a user's Skills as inseparable runtime content.
+ */
+async function isRegularFile(path: string): Promise<boolean> {
+  const stats = await lstat(path).catch((error: unknown) => {
+    if (isMissingPathError(error)) return null;
+    throw error;
+  });
+  return stats !== null && stats.isFile();
 }
 
 async function adapterDiscoveryRoots(
@@ -987,6 +1138,7 @@ function createInstallation(
     pluginBoundaryId:
       root.kind === "plugin" ? pluginBoundaryIdForRoot(root) : null,
     agentId: root.agentId,
+    exposedTo: [root.agentId],
     scope: scopeForInstallationRoot(root),
     location,
     contentHash,
@@ -1061,6 +1213,7 @@ async function createPluginBoundaries(
         independentlySelectable: root.independentlySelectable,
         confidence: "declared",
       },
+      runtimeDefault: false,
       installationIds: sortedMembers.map((installation) => installation.id),
       resources: [
         {

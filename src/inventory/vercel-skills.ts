@@ -62,6 +62,8 @@ const skillFileName = "SKILL.md";
 interface LockDocument {
   readonly path: string;
   readonly format: "global" | "project";
+  /** Whether the manager itself resolves this lock in the current environment. */
+  readonly managerVisible: boolean;
   readonly scope: Scope;
   readonly bytes: Buffer;
   readonly location: ArtifactLocation;
@@ -90,12 +92,7 @@ export async function scanVercelSkills(
   commandRunner: InventoryCommandRunner,
 ): Promise<VercelSkillsScanResult> {
   const lockResults = await Promise.all([
-    readLockDocument(
-      globalLockPath(environment),
-      "global",
-      { kind: "user" },
-      dirname(vercelCanonicalPath("global", environment, "placeholder")),
-    ),
+    readGlobalLockDocument(environment),
     readLockDocument(
       join(environment.workspaceDirectory, "skills-lock.json"),
       "project",
@@ -294,6 +291,7 @@ async function materializeLockEntry(input: {
     environment: input.environment,
     scope: input.lock.format,
     lockVersion: numberField(input.lock.value.version)!,
+    lockManagerVisible: input.lock.managerVisible,
     managerAvailable: input.managerAvailable,
     unsafeReason: managedUnsafeReason,
     externalId: input.lockKey,
@@ -335,6 +333,8 @@ async function materializeLockEntry(input: {
     adapterId: VERCEL_SKILLS_ADAPTER_ID,
     pluginBoundaryId: null,
     agentId: managerId,
+    // Every agent whose native location the Manager itself placed.
+    exposedTo: agents,
     scope: input.lock.scope,
     location: primaryLocation,
     contentHash,
@@ -382,6 +382,7 @@ function managedRemoval(input: {
   readonly environment: InventoryScanEnvironment;
   readonly scope: "global" | "project";
   readonly lockVersion: number;
+  readonly lockManagerVisible: boolean;
   readonly managerAvailable: boolean;
   readonly unsafeReason: string | null;
   readonly externalId: string;
@@ -397,13 +398,15 @@ function managedRemoval(input: {
       ? input.unsafeReason
       : !managerSupportsLockVersion(input.scope, input.lockVersion)
         ? `${input.scope} lock version ${String(input.lockVersion)} is not supported by skills@${VERCEL_SKILLS_PACKAGE_VERSION}`
-        : input.scope === "project" && !input.managerAvailable
-          ? "project removal requires an installed skills manager"
-          : input.scope === "global" &&
-              !input.managerAvailable &&
-              !supportsPinnedPackage(input.environment.nodeVersion)
-            ? `skills@${VERCEL_SKILLS_PACKAGE_VERSION} requires Node.js 22.20 or newer`
-            : null;
+        : !input.lockManagerVisible
+          ? `the ${input.scope} lock is not the location skills@${VERCEL_SKILLS_PACKAGE_VERSION} resolves in this environment`
+          : input.scope === "project" && !input.managerAvailable
+            ? "project removal requires an installed skills manager"
+            : input.scope === "global" &&
+                !input.managerAvailable &&
+                !supportsPinnedPackage(input.environment.nodeVersion)
+              ? `skills@${VERCEL_SKILLS_PACKAGE_VERSION} requires Node.js 22.20 or newer`
+              : null;
   const availability =
     unavailableReason === null
       ? ({ kind: "available" } as const)
@@ -656,6 +659,7 @@ async function readLockDocument(
   format: LockDocument["format"],
   scope: Scope,
   canonicalSkillsRoot: string,
+  managerVisible = true,
 ): Promise<LockReadResult> {
   const initialStats = await lstat(path).catch((error: unknown) => {
     if (isMissing(error)) return null;
@@ -704,6 +708,7 @@ async function readLockDocument(
     document: {
       path,
       format,
+      managerVisible,
       scope,
       bytes: file.bytes,
       location: {
@@ -717,11 +722,61 @@ async function readLockDocument(
   };
 }
 
-function globalLockPath(environment: InventoryScanEnvironment): string {
-  return environment.stateDirectory === undefined ||
-    environment.stateDirectory === null
-    ? join(environment.homeDirectory, ".agents", ".skill-lock.json")
-    : join(environment.stateDirectory, "skills", ".skill-lock.json");
+/**
+ * Reads the first global lock present, preferring the manager-resolved one.
+ *
+ * A malformed lock at a candidate location is reported rather than skipped, so
+ * an unreadable authoritative lock never silently promotes a stale one.
+ */
+async function readGlobalLockDocument(
+  environment: InventoryScanEnvironment,
+): Promise<LockReadResult> {
+  const canonicalSkillsRoot = dirname(
+    vercelCanonicalPath("global", environment, "placeholder"),
+  );
+  let absent: LockReadResult = { kind: "absent" };
+  for (const candidate of globalLockCandidates(environment)) {
+    const result = await readLockDocument(
+      candidate.path,
+      "global",
+      { kind: "user" },
+      canonicalSkillsRoot,
+      candidate.managerVisible,
+    );
+    if (result.kind !== "absent") return result;
+    absent = result;
+  }
+  return absent;
+}
+
+/**
+ * The global lock locations, most authoritative first.
+ *
+ * `skills@1.5.22` resolves exactly one of these: the `XDG_STATE_HOME` location
+ * when that variable is set, and the home-relative one when it is not. A lock
+ * written under a different environment therefore remains on disk while the
+ * manager cannot see it. Discovery reads either, because the Skills are really
+ * installed; only the manager-resolved lock carries removal authority.
+ */
+function globalLockCandidates(
+  environment: InventoryScanEnvironment,
+): readonly { readonly path: string; readonly managerVisible: boolean }[] {
+  const homeRelative = join(
+    environment.homeDirectory,
+    ".agents",
+    ".skill-lock.json",
+  );
+  const stateDirectory = environment.stateDirectory;
+  if (stateDirectory === undefined || stateDirectory === null) {
+    return [{ path: homeRelative, managerVisible: true }];
+  }
+  return [
+    {
+      path: join(stateDirectory, "skills", ".skill-lock.json"),
+      managerVisible: true,
+    },
+    { path: homeRelative, managerVisible: false },
+  ];
 }
 
 async function probeManager(

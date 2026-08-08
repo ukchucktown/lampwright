@@ -7,8 +7,10 @@ scan(request: ScanRequest): Promise<Inventory>
 ```
 
 The normal scanner resolves the bounded generic `.agents/skills` roots under
-the current user's home and current workspace and Codex's standalone
-`<CODEX_HOME>/skills` root. Callers may add explicit, absolute discovery roots.
+the current user's home and current workspace, Codex's standalone
+`<CODEX_HOME>/skills` root, and Claude's standalone `<CLAUDE_CONFIG_DIR>/skills`
+and `<workspace>/.claude/skills` roots. Callers may add explicit, absolute
+discovery roots.
 The module owns root resolution, traversal, metadata parsing, hashing,
 classification, Git inspection, identity grouping, and result validation. It
 never scans the home or workspace itself.
@@ -60,6 +62,34 @@ known agent locations commonly do not exist. Duplicate equivalent roots are
 deduplicated by filesystem identity; contradictory declarations are rejected
 with `InventoryScanError`.
 
+When two roots claim one path and classify it differently, the root declared
+strictly inside the other describes the narrower boundary and wins. Roots that
+do not contain one another remain a contradiction and are rejected. A declared
+root — a default or one an Adapter supplies — may only narrow toward
+protection, so a nested Adapter root can never widen what is removable inside a
+`source`, `cache-or-vendor`, `system`, or `unknown` root. A root the caller
+supplied for the current invocation may narrow in either direction, because the
+caller named that absolute path deliberately.
+
+Claude's standalone Skill roots are bounded to `<CLAUDE_CONFIG_DIR>/skills` and
+`<workspace>/.claude/skills`, defaulting to `~/.claude` when the variable is
+unset. Plugin caches, marketplaces, and source checkouts live elsewhere under
+the config directory and are never swept by these roots. Where a Manager or
+Plugin already claims a path, that stronger ownership wins: an agent-native
+copy or link the Vercel reconciliation records as supplemental removal
+collateral is not materialized again as a separate Installation. A link to an
+unmanaged target stays a distinct Installation at its own path and joins its
+target's Logical Skill through canonical-target evidence, so removing the Skill
+covers both while removing one Installation removes only that entry.
+
+Codex marks the Skills shipped with its own runtime. When
+`<CODEX_HOME>/skills/.system/.codex-system-skills.marker` is a regular file,
+that subtree is a `system` root and its Skills become protected System Skill
+findings, while the rest of `<CODEX_HOME>/skills` stays an ordinary agent root.
+The marker must be a regular file, never a link, so a planted link cannot make
+the scanner treat a user's own Skills as inseparable runtime content. Without
+the marker the subtree stays ordinary: a missing marker never hides Skills.
+
 `Inventory.id` is a deterministic fingerprint of the complete normalized
 snapshot, excluding `scannedAt`. Repeating an unchanged scan at another time
 therefore retains the ID, while changed ownership, protection, removal,
@@ -99,6 +129,43 @@ Frontmatter `name`, `description`, and string-array `tags` are normalized.
 Malformed frontmatter leaves the finding visible with fallback metadata and an
 `unresolved` Installation status.
 
+## Agent exposure
+
+`Installation.agentId` names the agent that owns the lifecycle location.
+`exposedTo` names every agent that can actually load the Skill there. They
+differ whenever a Manager owns an Installation while placing agent-native
+copies or links that several agents read: a Vercel-managed Skill reports
+`vercel-skills` as its owner and `claude-code`, `codex`, and `universal` as its
+exposure.
+
+Each discovery path supplies its own declared evidence — a root's declared
+agent, the Manager's resolved agent-native locations, or a Plugin's owning
+agent. Exposure is never derived from the shape of a path. It is empty only
+when nothing can load the Skill, as for a lock-only record whose artifacts are
+absent; an active Installation always names at least one agent.
+
+## Installation Groups
+
+`Inventory.groups` records Installations that one act of installation put in
+place together. Only declared evidence forms a Group: an Owner's own record
+naming both the Manager that installed a Skill and the source it came from,
+within one Scope. A shared name, a shared directory, or a shared install time is
+not evidence and forms nothing.
+
+Every Group carries a `tier`. `declared` is the evidence above. `structural` is
+reserved for evidence derived from the filesystem, such as a shared repository
+remote; the type exists so adding it later needs no schema change, and no
+discovery path emits it today. Plugin-owned Installations are never grouped,
+because their bundle is already a `PluginBoundary` and representing it twice
+would let one selection expand through two different boundaries.
+
+A Group is navigational and selectable, not an identity claim. Membership never
+merges Skills, and a Group expands to its exact member Installations when
+planned. A Logical Skill records the `groupId` that contains **every** one of
+its Installations, or `null` when they disagree, in which case `spansGroups` is
+set so presentation can surface the split rather than filing a Skill under one
+source it only partly came from.
+
 ## Protection and identity
 
 Every discovered path, including a Skill directory that is itself a worktree
@@ -117,9 +184,23 @@ state, cache, quarantine, or temporary files.
 
 When either `<workspace>/skills-lock.json` or the global Vercel lock exists,
 Inventory reads the regular JSON file and reconciles every lock key against
-the bounded path registry pinned to `skills@1.5.22`. The global lock is
-`$XDG_STATE_HOME/skills/.skill-lock.json` when a state directory is supplied,
-and `~/.agents/.skill-lock.json` otherwise. Global and project canonical
+the bounded path registry pinned to `skills@1.5.22`.
+
+The manager resolves exactly one global lock: `$XDG_STATE_HOME/skills/.skill-lock.json`
+when `XDG_STATE_HOME` is set, and `~/.agents/.skill-lock.json` when it is not.
+`InventoryScanEnvironment.stateDirectory` therefore carries the environment
+variable itself and is `null` when unset; substituting a conventional default
+such as `~/.local/state` would make the unset branch unreachable.
+
+Discovery and authority are separate. A lock written under one environment
+stays on disk when the variable later changes, so Inventory reads whichever of
+the two known locations is present, preferring the manager-resolved one when
+both exist. Skills recorded in a lock the manager cannot currently resolve
+remain fully visible with their Manager, source, and supplemental collateral
+evidence, but managed removal reports `unavailable` with that reason, leaving
+the exact declarative fallback and Quarantine. A malformed lock at a candidate
+location is reported rather than skipped, so an unreadable authoritative lock
+never silently promotes a stale one. Global and project canonical
 installations are respectively under `~/.agents/skills` and
 `<workspace>/.agents/skills`. Known agent-native copies, links, legacy
 universal paths, and bounded Eve subagent directories are inspected without
@@ -243,6 +324,19 @@ that same root so Codex cannot create its helper alias during a read-only scan.
 `DO_NOT_TRACK=1` and `DISABLE_TELEMETRY=1` are also fixed by the scanner. Tests
 can observe the complete structured command and environment through
 `InventoryCommandRunner` without invoking the developer's Codex installation.
+
+A Plugin whose declared `marketplaceSource` resolves inside a runtime-managed
+marketplace root is marked `runtimeDefault` on its boundary. Two are in use:
+`<XDG_CACHE_HOME>/codex-runtimes`, defaulting to `~/.cache/codex-runtimes`, and
+`<CODEX_HOME>/.tmp/bundled-marketplaces`. Codex
+ships those Plugins with itself. They stay ordinary removable Installations
+with their managed removal intact, because `codex plugin` can uninstall them;
+the flag exists so presentation can set them aside and so a bulk sweep cannot
+take them. `--all --include-plugins` therefore skips a runtime default, and
+removing one requires naming its boundary. Matching on the managed location
+rather than a marketplace name survives the runtime adding or renaming a
+marketplace, and a user marketplace whose name collides with a runtime one is
+never flagged.
 
 List output must be unique-key JSON with `installed` and `available` arrays.
 Every installed record must attest `installed: true`, a safe Plugin and

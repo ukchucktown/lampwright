@@ -73,6 +73,8 @@ interface CodexPluginEntry {
   readonly version: string;
   readonly enabled: boolean;
   readonly source: PluginSource;
+  /** Where the marketplace supplying this Plugin lives, when Codex reports it. */
+  readonly marketplaceSource: string | null;
 }
 
 type PluginSource =
@@ -125,6 +127,7 @@ export async function scanCodexPlugins(
 ): Promise<CodexPluginsScanResult> {
   const home = codexHome(environment);
   const cacheRoot = join(home, "plugins", "cache");
+  const runtimeMarketplaceRoots = codexRuntimeMarketplaceRoots(environment);
   const listState = await listInstalledPlugins(home, commandRunner);
   const materialized =
     listState.kind === "valid"
@@ -136,6 +139,10 @@ export async function scanCodexPlugins(
               home,
               cacheRoot,
               entry,
+              runtimeDefault: isRuntimeMarketplace(
+                entry.marketplaceSource,
+                runtimeMarketplaceRoots,
+              ),
             }),
           ),
         )
@@ -283,6 +290,11 @@ function parseListEntry(value: unknown): CodexPluginEntry | null {
     version: value.version,
     enabled: value.enabled,
     source,
+    marketplaceSource:
+      isRecord(value.marketplaceSource) &&
+      typeof value.marketplaceSource.source === "string"
+        ? value.marketplaceSource.source
+        : null,
   };
 }
 
@@ -330,6 +342,7 @@ async function materializePlugin(input: {
   readonly home: string;
   readonly cacheRoot: string;
   readonly entry: CodexPluginEntry;
+  readonly runtimeDefault: boolean;
 }): Promise<{
   readonly installations: readonly Installation[];
   readonly boundary: PluginBoundary;
@@ -461,6 +474,7 @@ async function materializePlugin(input: {
         independentlySelectable: false,
         confidence: "declared",
       },
+      runtimeDefault: input.runtimeDefault,
       installationIds: installations.map((installation) => installation.id),
       resources,
       removal: {
@@ -538,6 +552,7 @@ async function materializeSkill(input: {
     adapterId: CODEX_PLUGIN_ADAPTER_ID,
     pluginBoundaryId: input.boundaryId,
     agentId,
+    exposedTo: [agentId],
     scope: { kind: "user" },
     location: input.skill.location,
     contentHash,
@@ -1704,6 +1719,37 @@ function codexHome(environment: InventoryScanEnvironment): string {
     environment.agentHomeDirectories?.[agentId] ??
       join(environment.homeDirectory, ".codex"),
   );
+}
+
+/**
+ * The marketplace locations Codex manages for the Plugins it ships itself.
+ *
+ * Two are in use: the runtime cache it unpacks into, and the bundled
+ * marketplaces it stages inside its own home. A Plugin whose declared
+ * marketplace source resolves inside either was supplied by the runtime rather
+ * than added by the user. Matching on the managed location survives the runtime
+ * adding or renaming a marketplace, which a list of names would not.
+ */
+function isRuntimeMarketplace(
+  marketplaceSource: string | null,
+  runtimeRoots: readonly string[],
+): boolean {
+  if (marketplaceSource === null) return false;
+  return runtimeRoots.some((root) => pathIsWithin(root, marketplaceSource));
+}
+
+function codexRuntimeMarketplaceRoots(
+  environment: InventoryScanEnvironment,
+): readonly string[] {
+  return [
+    resolve(
+      join(
+        environment.cacheDirectory ?? join(environment.homeDirectory, ".cache"),
+        "codex-runtimes",
+      ),
+    ),
+    resolve(join(codexHome(environment), ".tmp", "bundled-marketplaces")),
+  ];
 }
 
 async function directDirectories(path: string) {
