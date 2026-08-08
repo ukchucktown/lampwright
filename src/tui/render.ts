@@ -17,6 +17,7 @@ import {
   sharedExposure,
   sharedPathCount,
 } from "./browse.js";
+import { searchLayout } from "./search.js";
 import {
   nightfallTheme,
   plainTuiTheme,
@@ -30,6 +31,7 @@ import type {
   TuiPaneView,
   TuiPlanState,
   TuiReportState,
+  TuiSearchState,
   TuiSection,
   TuiState,
 } from "./types.js";
@@ -45,8 +47,128 @@ export function renderTui(
     return `${style.title("skill-cleaner")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or Ctrl-C to exit.")}\n`;
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
+  if (state.screen === "search") return renderSearch(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
   return renderReport(state, style);
+}
+
+function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
+  const style = createPaint(theme);
+  const { model } = state;
+  const grid = searchLayout(model.viewport);
+  const { usable, resultRows: rows, leftWidth: left, rightWidth: right } = grid;
+  if (grid.rows < 7 || grid.columns < 20)
+    return [
+      style.title(fit("skill-cleaner", usable)),
+      style.warning(fit("Resize the terminal", usable)),
+    ]
+      .slice(0, Math.max(0, model.viewport.rows - 1))
+      .join("\n");
+  const focused = model.results[model.index];
+  const preview =
+    focused === undefined
+      ? []
+      : [
+          `Owner: ${focused.entry.owner}`,
+          `Category: ${focused.category}`,
+          `Exposure: ${focused.entry.exposedTo.join(", ") || "none"}`,
+          "",
+          ...wrapPlanLine(
+            focused.entry.description ?? "No description.",
+            right,
+          ),
+          "",
+          ...focused.entry.paths.flatMap((path) =>
+            wrapPlanLine(`Path: ${path}`, right),
+          ),
+        ];
+  const out = [
+    fitStyledSegments(
+      [
+        { text: "skill-cleaner", paint: style.title },
+        { text: " search  ", paint: style.muted },
+        {
+          text:
+            model.staged.size === 0
+              ? "nothing staged"
+              : `${String(model.staged.size)} staged`,
+          paint: model.staged.size === 0 ? style.muted : style.selected,
+        },
+      ],
+      usable,
+      style.muted,
+    ),
+    fitStyledSegments(
+      [
+        { text: "↑↓", paint: style.title },
+        { text: " move · ", paint: style.muted },
+        { text: "space", paint: style.title },
+        { text: " stage · ", paint: style.muted },
+        { text: "Ctrl-A", paint: style.title },
+        { text: " all · ", paint: style.muted },
+        { text: "enter", paint: style.title },
+        { text: " done · ", paint: style.muted },
+        { text: "esc", paint: style.title },
+        { text: " cancel · ", paint: style.muted },
+        { text: "Ctrl-U", paint: style.title },
+        { text: " clear", paint: style.muted },
+      ],
+      usable,
+      style.muted,
+    ),
+    model.matchError === null
+      ? fitStyledSegments(
+          [
+            { text: "regex ", paint: style.muted },
+            {
+              text: model.query === "" ? "(all Skills)" : model.query,
+              paint: style.active,
+            },
+            {
+              text: ` · ${String(model.results.length)} matches`,
+              paint: style.muted,
+            },
+          ],
+          usable,
+          style.muted,
+        )
+      : style.warning(fit(model.matchError, usable)),
+    style.border(`${"─".repeat(left)}┬${"─".repeat(right)}`),
+  ];
+  for (let row = 0; row < rows; row += 1) {
+    const index = model.scroll + row;
+    const result = model.results[index];
+    const marker =
+      result === undefined
+        ? "   "
+        : !result.selectable
+          ? " - "
+          : result.existing
+            ? "[x]"
+            : model.staged.has(result.entry.key)
+              ? "[+]"
+              : "[ ]";
+    const text = result === undefined ? "" : `${marker} ${result.entry.name}`;
+    const leftCell =
+      index === model.index
+        ? style.focus(fit(text, left))
+        : result !== undefined && model.staged.has(result.entry.key)
+          ? style.selected(fit(text, left))
+          : fit(text, left);
+    out.push(
+      `${leftCell}${style.border("│")}${row === 0 && focused !== undefined ? style.active(fit(focused.entry.name, right)) : row > 0 && preview[row - 1] !== undefined ? style.muted(fit(preview[row - 1]!, right)) : ""}`,
+    );
+  }
+  out.push(
+    style.muted(
+      fit(
+        model.notice ??
+          `result=${String(model.results.length === 0 ? 0 : model.index + 1)}/${String(model.results.length)}`,
+        usable,
+      ),
+    ),
+  );
+  return out.join("\n");
 }
 
 /**
@@ -125,7 +247,16 @@ export function renderBrowseLines(
   );
   out.push(
     model.query === ""
-      ? style.muted(fit("filter: names, sections, agents, paths", usable))
+      ? fitStyledSegments(
+          [
+            { text: "/ or type", paint: style.title },
+            { text: " search names by regex · ", paint: style.muted },
+            { text: "Ctrl-U", paint: style.title },
+            { text: " clear selection", paint: style.muted },
+          ],
+          usable,
+          style.muted,
+        )
       : `filter ${style.active(model.query)} ${style.muted(`· ${String(view.entries.total)} here`)}`,
   );
   out.push(

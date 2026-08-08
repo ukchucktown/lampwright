@@ -8,4 +8,7 @@ not weaken the non-empty exposure invariant for active Installations.
 
 Installation Groups remain a navigational batch-selection aid, not an identity claim. V1 emits Groups only when an Owner record declares the Manager, source, and Scope together. Structural grouping is deferred: it may be reconsidered only with a concrete discovery path, observable fixtures, and a documented boundary for planning and force behavior.
 
-The TUI's current filtering behavior is retained while richer fuzzy metadata matching and field filters are prototyped separately. This decision does not change section organization, pointer gestures, or removal eligibility.
+The original decision to retain the TUI's section-preserving filter was
+superseded by ADR 0008 after global search was prototyped and accepted. That
+change does not alter System Skill protection, Installation Group identity,
+pointer gestures, or removal eligibility.

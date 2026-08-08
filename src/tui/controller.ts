@@ -12,12 +12,14 @@ import {
 } from "./browse.js";
 import { planScrollMetrics } from "./render.js";
 import { createTuiSections, selectionTargets } from "./sections.js";
+import { createSearchModel, reduceSearch } from "./search.js";
 import type {
   TuiAction,
   TuiBrowseState,
   TuiDependencies,
   TuiPlanState,
   TuiReportState,
+  TuiSearchState,
   TuiState,
 } from "./types.js";
 
@@ -60,6 +62,7 @@ export class TuiController {
     }
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
+      else if (state.screen === "search") this.searchAction(state, action);
       else if (state.screen === "plan") await this.planAction(state, action);
       else await this.reportAction(state, action);
     } catch (error: unknown) {
@@ -107,6 +110,23 @@ export class TuiController {
       return;
     }
 
+    if (action.kind === "open-search" || action.kind === "append-query") {
+      const value =
+        action.kind === "append-query" ? action.value : (action.value ?? "");
+      let model = createSearchModel(state.model);
+      if (value !== "")
+        model = reduceSearch(model, state.model.sections, {
+          kind: "type",
+          value,
+        });
+      this.stateValue = {
+        screen: "search",
+        browse: { inventory: state.inventory, model: state.model },
+        model,
+      };
+      return;
+    }
+
     const command = browseCommand(action);
     if (command !== null) {
       this.stateValue = { ...state, model: reduceBrowse(state.model, command) };
@@ -135,6 +155,44 @@ export class TuiController {
       technicalDetails: false,
       scrollOffset: 0,
       returnReport: null,
+    };
+  }
+
+  private searchAction(state: TuiSearchState, action: TuiAction): void {
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: null };
+      return;
+    }
+    if (action.kind === "cancel") {
+      this.stateValue = { screen: "browse", ...state.browse };
+      return;
+    }
+    if (
+      action.kind === "apply-search" ||
+      action.kind === "select" ||
+      action.kind === "confirm"
+    ) {
+      if (state.model.matchError !== null) {
+        this.stateValue = {
+          ...state,
+          model: { ...state.model, notice: state.model.matchError },
+        };
+        return;
+      }
+      const selected = new Set(state.browse.model.selected);
+      for (const key of state.model.staged) selected.add(key);
+      this.stateValue = {
+        screen: "browse",
+        inventory: state.browse.inventory,
+        model: { ...state.browse.model, selected, notice: null },
+      };
+      return;
+    }
+    const command = searchCommand(action);
+    if (command === null) return;
+    this.stateValue = {
+      ...state,
+      model: reduceSearch(state.model, state.browse.model.sections, command),
     };
   }
 
@@ -260,13 +318,22 @@ export class TuiController {
 }
 
 function resizeState(
-  state: TuiBrowseState | TuiPlanState | TuiReportState,
+  state: TuiBrowseState | TuiSearchState | TuiPlanState | TuiReportState,
   viewport: TuiBrowseState["model"]["viewport"],
-): TuiBrowseState | TuiPlanState | TuiReportState {
+): TuiBrowseState | TuiSearchState | TuiPlanState | TuiReportState {
   if (state.screen === "browse")
     return {
       ...state,
       model: reduceBrowse(state.model, { kind: "viewport", viewport }),
+    };
+  if (state.screen === "search")
+    return {
+      ...state,
+      browse: resizeBrowse(state.browse, viewport),
+      model: reduceSearch(state.model, state.browse.model.sections, {
+        kind: "viewport",
+        viewport,
+      }),
     };
   if (state.screen === "report")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
@@ -281,6 +348,35 @@ function resizeState(
             browse: resizeBrowse(state.returnReport.browse, viewport),
           },
   };
+}
+
+function searchCommand(action: TuiAction) {
+  switch (action.kind) {
+    case "append-query":
+      return { kind: "type", value: action.value } as const;
+    case "delete-query":
+      return { kind: "backspace" } as const;
+    case "clear-selection":
+      return { kind: "clear" } as const;
+    case "move":
+      return { kind: "move", delta: action.delta } as const;
+    case "page":
+      return { kind: "page", delta: action.delta } as const;
+    case "toggle-select":
+      return { kind: "toggle" } as const;
+    case "point-search-result":
+      return { kind: "focus", index: action.index } as const;
+    case "point-toggle":
+      return action.pane === "entries"
+        ? ({ kind: "toggle-at", index: action.index } as const)
+        : null;
+    case "stage-all-search":
+      return { kind: "stage-all" } as const;
+    case "viewport":
+      return { kind: "viewport", viewport: action.viewport } as const;
+    default:
+      return null;
+  }
 }
 
 function resizeBrowse(

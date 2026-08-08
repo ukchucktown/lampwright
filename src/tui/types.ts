@@ -141,6 +141,36 @@ export interface TuiBrowseState extends TuiBrowseSnapshot {
   readonly screen: "browse";
 }
 
+/** A temporary, flat projection used only by the global search overlay. */
+export interface TuiSearchResult {
+  readonly entry: TuiEntry;
+  /** The inventory section is the only available category projection in v1. */
+  readonly category: string;
+  readonly selectable: boolean;
+  /** Already selected in browse; it remains visible but cannot be re-staged. */
+  readonly existing: boolean;
+}
+
+export interface TuiSearchModel {
+  readonly results: readonly TuiSearchResult[];
+  readonly viewport: TuiViewport;
+  readonly query: string;
+  readonly matchError: string | null;
+  readonly index: number;
+  readonly scroll: number;
+  /** Staging is local to the overlay until Enter applies it. */
+  readonly staged: ReadonlySet<string>;
+  readonly existing: ReadonlySet<string>;
+  readonly notice: string | null;
+}
+
+export interface TuiSearchState {
+  readonly screen: "search";
+  /** The untouched browse position to restore on done or cancel. */
+  readonly browse: TuiBrowseSnapshot;
+  readonly model: TuiSearchModel;
+}
+
 export interface TuiPlanState {
   readonly screen: "plan";
   readonly browse: TuiBrowseSnapshot;
@@ -171,6 +201,7 @@ export interface TuiDoneState {
 export type TuiState =
   | TuiLoadingState
   | TuiBrowseState
+  | TuiSearchState
   | TuiPlanState
   | TuiReportState
   | TuiErrorState
@@ -193,6 +224,7 @@ export type TuiAction =
     }
   | { readonly kind: "point-section"; readonly index: number }
   | { readonly kind: "point-entry"; readonly index: number }
+  | { readonly kind: "point-search-result"; readonly index: number }
   | {
       readonly kind: "point-toggle";
       readonly pane: "sections" | "entries";
@@ -205,6 +237,9 @@ export type TuiAction =
   | { readonly kind: "viewport"; readonly viewport: TuiViewport }
   | { readonly kind: "toggle-select" }
   | { readonly kind: "clear-selection" }
+  | { readonly kind: "open-search"; readonly value?: string }
+  | { readonly kind: "stage-all-search" }
+  | { readonly kind: "apply-search" }
   | { readonly kind: "toggle-details" }
   | { readonly kind: "select" }
   | { readonly kind: "confirm" }

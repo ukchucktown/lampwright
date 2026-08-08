@@ -133,7 +133,21 @@ Running `node dist/cli.js` from a built trusted checkout without a subcommand op
 
 The UI must:
 
-- Filter names, section labels, agents, and paths using the current terminal matching behavior. Namespaced metadata search and concise field filters are deferred for further TUI prototyping.
+- Open a global search overlay when the user presses `/` or begins typing from
+  the inventory. Search uses a case-insensitive regular expression against
+  Skill names only. Invalid expressions and expressions that match empty text
+  cannot be applied. Category, Owner, agent exposure, path, and description
+  remain visible in the preview but do not affect matching; explicit metadata
+  field syntax is deferred for later prototyping.
+- Present matching Skill names in a flat list with the focused Skill's
+  description, category, ownership, exposure, and paths in a right-hand
+  preview. System Skills remain visible but cannot be staged.
+- Stage individual matches with Space, stage every visible removable match with
+  Ctrl-A, and add staged matches to the existing inventory selection with
+  Enter. Enter returns to the prior inventory position, `/` can start another
+  additive search, Escape cancels search without changing the inventory
+  selection, Ctrl-U clears the search expression, and Ctrl-U in the inventory
+  clears its selection.
 - Show one row per Logical Skill by default.
 - Show the focused Logical Skill's physical paths in the detail pane. Selecting
   an individual Installation in the terminal is deferred; the CLI accepts that
@@ -308,10 +322,11 @@ The v1 MVP is complete when:
    Before publication, the built executable is run from a trusted checkout;
    publication and `npx` verification require separate explicit approval.
 2. A zero-footprint scan inventories generic, Vercel, Claude Code, Codex, and Gemini skill installations from isolated fixtures.
-3. The TUI can filter its current browse fields and select Logical Skills,
-   declared Installation Groups, and Plugin boundaries. The non-interactive CLI
-   additionally accepts an individual Installation target; exposing individual
-   paths in the TUI remains future prototyping work.
+3. The TUI provides additive, name-only regular-expression search and can
+   select Logical Skills, declared Installation Groups, and Plugin boundaries.
+   The non-interactive CLI additionally accepts an individual Installation
+   target; exposing individual paths in the TUI remains future prototyping
+   work.
 4. The planner reports ownership, dependencies, plugin impact, Git protection, and exact actions.
 5. Supported managers/plugins are used for removal when available.
 6. Failed managed removal never silently triggers fallback.
