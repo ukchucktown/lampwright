@@ -23,9 +23,12 @@ on the next.
 
 Arrows move; left and right change pane; Page Up and Page Down step exactly one
 viewport; shift with left or right moves the pane split and with up or down
-changes the detail height. A pointer can click a row, double-click to select it,
-wheel over either pane, and drag the divider. The wheel moves the cursor rather
+changes the detail height. A pointer can click a row to focus it, double-click to select it, wheel over
+either pane, and drag the divider to resize. The wheel moves the cursor rather
 than only the viewport, so the focused row cannot scroll out from under it.
+Pointer reporting is enabled only for the raw terminal and is turned off again
+on exit. Motion is ignored unless a divider drag is in progress, since
+otherwise every twitch of the pointer would re-select the row beneath it.
 
 ## Sections
 

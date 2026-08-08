@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBrowseModel,
   createTuiSections,
+  layout,
   matches,
+  mouseAction,
   parseLineTuiAction,
+  parseMouseReport,
   reduceBrowse,
   renderBrowseLines,
   selectionTargets,
@@ -509,5 +512,96 @@ describe("terminal removal interactions", () => {
         "yes",
       ),
     ).toEqual({ kind: "confirm" });
+  });
+});
+
+describe("terminal pointer input", () => {
+  const inventory = groupedInventory();
+  const browse: TuiState = {
+    screen: "browse",
+    inventory,
+    model: createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 100,
+    }),
+  };
+  const idle = { dragging: false, doubleClick: false };
+  const press = (column: number, row: number, button = 0) => ({
+    button,
+    column,
+    row,
+    pressed: true,
+  });
+
+  it("parses an SGR report and ignores anything else", () => {
+    expect(parseMouseReport(`${String.fromCharCode(27)}[<0;12;7M`)).toEqual({
+      button: 0,
+      column: 12,
+      row: 7,
+      pressed: true,
+    });
+    expect(
+      parseMouseReport(`${String.fromCharCode(27)}[<0;12;7m`)?.pressed,
+    ).toBe(false);
+    expect(parseMouseReport(`${String.fromCharCode(27)}[A`)).toBeNull();
+  });
+
+  it("maps a click to the row beneath it in either pane", () => {
+    const { leftWidth } = layout(browse.model);
+    expect(mouseAction(browse, press(4, 5), idle)).toEqual({
+      kind: "point-section",
+      index: 0,
+    });
+    expect(mouseAction(browse, press(leftWidth + 8, 7), idle)).toEqual({
+      kind: "point-entry",
+      index: 1,
+    });
+  });
+
+  it("selects on a double click rather than a single one", () => {
+    expect(
+      mouseAction(browse, press(4, 5), { dragging: false, doubleClick: true }),
+    ).toEqual({ kind: "toggle-select" });
+  });
+
+  it("moves one row per wheel report, whichever way and with modifiers", () => {
+    expect(mouseAction(browse, press(4, 6, 64), idle)).toEqual({
+      kind: "move",
+      delta: -1,
+    });
+    expect(mouseAction(browse, press(4, 6, 65), idle)).toEqual({
+      kind: "move",
+      delta: 1,
+    });
+    // Bit 2 is a modifier; the wheel still reports through bits 6 and 0.
+    expect(mouseAction(browse, press(4, 6, 69), idle)).toEqual({
+      kind: "move",
+      delta: 1,
+    });
+  });
+
+  it("resizes from the divider and ignores motion that is not a drag", () => {
+    const { leftWidth } = layout(browse.model);
+    expect(mouseAction(browse, press(leftWidth + 1, 8), idle).kind).toBe(
+      "set-left-percent",
+    );
+    expect(mouseAction(browse, press(30, 8, 32), idle)).toEqual({
+      kind: "noop",
+    });
+    expect(
+      mouseAction(browse, press(30, 8, 32), {
+        dragging: true,
+        doubleClick: false,
+      }).kind,
+    ).toBe("set-left-percent");
+  });
+
+  it("ignores clicks on chrome, the section header, and empty rows", () => {
+    const { leftWidth } = layout(browse.model);
+    expect(mouseAction(browse, press(4, 2), idle)).toEqual({ kind: "noop" });
+    expect(mouseAction(browse, press(leftWidth + 8, 5), idle)).toEqual({
+      kind: "noop",
+    });
+    expect(mouseAction(browse, press(4, 90), idle)).toEqual({ kind: "noop" });
   });
 });
