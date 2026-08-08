@@ -236,7 +236,7 @@ function skill(name, category, description, owner, agents, removable = true) {
 
 let state = {
   screen: "search",
-  variant: 0,
+  variant: 1,
   query: "",
   cursor: 0,
   selected: new Set(),
@@ -355,7 +355,7 @@ function openSearch() {
   state.category = "All matches";
   state.categoryCursor = 0;
   state.categoryFocus = "results";
-  state.staged = new Set(state.selected);
+  state.staged = new Set();
   state.notice = "Type to search synthetic Skills.";
 }
 
@@ -370,7 +370,7 @@ function cycleVariant(delta) {
   state.category = "All matches";
   state.categoryCursor = 0;
   state.categoryFocus = "results";
-  state.staged = new Set(state.selected);
+  state.staged = new Set();
   state.notice = `Switched to ${variants[state.variant].key}: ${variants[state.variant].name}.`;
   settle();
 }
@@ -391,13 +391,19 @@ function toggleStaged() {
     state.notice = "That System Skill is visible but cannot be selected.";
     return;
   }
+  if (state.selected.has(candidate.key)) {
+    state.notice = `${candidate.name} is already selected in the main pane.`;
+    return;
+  }
   if (state.staged.has(candidate.key)) state.staged.delete(candidate.key);
   else state.staged.add(candidate.key);
   state.notice = `${state.staged.has(candidate.key) ? "Staged" : "Unstaged"} ${candidate.name}.`;
 }
 
 function toggleAllStaged() {
-  const available = rankedMatches().filter((candidate) => candidate.removable);
+  const available = rankedMatches().filter(
+    (candidate) => candidate.removable && !state.selected.has(candidate.key),
+  );
   const all = available.every((candidate) => state.staged.has(candidate.key));
   for (const candidate of available) {
     if (all) state.staged.delete(candidate.key);
@@ -440,8 +446,11 @@ function enter() {
     return;
   }
   if (state.variant === 1) {
-    state.selected = new Set(state.staged);
-    closeSearch(`Applied ${state.selected.size} staged selections.`);
+    const added = state.staged.size;
+    state.selected = new Set([...state.selected, ...state.staged]);
+    closeSearch(
+      `Added ${added} new ${added === 1 ? "Skill" : "Skills"}; ${state.selected.size} selected total.`,
+    );
     return;
   }
   const candidate = current();
@@ -576,7 +585,9 @@ function header(width) {
         state.screen === "search"
           ? state.variant === 0
             ? "type search · ←→ pane · ↑↓ move · enter add matches + return · esc clear/close · ctrl-c quit"
-            : "type search · ↑↓ move · enter apply variant behavior · esc clear/close · [ ] compare variants · ctrl-c quit"
+            : state.variant === 1
+              ? "type search · ↑↓ move · space stage · ctrl-a all · enter add + return · esc close"
+              : "type search · ↑↓ move · enter add current + return · esc clear/close · ctrl-c quit"
           : "/ search · [ ] compare variants · q/ctrl-c quit",
         width,
       ),
@@ -703,14 +714,16 @@ function renderVariantB(width, bodyRows) {
         ? ""
         : !candidate.removable
           ? " - "
-          : state.staged.has(candidate.key)
+          : state.selected.has(candidate.key)
             ? "[x]"
-            : "[ ]";
+            : state.staged.has(candidate.key)
+              ? "[x]"
+              : "[ ]";
     const text = candidate === undefined ? "" : `${marker} ${candidate.name}`;
     const listCell =
       index === state.cursor
         ? paint.focus(fit(text, left))
-        : state.staged.has(candidate?.key)
+        : state.staged.has(candidate?.key) || state.selected.has(candidate?.key)
           ? paint.selected(fit(text, left))
           : fit(text, left);
     lines.push(

@@ -15,10 +15,11 @@ Three structurally different variants are switchable live:
 - **A — Categories + matches:** category counts on the left, matching Skill
   names on the right, and a full-width preview below. Enter from the result list
   adds every visible removable match to the existing selection and returns to
-  the main view. This is the preferred layout and the prototype default.
+  the main view.
 - **B — Results + preview:** a flat Skill result list beside a large preview.
   Category/source, description, Owner, and exposure live in the preview. Space
-  stages individual results; Enter applies the staged selection and returns.
+  stages individual results; Enter adds the staged Skills to the existing
+  selection and returns. This is the preferred layout and prototype default.
 - **C — Quick picker:** full-width Skill results with a compact preview below.
   Enter selects only the highlighted Skill and returns.
 
@@ -40,10 +41,12 @@ are deliberately preview-only so ordinary prose does not flood the results.
 
 ## Validated direction
 
-Search is an additive workflow. A user can search, press Enter to add the
-matching Skills and return to the main pane, continue selecting there, then
-press `/` to run another search. A later search never replaces Skills selected
-by an earlier search or directly in the main pane.
+Use the flat matching-Skill list on the left with a description and metadata
+preview on the right. Category is context in that preview rather than a second
+navigable list. Search is an additive workflow: a user can stage matching
+Skills, press Enter to add them and return to the main pane, continue selecting
+there, then press `/` to run another search. A later search never replaces
+Skills selected by an earlier search or directly in the main pane.
 
 ## What should survive
 
