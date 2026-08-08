@@ -146,6 +146,8 @@ export interface TuiPlanState {
   readonly browse: TuiBrowseSnapshot;
   readonly plan: RemovalPlan;
   readonly label: string;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
   readonly returnReport: TuiReportState | null;
 }
 
@@ -203,6 +205,7 @@ export type TuiAction =
   | { readonly kind: "viewport"; readonly viewport: TuiViewport }
   | { readonly kind: "toggle-select" }
   | { readonly kind: "clear-selection" }
+  | { readonly kind: "toggle-details" }
   | { readonly kind: "select" }
   | { readonly kind: "confirm" }
   | { readonly kind: "cancel" }

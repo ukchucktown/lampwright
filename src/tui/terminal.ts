@@ -130,6 +130,10 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
+  if (state.screen === "plan")
+    return (report.button & 64) !== 0
+      ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
+      : { kind: "noop" };
   if (state.screen !== "browse") return { kind: "noop" };
   const grid = layout(state.model);
   const { leftWidth, columns, paneRows, rows } = grid;
@@ -273,6 +277,11 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     return { kind: "append-query", value };
   }
   if (state.screen === "plan") {
+    if (value === "details" || value === "d") return { kind: "toggle-details" };
+    if (value === "up" || value === "k") return { kind: "move", delta: -1 };
+    if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "pageup") return { kind: "page", delta: -1 };
+    if (value === "pagedown") return { kind: "page", delta: 1 };
     if (value === "yes" || value === "y") return { kind: "confirm" };
     if (value === "force" || value === "f") return { kind: "force" };
     if (value === "quit" || value === "q") return { kind: "quit" };
@@ -490,6 +499,9 @@ function keyAction(state: TuiState, text: string, key: Key): TuiAction {
   }
   if (state.screen === "plan") {
     if (key.name === "escape" || text === "n") return { kind: "cancel" };
+    if (text === "d") return { kind: "toggle-details" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
     if (text === "y") return { kind: "confirm" };
     if (text === "f") return { kind: "force" };
     return { kind: "noop" };
