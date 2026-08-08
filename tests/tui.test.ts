@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
@@ -1422,9 +1423,7 @@ describe("terminal removal interactions", () => {
     expect(confirmedTerminal.frames.join("\n")).toContain(
       "Nothing has changed yet",
     );
-    expect(confirmedTerminal.frames.join("\n")).toContain(
-      "Execution succeeded",
-    );
+    expect(confirmedTerminal.frames.join("\n")).toContain("Completed");
   });
 
   it("renders execution feedback before a delayed executor resolves", async () => {
@@ -1479,7 +1478,212 @@ describe("terminal removal interactions", () => {
     );
 
     await expect(outcome).resolves.toMatchObject({ status: "completed" });
-    expect(terminal.frames.join("\n")).toContain("Execution succeeded");
+    expect(terminal.frames.join("\n")).toContain("Completed");
+  });
+
+  it("renders a readable scrolling report and keeps identifiers behind details", async () => {
+    const inventory = groupedInventory(["alpha", "beta", "gamma", "delta"]);
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async (removalPlan) => ({
+          ...buildExecutionReport({
+            planId: removalPlan.id,
+            inventoryId: removalPlan.inventoryId,
+            finalInventoryId: null,
+            status: "partial",
+            rescanError: {
+              code: "scan-failed",
+              message: "final scan is unavailable",
+              details: {},
+            },
+            targetResults: removalPlan.targets.map((target) => ({
+              target,
+              status: "partially-removed" as const,
+              actionIds: removalPlan.actions.map((action) => action.id),
+              reason: "one location remains",
+            })),
+            actionResults: removalPlan.actions.map((action) => ({
+              actionId: action.id,
+              startedAt: "2026-01-01T00:00:00.000Z",
+              completedAt: "2026-01-01T00:00:01.000Z",
+              status: "skipped" as const,
+              reason: "a prior action failed",
+            })),
+            verificationResults: [],
+          }),
+          fallbackPlans: [
+            plan(inventory, { ...removalPlan.intent, mode: "brute-force" }),
+            plan(inventory, { ...removalPlan.intent, mode: "brute-force" }),
+          ],
+        }),
+      },
+      { rows: 12, columns: 62 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForExecution();
+    const first = renderTui(controller.state, plainTuiTheme);
+    expect(first).toContain("Completed with concerns");
+    expect(first).toContain("←/→ choose fallback");
+    expect(first).not.toContain("removal-plan-");
+    expect(first).not.toContain("scan-failed");
+
+    await controller.dispatch({ kind: "page", delta: 1 });
+    const paged = renderTui(controller.state, plainTuiTheme);
+    expect(paged).toContain("report ");
+    expect(paged).toContain("Final scan could not be completed");
+    await controller.dispatch({ kind: "select-fallback", delta: 1 });
+    const selected = controller.state;
+    if (selected.screen !== "report") throw new Error("expected report");
+    expect(selected.fallbackCursor).toBe(1);
+    await controller.dispatch({ kind: "toggle-details" });
+    const detailPages = [renderTui(controller.state, plainTuiTheme)];
+    for (let index = 0; index < 8; index += 1) {
+      await controller.dispatch({ kind: "page", delta: 1 });
+      detailPages.push(renderTui(controller.state, plainTuiTheme));
+    }
+    const details = detailPages.join("\n");
+    expect(details).toContain("Technical details");
+    expect(details).toContain("scan-failed");
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 28, columns: 80 },
+    });
+    const resized = controller.state;
+    if (resized.screen !== "report") throw new Error("expected report");
+    expect(resized.scrollOffset).toBeLessThanOrEqual(30);
+  });
+
+  it("documents every technical report status family and fallback boundary", () => {
+    const documentation = readFileSync(
+      new URL("../docs/tui.md", import.meta.url),
+      "utf8",
+    );
+    for (const status of [
+      "partially-removed",
+      "unresolved",
+      "succeeded",
+      "skipped",
+      "passed",
+      "finalInventoryId",
+      "startedAt",
+      "completedAt",
+    ])
+      expect(documentation).toContain(status);
+    expect(documentation).toContain("never runs automatically");
+  });
+
+  it("keeps a large Group's selected-capability label in a succeeded report", () => {
+    const inventory = groupedInventory(
+      Array.from({ length: 22 }, (_, index) => `skill-${String(index)}`),
+    );
+    const removalPlan = plan(inventory, {
+      kind: "targets",
+      targets: [{ kind: "source-group", groupId: inventory.groups[0]!.id }],
+      force: false,
+      mode: "managed-first",
+    });
+    const state: TuiState = {
+      screen: "report",
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 28,
+          columns: 100,
+        }),
+      },
+      report: buildExecutionReport({
+        planId: removalPlan.id,
+        inventoryId: removalPlan.inventoryId,
+        finalInventoryId: removalPlan.inventoryId,
+        actionResults: removalPlan.actions.map((action) => ({
+          actionId: action.id,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          completedAt: "2026-01-01T00:00:01.000Z",
+          status: "succeeded" as const,
+          details: {},
+        })),
+        targetResults: [
+          {
+            target: removalPlan.targets[0]!,
+            status: "removed",
+            actionIds: removalPlan.actions.map((action) => action.id),
+          },
+        ],
+        verificationResults: [
+          {
+            checkId: removalPlan.verificationChecks[0]!.id,
+            status: "passed",
+            details: {},
+          },
+        ],
+      }),
+      label: "22 selected capabilities",
+      fallbackCursor: 0,
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    const rendered = renderTui(state, plainTuiTheme);
+    expect(rendered).toContain("22 selected capabilities removed");
+    expect(rendered).toContain("1 of 1 verification checks passed");
+    expect(rendered).toContain("Final scan completed");
+    expect(parseLineTuiAction(state, "pagedown")).toEqual({
+      kind: "page",
+      delta: 1,
+    });
+    expect(parseLineTuiAction(state, "next")).toEqual({
+      kind: "select-fallback",
+      delta: 1,
+    });
+    expect(
+      parseRawTuiAction(state, "", { name: "right", ctrl: false }),
+    ).toEqual({ kind: "select-fallback", delta: 1 });
+    expect(
+      mouseAction(
+        state,
+        { button: 65, column: 4, row: 5, pressed: true },
+        { dragging: false, doubleClick: false },
+      ),
+    ).toEqual({ kind: "move", delta: 1 });
+  });
+
+  it("keeps blocked report identifiers behind technical details", () => {
+    const inventory = buildInventory();
+    const state: TuiState = {
+      screen: "report",
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 28,
+          columns: 100,
+        }),
+      },
+      report: buildExecutionReport({
+        status: "blocked",
+        targetResults: [
+          {
+            target: {
+              kind: "installation",
+              installationId: inventory.installations[0]!.id,
+            },
+            status: "blocked",
+            actionIds: [],
+            reason: "protected by policy",
+          },
+        ],
+      }),
+      label: "example-skill",
+      fallbackCursor: 0,
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    const rendered = renderTui(state, plainTuiTheme);
+    expect(rendered).toContain("Blocked");
+    expect(rendered).toContain("No capabilities were removed");
+    expect(rendered).not.toContain("removal-plan-");
   });
 
   it("renders the existing error outcome when execution throws synchronously", async () => {
@@ -1581,7 +1785,8 @@ describe("terminal removal interactions", () => {
       kind: "brute-force-confirmation",
     });
     const frames = terminal.frames.join("\n");
-    expect(frames).toContain("Fallback plans are never executed automatically");
+    expect(frames).toContain("Could not complete");
+    expect(frames).toContain("Fallbacks are never executed automatically");
     expect(frames).toContain("Remove example-skill?");
     expect(frames).toContain(
       "This is a separate recoverable removal after the managed attempt failed",

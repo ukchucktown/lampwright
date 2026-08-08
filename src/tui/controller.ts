@@ -10,7 +10,7 @@ import {
   reduceBrowse,
   type TuiBrowseCommand,
 } from "./browse.js";
-import { planScrollMetrics } from "./render.js";
+import { planScrollMetrics, reportScrollMetrics } from "./render.js";
 import { createTuiSections, selectionTargets } from "./sections.js";
 import { createSearchModel, reduceSearch } from "./search.js";
 import type {
@@ -86,7 +86,10 @@ export class TuiController {
             screen: "report",
             browse: state.browse,
             report,
+            label: state.label,
             fallbackCursor: 0,
+            technicalDetails: false,
+            scrollOffset: 0,
           };
         })
         .catch((error: unknown) => {
@@ -307,7 +310,28 @@ export class TuiController {
       this.stateValue = { screen: "done", report: state.report };
       return;
     }
-    if (action.kind === "move") {
+    if (action.kind === "toggle-details") {
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const metrics = reportScrollMetrics(state);
+      const distance =
+        action.kind === "page" ? Math.max(1, metrics.pageRows) : 1;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + action.delta * distance),
+        ),
+      };
+      return;
+    }
+    if (action.kind === "select-fallback") {
       this.stateValue = {
         ...state,
         fallbackCursor: movedCursor(
@@ -368,8 +392,16 @@ function resizeState(
         viewport,
       }),
     };
-  if (state.screen === "report")
-    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "report") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        reportScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
   if (state.screen === "executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   return {

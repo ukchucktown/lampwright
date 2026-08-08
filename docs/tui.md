@@ -187,8 +187,38 @@ progress because Execution returns a final report rather than progress events.
 A managed-removal failure is reported without running a
 filesystem fallback. If Execution returns fallback plans, `f` opens one as a
 new brute-force review and a second `y` is required. That plan uses Quarantine
-for filesystem removal. The final screen reports target, action, and
-verification outcomes, rescan failure, and any still-available fallbacks.
+for filesystem removal. The final screen leads with `Completed`, `Completed
+with concerns`, `Could not complete`, or `Blocked`. It uses capability and
+category names from the saved Inventory, condenses successful outcomes into
+counts, and expands only actionable concerns. `d` exposes exact identifiers
+and raw errors. Its body scrolls with Up/Down, Page Up/Page Down, or the wheel;
+the status/action footer remains visible and gives the visible range. Resizing
+clamps that viewport. Left/Right selects an offered fallback, while vertical
+scrolling never changes that selection.
+
+### Technical report reference
+
+The review, execution-feedback, and final-report screens describe the same
+execution model at different times. A **target** is the requested capability,
+source group, or Plugin boundary. An **action** is an approved managed removal,
+recoverable quarantine, or record cleanup. A **verification check** tests the
+promised post-removal condition. Review shows their planned forms;
+execution-feedback intentionally shows only approved target/action counts
+because Execution returns one final report; that report gives their results.
+
+Technical details expose the `planId`, the source `inventoryId`, and the
+`finalInventoryId` when the final scan succeeds. The report and every action
+carry `startedAt`/`completedAt` timestamps; they are for audit correlation, not
+progress. Target statuses are `removed`, `unchanged`, `partially-removed`,
+`unresolved`, `failed`, and `blocked`; action statuses are `succeeded`,
+`unchanged`, `failed`, `blocked`, and `skipped`; verification statuses are
+`passed`, `failed`, and `skipped`. Raw target/action/check IDs, error codes,
+messages, and rescan errors are technical-detail material.
+
+A fallback plan is a new complete brute-force plan from the final Inventory.
+It is offered for separate review only and never runs automatically: select it,
+open it with `f`, then confirm it independently. It has its own targets,
+actions, verification checks, identifiers, and approval boundary.
 
 ## Limited terminals
 
@@ -198,7 +228,8 @@ commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
 and `quit`. Search accepts a regex, `up`, `down`, `take`, `all`, `clear`, `done`,
 and `cancel`. Plan screens accept `yes`, `no`, `details`, `up`, `down`,
 `pageup`, `pagedown`, `force`, and `quit`; report screens accept `up`, `down`,
-`fallback`, and `quit`. End-of-input cancels safely.
+`pageup`, `pagedown`, `details`, `previous`, `next`, `fallback`, and `quit`.
+End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 

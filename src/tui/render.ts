@@ -1080,73 +1080,357 @@ function targetLabel(state: TuiPlanState, target: RemovalTarget): string {
 }
 
 function renderReport(state: TuiReportState, style: TuiPaint): string {
-  const report = state.report;
-  const statusStyle =
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return renderCompactReport(state, style);
+  const body = reportBodyLines(state, style);
+  const footer = reportFooterLines(state, style);
+  const metrics = reportScrollMetricsFor(state, body.length, footer.length);
+  const offset = Math.min(
+    Math.max(0, state.scrollOffset),
+    metrics.maximumOffset,
+  );
+  const visible =
+    metrics.maximumOffset > 0
+      ? body.slice(offset, offset + metrics.pageRows)
+      : body;
+  const range =
+    metrics.maximumOffset > 0
+      ? [
+          style.muted(
+            `report ${String(offset + 1)}-${String(Math.min(body.length, offset + metrics.pageRows))}/${String(body.length)}  ↑↓/PgUp/PgDn scroll`,
+          ),
+        ]
+      : [];
+  const width = Math.max(0, state.browse.model.viewport.columns - 1);
+  return `${[...visible, ...range, ...footer]
+    .slice(0, Math.max(0, state.browse.model.viewport.rows - 1))
+    .map((line) => fit(line, width))
+    .join("\n")}\n`;
+}
+
+export function reportScrollMetrics(state: TuiReportState): {
+  readonly pageRows: number;
+  readonly maximumOffset: number;
+} {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return { pageRows: 0, maximumOffset: 0 };
+  const style = createPaint(plainTuiTheme);
+  return reportScrollMetricsFor(
+    state,
+    reportBodyLines(state, style).length,
+    reportFooterLines(state, style).length,
+  );
+}
+
+function reportScrollMetricsFor(
+  state: TuiReportState,
+  bodyRows: number,
+  footerRows: number,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  const usableRows = Math.max(0, state.browse.model.viewport.rows - 1);
+  const overflows = bodyRows + footerRows > usableRows;
+  const pageRows = Math.max(
+    0,
+    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
+  );
+  return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
+}
+
+function reportBodyLines(state: TuiReportState, style: TuiPaint): string[] {
+  const { report } = state;
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const outcome =
+    report.status === "succeeded"
+      ? "Completed"
+      : report.status === "partial"
+        ? "Completed with concerns"
+        : report.status === "blocked"
+          ? "Blocked"
+          : "Could not complete";
+  const outcomeStyle =
     report.status === "succeeded"
       ? style.success
       : report.status === "partial"
         ? style.warning
         : style.error;
+  const removed = report.targetResults.filter(
+    (item) => item.status === "removed",
+  ).length;
+  const unchanged = report.targetResults.filter(
+    (item) => item.status === "unchanged",
+  ).length;
+  const unresolved = report.targetResults.filter(
+    (item) => item.status !== "removed" && item.status !== "unchanged",
+  );
+  const actionSuccess = report.actionResults.filter(
+    (item) => item.status === "succeeded" || item.status === "unchanged",
+  ).length;
+  const checkPass = report.verificationResults.filter(
+    (item) => item.status === "passed",
+  ).length;
+  const concerns = [
+    ...condenseTargetConcerns(state, unresolved),
+    ...condenseReportConcerns(
+      report.actionResults
+        .filter(
+          (item) => item.status !== "succeeded" && item.status !== "unchanged",
+        )
+        .map(
+          (item) =>
+            `An approved removal ${item.status}: ${actionResultReason(item)}`,
+        ),
+    ),
+    ...condenseReportConcerns(
+      report.verificationResults
+        .filter((item) => item.status !== "passed")
+        .map(
+          (item) =>
+            `Verification ${item.status}: ${verificationResultReason(item)}`,
+        ),
+    ),
+    ...(report.rescanError === null
+      ? []
+      : [`• Final scan could not finish: ${report.rescanError.message}`]),
+  ];
   const lines = [
-    style.title("skill-cleaner — ") + statusStyle(`Execution ${report.status}`),
+    style.title("skill-cleaner — Final report"),
     "",
-    style.muted(`Plan: ${report.planId}`),
-    `Final inventory: ${style.info(report.finalInventoryId ?? "unavailable")}`,
+    outcomeStyle(outcome),
+    ...wrapPlanLine(
+      removed > 0
+        ? removed === 1
+          ? `${state.label} removed.`
+          : `${countLabel(removed, "capability")} removed.`
+        : "No capabilities were removed.",
+      width,
+    ).map(removed > 0 ? style.success : outcomeStyle),
+    ...(unchanged > 0
+      ? [
+          style.muted(
+            unchanged === 1
+              ? `${state.label} remained unchanged.`
+              : `${countLabel(unchanged, "capability")} remained unchanged.`,
+          ),
+        ]
+      : []),
+    report.rescanError === null
+      ? style.success("Final scan completed.")
+      : style.error("Final scan could not be completed."),
+    ...(report.verificationResults.length === 0
+      ? []
+      : [
+          style.muted(
+            `${String(checkPass)} of ${String(report.verificationResults.length)} verification checks passed.`,
+          ),
+        ]),
+    ...(actionSuccess === 0
+      ? []
+      : [
+          style.muted(
+            `${countLabel(actionSuccess, "approved removal")} finished.`,
+          ),
+        ]),
+    ...(concerns.length === 0
+      ? []
+      : [
+          "",
+          style.warning("What still needs attention"),
+          ...wrapPlanLines(concerns, width).map(style.warning),
+        ]),
+  ];
+  if (state.technicalDetails)
+    lines.push("", ...technicalReportLines(state, style, width));
+  return lines;
+}
+
+function condenseReportConcerns(values: readonly string[]): readonly string[] {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts].map(([value, count]) =>
+    count === 1 ? `• ${value}` : `• ${String(count)} items: ${value}`,
+  );
+}
+
+function condenseTargetConcerns(
+  state: TuiReportState,
+  results: readonly import("../model/types.js").TargetResult[],
+): readonly string[] {
+  const groups = new Map<string, string[]>();
+  for (const result of results) {
+    const reason = targetResultReason(result);
+    const names = groups.get(reason) ?? [];
+    names.push(reportTargetLabel(state, result.target));
+    groups.set(reason, names);
+  }
+  return [...groups].map(([reason, names]) =>
+    names.length === 1
+      ? `• ${names[0]}: ${reason}`
+      : `• ${String(names.length)} capabilities: ${reason}`,
+  );
+}
+
+function renderCompactReport(state: TuiReportState, style: TuiPaint): string {
+  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
+  const width = Math.max(0, state.browse.model.viewport.columns - 1);
+  return `${[
+    style.title("skill-cleaner"),
+    style.warning("Resize the terminal"),
+    style.muted("q quit"),
+  ]
+    .slice(0, rows)
+    .map((line) => fit(line, width))
+    .join("\n")}\n`;
+}
+
+function targetResultReason(
+  result: import("../model/types.js").TargetResult,
+): string {
+  return "reason" in result ? result.reason : "did not finish";
+}
+
+function actionResultReason(
+  result: import("../model/types.js").ActionResult,
+): string {
+  return "error" in result
+    ? result.error.message
+    : "reason" in result
+      ? result.reason
+      : "did not finish";
+}
+
+function verificationResultReason(
+  result: import("../model/types.js").VerificationResult,
+): string {
+  return "error" in result
+    ? result.error.message
+    : "reason" in result
+      ? result.reason
+      : "did not finish";
+}
+
+function reportFooterLines(state: TuiReportState, style: TuiPaint): string[] {
+  const fallbacks = state.report.fallbackPlans;
+  const details = state.technicalDetails
+    ? "hide technical details"
+    : "technical details";
+  const lines: string[] = [""];
+  if (fallbacks.length > 0) {
+    const selected = fallbacks[state.fallbackCursor]!;
+    lines.push(
+      style.warning(
+        `${countLabel(fallbacks.length, "separate recoverable fallback")} available.`,
+      ),
+    );
+    lines.push(
+      style.focus(
+        `Fallback ${String(state.fallbackCursor + 1)}/${String(fallbacks.length)}: ${countLabel(selected.targets.length, "target")} · ${countLabel(selected.actions.length, "action")}`,
+      ),
+    );
+    lines.push(
+      style.active("←/→ choose fallback   f review selected fallback") +
+        style.muted("   Esc/q finish"),
+    );
+    lines.push(
+      style.muted(
+        "Fallbacks are never executed automatically; review and confirm each separately.",
+      ),
+    );
+  } else lines.push(style.muted("Esc/q finish"));
+  lines.push(style.title("d") + style.muted(` ${details}`));
+  return lines;
+}
+
+function reportTargetLabel(
+  state: TuiReportState,
+  target: RemovalTarget,
+): string {
+  const inventory = state.browse.inventory;
+  if (target.kind === "installation")
+    return (
+      inventory.installations.find((item) => item.id === target.installationId)
+        ?.skill.name ?? "selected capability"
+    );
+  if (target.kind === "logical-skill")
+    return (
+      inventory.logicalSkills.find((item) => item.id === target.logicalSkillId)
+        ?.skill.name ?? "selected capability"
+    );
+  if (target.kind === "source-group")
+    return (
+      inventory.groups.find((item) => item.id === target.groupId)?.label ??
+      "selected group"
+    );
+  return (
+    inventory.plugins.find((item) => item.id === target.pluginBoundaryId)
+      ?.pluginId ?? "selected Plugin"
+  );
+}
+
+function technicalReportLines(
+  state: TuiReportState,
+  style: TuiPaint,
+  width: number,
+): string[] {
+  const { report } = state;
+  return [
+    style.info("Technical details"),
+    style.info("Report"),
+    ...wrapPlanLine(`Status: ${report.status}`, width).map(style.muted),
+    ...wrapPlanLine(`Plan: ${report.planId}`, width).map(style.muted),
+    ...wrapPlanLine(`Source inventory: ${report.inventoryId}`, width).map(
+      style.muted,
+    ),
+    ...wrapPlanLine(`Started: ${report.startedAt}`, width).map(style.muted),
+    ...wrapPlanLine(`Completed: ${report.completedAt}`, width).map(style.muted),
+    ...wrapPlanLine(
+      `Final inventory: ${report.finalInventoryId ?? "unavailable"}`,
+      width,
+    ).map(style.muted),
+    style.info(`Targets (${String(report.targetResults.length)})`),
+    ...report.targetResults.flatMap((item) =>
+      wrapPlanLine(
+        `Target ${describeTarget(item.target)} — ${item.status}${"reason" in item ? `: ${item.reason}` : ""}`,
+        width,
+      ).map(style.muted),
+    ),
+    style.info(`Actions (${String(report.actionResults.length)})`),
+    ...report.actionResults.flatMap((item) => [
+      ...wrapPlanLine(
+        `Action ${item.actionId} — ${item.status}${"error" in item ? `: ${item.error.code}: ${item.error.message}` : "reason" in item ? `: ${item.reason}` : ""}`,
+        width,
+      ).map(style.muted),
+      ...wrapPlanLine(`  Started: ${item.startedAt}`, width).map(style.muted),
+      ...wrapPlanLine(`  Completed: ${item.completedAt}`, width).map(
+        style.muted,
+      ),
+    ]),
+    style.info(`Verification (${String(report.verificationResults.length)})`),
+    ...report.verificationResults.flatMap((item) =>
+      wrapPlanLine(
+        `Check ${item.checkId} — ${item.status}${"error" in item ? `: ${item.error.code}: ${item.error.message}` : "reason" in item ? `: ${item.reason}` : ""}`,
+        width,
+      ).map(style.muted),
+    ),
     ...(report.rescanError === null
       ? []
       : [
-          style.error(
-            `Rescan error: ${report.rescanError.code}: ${report.rescanError.message}`,
-          ),
+          style.info("Rescan error"),
+          ...wrapPlanLine(
+            `${report.rescanError.code}: ${report.rescanError.message}`,
+            width,
+          ).map(style.muted),
         ]),
-    style.active(`Targets (${report.targetResults.length}):`),
-    ...indented(
-      orNone(
-        report.targetResults.map(
-          (result) =>
-            `${describeTarget(result.target)} — ${result.status}${"reason" in result ? `: ${result.reason}` : ""}`,
-        ),
-      ),
-    ),
-    style.active(`Actions (${report.actionResults.length}):`),
-    ...indented(
-      orNone(
-        report.actionResults.map(
-          (result) =>
-            `${result.actionId} — ${result.status}${"reason" in result ? `: ${result.reason}` : ""}${"error" in result ? `: ${result.error.code}: ${result.error.message}` : ""}`,
-        ),
-      ),
-    ),
-    style.active(`Verification (${report.verificationResults.length}):`),
-    ...indented(
-      orNone(
-        report.verificationResults.map(
-          (result) =>
-            `${result.checkId} — ${result.status}${"reason" in result ? `: ${result.reason}` : ""}${"error" in result ? `: ${result.error.code}: ${result.error.message}` : ""}`,
-        ),
-      ),
-    ),
-    style.warning(
-      `Separate brute-force fallbacks (${report.fallbackPlans.length}):`,
+    style.info(`Fallback plans (${String(report.fallbackPlans.length)})`),
+    ...report.fallbackPlans.flatMap((plan) =>
+      wrapPlanLine(`Fallback plan: ${plan.id}`, width).map(style.muted),
     ),
   ];
-  if (report.fallbackPlans.length === 0) lines.push(style.muted("  none"));
-  else
-    report.fallbackPlans.forEach((fallback, index) => {
-      const line = `${index === state.fallbackCursor ? ">" : " "} ${index + 1}. ${fallback.id} — ${fallback.targets.length} target(s), ${fallback.actions.length} action(s), ${fallback.blocks.length} block(s)`;
-      lines.push(
-        index === state.fallbackCursor ? style.focus(line) : style.muted(line),
-      );
-    });
-  lines.push(
-    "",
-    report.fallbackPlans.length > 0
-      ? style.active("↑/↓ choose fallback   f review selected fallback") +
-          style.muted("   Esc/q finish")
-      : style.muted("Esc/q finish"),
-    style.muted("Fallback plans are never executed automatically."),
-  );
-  return `${lines.join("\n")}\n`;
 }
 
 function describeAction(action: RemovalAction): string {
