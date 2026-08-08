@@ -107,8 +107,7 @@ export function defaultInventoryScanEnvironment(): InventoryScanEnvironment {
     configDirectory:
       process.env.XDG_CONFIG_HOME || join(homeDirectory, ".config"),
     stateDirectory: process.env.XDG_STATE_HOME || null,
-    cacheDirectory:
-      process.env.XDG_CACHE_HOME || join(homeDirectory, ".cache"),
+    cacheDirectory: process.env.XDG_CACHE_HOME || join(homeDirectory, ".cache"),
     nodeVersion: process.versions.node,
     agentHomeDirectories: Object.fromEntries(
       [
