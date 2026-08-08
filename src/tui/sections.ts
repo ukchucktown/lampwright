@@ -109,8 +109,8 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     sections.push({
       key: "plugins",
       label: "Plugins",
-      detail: "removable through their own manager, never by a bulk sweep",
-      selectable: true,
+      detail: "informational; manage with the owning harness",
+      selectable: false,
       target: null,
       entries: sorted(inventory.plugins.map((plugin) => pluginEntry(plugin))),
     });
@@ -159,11 +159,16 @@ function pluginEntry(plugin: PluginBoundary): TuiEntry {
         ? plugin.pluginId
         : `${plugin.pluginId}@${plugin.version}`,
     description: `${String(plugin.installationIds.length)} owned skills, ${String(plugin.resources.length)} resources`,
-    exposedTo: [plugin.ownership.pluginId],
+    exposedTo: [...plugin.exposedTo].sort(compare),
     paths: resources,
     owner: plugin.adapterId ?? "plugin",
-    note: plugin.runtimeDefault ? "agent default" : null,
-    target: { kind: "plugin", pluginBoundaryId: plugin.id },
+    note: [
+      plugin.exposedTo.join(", "),
+      plugin.runtimeDefault ? "agent default" : null,
+    ]
+      .filter((value): value is string => value !== null && value !== "")
+      .join(" · "),
+    target: null,
   };
 }
 

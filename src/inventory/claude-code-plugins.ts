@@ -381,6 +381,7 @@ async function materializePlugin(input: {
       pluginId: input.entry.pluginKey,
       version: input.entry.record.version ?? manifestResult.version,
       adapterId: CLAUDE_CODE_PLUGIN_ADAPTER_ID,
+      exposedTo: [agentId],
       ownership: {
         kind: "plugin",
         pluginId: input.entry.pluginKey,

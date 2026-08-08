@@ -59,7 +59,7 @@ export interface TuiPaneView<Item> {
   readonly height: number;
 }
 
-/** One selectable thing: a Logical Skill, a Plugin boundary, or a finding. */
+/** One visible inventory row; informational rows have no Removal Target. */
 export interface TuiEntry {
   readonly key: string;
   readonly name: string;
@@ -67,7 +67,7 @@ export interface TuiEntry {
   readonly exposedTo: readonly string[];
   readonly paths: readonly string[];
   readonly owner: string;
-  /** Shown only when this entry departs from what its section already says. */
+  /** Supplemental row context, such as protection or a Plugin's harness. */
   readonly note: string | null;
   readonly target: RemovalTarget | null;
 }

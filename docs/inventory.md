@@ -108,7 +108,11 @@ Each physical declared Plugin root receives a stable scan-local boundary ID.
 Installations reference that boundary separately from the Plugin system's
 external ID, so the same external Plugin installed in user and workspace scope
 remains two independently reviewable ownership boundaries. Generic discovery
-materializes the declared root itself as protected, recoverable collateral plus
+and built-in Plugin scanners record the owning agent harness in
+`PluginBoundary.exposedTo`, including for a Plugin with no discovered Skill
+children, so presentation never has to infer the harness from an adapter ID or
+path. Generic discovery materializes the declared root itself as protected,
+recoverable collateral plus
 an explicit filesystem fallback, even when that root contains no Skills. A
 fallback can therefore quarantine the complete Plugin root—including unknown
 files and directories—instead of treating only discovered `SKILL.md` children
@@ -337,14 +341,13 @@ A Plugin whose declared `marketplaceSource` resolves inside a runtime-managed
 marketplace root is marked `runtimeDefault` on its boundary. Two are in use:
 `<XDG_CACHE_HOME>/codex-runtimes`, defaulting to `~/.cache/codex-runtimes`, and
 `<CODEX_HOME>/.tmp/bundled-marketplaces`. Codex
-ships those Plugins with itself. They stay ordinary removable Installations
-with their managed removal intact, because `codex plugin` can uninstall them;
-the flag exists so presentation can set them aside and so a bulk sweep cannot
-take them. `--all --include-plugins` therefore skips a runtime default, and
-removing one requires naming its boundary. Matching on the managed location
-rather than a marketplace name survives the runtime adding or renaming a
-marketplace, and a user marketplace whose name collides with a runtime one is
-never flagged.
+ships those Plugins with itself. They remain visible inventory evidence, but
+are outside every removal boundary even when
+`codex plugin` advertises an uninstall operation. The flag lets presentation
+mark them and makes bulk, explicit, and forced Plugin removal refuse them.
+Matching on the managed location rather than a marketplace name survives the
+runtime adding or renaming a marketplace, and a user marketplace whose name
+collides with a runtime one is never flagged.
 
 List output must be unique-key JSON with `installed` and `available` arrays.
 Every installed record must attest `installed: true`, a safe Plugin and

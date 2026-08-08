@@ -721,7 +721,15 @@ function entryCell(
   }
   const exposure = section === null ? null : sharedExposure(section);
   const differs = exposure === null || entry.exposedTo.join(" ") !== exposure;
-  const note = entry.note ?? (differs ? entry.exposedTo.join(" ") : "");
+  const exposureNote = entry.exposedTo.join(" ");
+  const note = [
+    entry.note,
+    differs && !(entry.note?.includes(exposureNote) ?? false)
+      ? exposureNote
+      : null,
+  ]
+    .filter((value): value is string => value !== null && value !== "")
+    .join(" · ");
   const nameWidth = Math.max(6, Math.min(44, width - 22));
   const head = `${marker} ${fit(entry.name, nameWidth)} `;
   const tail = fit(note, Math.max(0, width - nameWidth - 5));
@@ -1252,6 +1260,11 @@ function describePlainBlock(block: PlanBlock): readonly string[] {
       `  • This is a built-in System Skill supplied by ${block.agentId}.`,
       "    System Skills cannot be removed.",
     ];
+  if (block.kind === "runtime-default-plugin")
+    return [
+      `  • Plugin ${block.pluginId} is supplied by ${block.exposedTo.join(", ") || "its agent harness"}.`,
+      "    Runtime-default Plugins cannot be removed.",
+    ];
   if (block.kind === "filesystem-permission")
     return [
       `  • skill-cleaner cannot modify ${block.path}: ${block.reason}`,
@@ -1778,6 +1791,8 @@ function describeBlock(block: PlanBlock): string {
     return `${block.kind}: ${block.path}${suffix}`;
   if (block.kind === "system-skill")
     return `${block.kind}: supplied by ${block.agentId}${suffix}`;
+  if (block.kind === "runtime-default-plugin")
+    return `${block.kind}: Plugin ${block.pluginId}; harnesses ${block.exposedTo.join(", ") || "unknown"}${suffix}`;
   if (
     block.kind === "filesystem-permission" ||
     block.kind === "cleanup-conflict"

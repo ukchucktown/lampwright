@@ -921,7 +921,7 @@ describe("terminal section projection", () => {
       sections.map((section) => [section.label, section.selectable]),
     ).toEqual([
       ["No shared source", true],
-      ["Plugins", true],
+      ["Plugins", false],
       ["System skills", false],
     ]);
     expect(
@@ -953,15 +953,37 @@ describe("terminal section projection", () => {
     });
   });
 
-  it("offers a Plugin as its own boundary rather than its owned Skills", () => {
-    const sections = createTuiSections(
-      buildInventory({ installations: [], plugins: [buildPluginBoundary()] }),
-    );
-
-    expect(sections[0]?.entries[0]?.target).toEqual({
-      kind: "plugin",
-      pluginBoundaryId: "fixture-plugin",
+  it("shows a Plugin and its harness without offering a Removal Target", () => {
+    const inventory = buildInventory({
+      installations: [],
+      plugins: [buildPluginBoundary()],
     });
+    const sections = createTuiSections(inventory);
+
+    expect(sections[0]).toMatchObject({
+      label: "Plugins",
+      selectable: false,
+      entries: [
+        {
+          exposedTo: ["fixture-agent"],
+          target: null,
+        },
+      ],
+    });
+
+    const focused = reduceBrowse(
+      createBrowseModel(sections, { rows: 24, columns: 100 }),
+      { kind: "focus", pane: "entries" },
+    );
+    const attempted = reduceBrowse(focused, { kind: "toggle-select" });
+    expect(attempted.selected).toEqual(new Set());
+    expect(attempted.notice).toBe("Plugins cannot be removed here.");
+    expect(
+      renderBrowseLines(
+        { screen: "browse", inventory, model: attempted },
+        plainTuiTheme,
+      ).join("\n"),
+    ).toContain("fixture-agent");
   });
 });
 

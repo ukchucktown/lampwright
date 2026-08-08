@@ -144,6 +144,7 @@ function pluginBoundary(
     pluginId,
     version: "1.0.0",
     adapterId: "fixture-adapter",
+    exposedTo: ["fixture-agent"],
     runtimeDefault: false,
     ownership: {
       kind: "plugin",
@@ -478,10 +479,22 @@ describe("pure removal planner", () => {
       force: false,
       mode: "managed-first",
     });
-    expect(namedRuntimePlugin.targets).toEqual([
-      { kind: "plugin", pluginBoundaryId: "plugin-a-boundary" },
-    ]);
-    expect(namedRuntimePlugin.actions).not.toHaveLength(0);
+    expect(namedRuntimePlugin.actions).toEqual([]);
+    expect(namedRuntimePlugin.blocks).toContainEqual({
+      kind: "runtime-default-plugin",
+      target: { kind: "plugin", pluginBoundaryId: "plugin-a-boundary" },
+      pluginId: "plugin-a",
+      exposedTo: ["fixture-agent"],
+      overridable: false,
+    });
+
+    const forcedRuntimePlugin = plan(runtimeInventory, {
+      kind: "targets",
+      targets: [{ kind: "plugin", pluginBoundaryId: "plugin-a-boundary" }],
+      force: true,
+      mode: "managed-first",
+    });
+    expect(forcedRuntimePlugin.actions).toEqual([]);
   });
 
   it("resolves Plugin targets by physical boundary rather than external ID", () => {

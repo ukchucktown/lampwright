@@ -525,14 +525,15 @@ export interface PluginBoundary {
   readonly pluginId: string;
   readonly version: string | null;
   readonly adapterId: string | null;
+  /** Agent harnesses that load or manage this installed Plugin. */
+  readonly exposedTo: readonly string[];
   readonly ownership: PluginOwnership;
   /**
    * Whether the agent runtime ships this Plugin with itself.
    *
    * Declared by the owning system, never inferred from a name or version. A
-   * runtime default stays removable when its Owner supports removal; the flag
-   * keeps it out of ordinary browsing and bulk selection so a user cleaning
-   * their own Skills does not sweep the agent's own bundled capability.
+   * Runtime defaults are visible inventory evidence, but stay outside every
+   * removal boundary even when their Owner advertises a removal operation.
    */
   readonly runtimeDefault: boolean;
   readonly installationIds: readonly InstallationId[];
@@ -609,6 +610,13 @@ export type PlanBlock =
       readonly kind: "system-skill";
       readonly target: RemovalTarget;
       readonly agentId: string;
+      readonly overridable: false;
+    }
+  | {
+      readonly kind: "runtime-default-plugin";
+      readonly target: Extract<RemovalTarget, { kind: "plugin" }>;
+      readonly pluginId: string;
+      readonly exposedTo: readonly string[];
       readonly overridable: false;
     }
   | {

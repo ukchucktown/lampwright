@@ -492,6 +492,13 @@ function validatePluginBoundaries(
         "plugin ownership must match the external plugin id",
       );
     }
+    if (new Set(plugin.exposedTo).size !== plugin.exposedTo.length) {
+      addIssue(
+        issues,
+        [...path, "exposedTo"],
+        "Plugin harnesses must be unique",
+      );
+    }
     validateRemovalEvidence(
       plugin.removal,
       plugin.ownership,
@@ -549,6 +556,17 @@ function validatePluginBoundaries(
           issues,
           installationPath,
           "plugin child adapter must match the plugin boundary",
+        );
+      }
+      if (
+        installation.exposedTo.some(
+          (agentId) => !plugin.exposedTo.includes(agentId),
+        )
+      ) {
+        addIssue(
+          issues,
+          installationPath,
+          "plugin boundary must include every harness exposed by its Skills",
         );
       }
       if (claimedInstallations.has(installationId)) {

@@ -831,11 +831,13 @@ function humanQuarantinePlan(plan: Record<string, unknown>): string {
 function describeBlock(block: Record<string, unknown>): string {
   const location = typeof block.path === "string" ? ` at ${block.path}` : "";
   const reason = typeof block.reason === "string" ? `: ${block.reason}` : "";
+  const subject =
+    typeof block.pluginId === "string" ? ` ${block.pluginId}` : "";
   const override =
     block.overridable === true
       ? " (overridable with --force)"
       : " (not overridable)";
-  return `${String(block.kind)}${location}${reason}${override}`;
+  return `${String(block.kind)}${subject}${location}${reason}${override}`;
 }
 
 function isInventory(

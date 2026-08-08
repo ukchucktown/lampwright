@@ -652,6 +652,7 @@ async function scanExtensions(
         pluginId: manifest.name,
         version: manifest.version,
         adapterId: GEMINI_CLI_ADAPTER_ID,
+        exposedTo: [agentId],
         ownership: {
           kind: "plugin",
           pluginId: manifest.name,
