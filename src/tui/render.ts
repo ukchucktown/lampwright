@@ -10,13 +10,19 @@ import type {
   VerificationCheck,
 } from "../model/types.js";
 import {
-  currentEntry,
   currentSection,
+  detailPane,
   layout,
   panes,
   sharedExposure,
   sharedPathCount,
 } from "./browse.js";
+import {
+  nightfallTheme,
+  styleTui,
+  type TuiStyleRole,
+  type TuiTheme,
+} from "./theme.js";
 import type {
   TuiBrowseState,
   TuiEntry,
@@ -27,15 +33,19 @@ import type {
   TuiState,
 } from "./types.js";
 
-export function renderTui(state: TuiState): string {
+export function renderTui(
+  state: TuiState,
+  theme: TuiTheme = nightfallTheme,
+): string {
+  const style = createPaint(theme);
   if (state.screen === "loading")
-    return "skill-cleaner\n\nScanning known skill roots…\n";
+    return `${style.title("skill-cleaner")}\n\n${style.info("Scanning known skill roots…")}\n`;
   if (state.screen === "error")
-    return `skill-cleaner\n\nUnable to continue: ${state.message}\n\nPress Esc or Ctrl-C to exit.\n`;
+    return `${style.title("skill-cleaner")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or Ctrl-C to exit.")}\n`;
   if (state.screen === "done") return "";
-  if (state.screen === "browse") return renderBrowse(state);
-  if (state.screen === "plan") return renderPlan(state);
-  return renderReport(state);
+  if (state.screen === "browse") return renderBrowse(state, theme);
+  if (state.screen === "plan") return renderPlan(state, style);
+  return renderReport(state, style);
 }
 
 /**
@@ -47,85 +57,128 @@ export function renderTui(state: TuiState): string {
  * fitting strips escape codes when it truncates, which would leave the same
  * column dim on one row and plain on the next.
  */
-function renderBrowse(state: TuiBrowseState): string {
-  return renderBrowseLines(state).join("\n");
+function renderBrowse(state: TuiBrowseState, theme: TuiTheme): string {
+  return renderBrowseLines(state, theme).join("\n");
 }
 
-export function renderBrowseLines(state: TuiBrowseState): readonly string[] {
+export function renderBrowseLines(
+  state: TuiBrowseState,
+  theme: TuiTheme = nightfallTheme,
+): readonly string[] {
+  const style = createPaint(theme);
   const model = state.model;
-  const { usable, paneRows, detailRows, leftWidth, rightWidth } = layout(model);
+  const grid = layout(model);
+  const { rows, columns, usable, paneRows, detailRows, leftWidth, rightWidth } =
+    grid;
+  if (rows < 7 || columns < 4) return renderCompactBrowse(rows, usable, style);
   const view = panes(model);
   const section = currentSection(model);
-  const entry = currentEntry(model);
   const out: string[] = [];
 
   const selected = model.selected.size;
   out.push(
-    `${bold("skill-cleaner")} ${dim("inventory")}  ${
+    `${style.title("skill-cleaner")} ${style.muted("inventory")}  ${
       selected > 0
-        ? accent(`${String(selected)} selected`)
-        : dim("nothing selected")
+        ? style.selected(`${String(selected)} selected`)
+        : style.muted("nothing selected")
     }`,
   );
   out.push(
-    dim(
-      fit(
-        "arrows/click/wheel move · space select (a section takes all) · enter review · esc back · ^c quit",
-        usable,
-      ),
+    fitStyledSegments(
+      model.focus === "detail"
+        ? [
+            { text: "↑↓/wheel", paint: style.title },
+            { text: " scroll · ", paint: style.muted },
+            { text: "PgUp/PgDn", paint: style.title },
+            { text: " page · ", paint: style.muted },
+            { text: "click", paint: style.title },
+            { text: " focus · ", paint: style.muted },
+            { text: "tab/⇧tab", paint: style.title },
+            { text: " pane · ", paint: style.muted },
+            { text: "⇧↑↓", paint: style.title },
+            { text: " resize · ", paint: style.muted },
+            { text: "esc", paint: style.title },
+            { text: " back · ", paint: style.muted },
+            { text: "q", paint: style.title },
+            { text: " quit", paint: style.muted },
+          ]
+        : [
+            { text: "↑↓/wheel", paint: style.title },
+            { text: " move · ", paint: style.muted },
+            { text: "click", paint: style.title },
+            { text: " focus · ", paint: style.muted },
+            { text: "space/dbl-click", paint: style.title },
+            { text: " select · ", paint: style.muted },
+            { text: "tab", paint: style.title },
+            { text: " pane · ", paint: style.muted },
+            { text: "enter", paint: style.title },
+            { text: " review · ", paint: style.muted },
+            { text: "esc", paint: style.title },
+            { text: " back · ", paint: style.muted },
+            { text: "q", paint: style.title },
+            { text: " quit", paint: style.muted },
+          ],
+      usable,
+      style.muted,
     ),
   );
   out.push(
     model.query === ""
-      ? dim(fit("filter: names, sections, agents, paths", usable))
-      : `filter ${bold(model.query)} ${dim(`· ${String(view.entries.total)} here`)}`,
+      ? style.muted(fit("filter: names, sections, agents, paths", usable))
+      : `filter ${style.active(model.query)} ${style.muted(`· ${String(view.entries.total)} here`)}`,
   );
-  out.push(`${"─".repeat(leftWidth)}┬${"─".repeat(usable - leftWidth - 1)}`);
+  out.push(
+    style.border(
+      `${"─".repeat(leftWidth)}┬${"─".repeat(usable - leftWidth - 1)}`,
+    ),
+  );
 
   for (let row = 0; row < paneRows; row += 1) {
     out.push(
-      `${sectionCell(model, view.sections, row, leftWidth)}│${entryCell(
+      `${sectionCell(model, view.sections, row, leftWidth, style)}${style.border("│")}${entryCell(
         model,
         view.entries,
         section,
         row,
         rightWidth,
-      )}${dim(scrollMark(view.entries, row))}`,
-    );
-  }
-
-  out.push(`${"─".repeat(leftWidth)}┴${"─".repeat(usable - leftWidth - 1)}`);
-
-  const detail: { text: string; style: (value: string) => string }[] = [];
-  if (entry !== null) {
-    detail.push({
-      text: `${entry.name}   ${entry.owner}${entry.note === null ? "" : ` · ${entry.note}`}`,
-      style: bold,
-    });
-    for (const line of wrap(entry.description ?? "", usable - 2))
-      detail.push({ text: `  ${line}`, style: plain });
-    if (entry.paths.length > 0) detail.push({ text: "", style: plain });
-    for (const path of entry.paths)
-      detail.push({ text: `  ${path}`, style: dim });
-  }
-  for (let row = 0; row < detailRows; row += 1) {
-    const line = detail[row];
-    out.push(
-      line === undefined
-        ? " ".repeat(usable)
-        : line.style(fit(line.text, usable)),
+        style,
+      )}${scrollMark(view.entries, row, style)}`,
     );
   }
 
   out.push(
+    (model.focus === "detail" ? style.title : style.border)(
+      `${"─".repeat(leftWidth)}┴${"─".repeat(usable - leftWidth - 1)}`,
+    ),
+  );
+
+  const detail = detailPane(model);
+  for (let row = 0; row < detailRows; row += 1) {
+    const line = detail.items[row];
+    const paint =
+      line?.kind === "heading"
+        ? style.active
+        : line?.kind === "path"
+          ? style.path
+          : plain;
+    out.push(
+      `${line === undefined ? " ".repeat(Math.max(0, usable - 1)) : paint(fit(line.text, Math.max(0, usable - 1)))}${scrollMark(detail, row, style)}`,
+    );
+  }
+
+  const detailStatus =
+    detail.total > detail.height
+      ? `detail=${String(detail.offset + 1)}-${String(Math.min(detail.total, detail.offset + detail.height))}/${String(detail.total)} `
+      : "";
+  out.push(
     model.notice === null
-      ? dim(
+      ? style.muted(
           fit(
-            `focus=${model.focus} section=${String(model.sectionIndex + 1)}/${String(view.sections.total)} entry=${String(view.entries.total === 0 ? 0 : model.entryIndex + 1)}/${String(view.entries.total)}`,
+            `focus=${model.focus} ${detailStatus}section=${String(model.sectionIndex + 1)}/${String(view.sections.total)} entry=${String(view.entries.total === 0 ? 0 : model.entryIndex + 1)}/${String(view.entries.total)}`,
             usable,
           ),
         )
-      : accent(fit(`! ${model.notice}`, usable)),
+      : style.info(fit(`! ${model.notice}`, usable)),
   );
 
   return out.map((line) => fit(line, usable));
@@ -136,6 +189,7 @@ function sectionCell(
   view: TuiPaneView<TuiSection>,
   row: number,
   width: number,
+  style: TuiPaint,
 ): string {
   const item = view.items[row];
   if (item === undefined) return " ".repeat(width);
@@ -156,8 +210,10 @@ function sectionCell(
       ? `${String(taken)}/${String(item.entries.length)}`
       : String(item.entries.length);
   const text = `${marker} ${fit(item.label, width - 12)} ${fit(count, 6)} `;
-  if (focused && model.focus === "sections") return inverse(fit(text, width));
-  return focused ? bold(fit(text, width)) : fit(text, width);
+  if (focused && model.focus === "sections")
+    return style.focus(fit(text, width));
+  if (focused) return style.active(fit(text, width));
+  return taken > 0 ? style.selected(fit(text, width)) : fit(text, width);
 }
 
 function entryCell(
@@ -166,7 +222,9 @@ function entryCell(
   section: TuiSection | null,
   row: number,
   width: number,
+  style: TuiPaint,
 ): string {
+  if (width <= 0) return "";
   if (row === 0) {
     if (section === null) return " ".repeat(width);
     const exposure = sharedExposure(section);
@@ -180,7 +238,7 @@ function entryCell(
       .filter((value): value is string => value !== null)
       .join(" · ");
     const label = Math.min(24, width);
-    return `${bold(fit(section.label, label))}${dim(fit(` ${detail}`, width - label))}`;
+    return `${style.title(fit(section.label, label))}${style.muted(fit(` ${detail}`, width - label))}`;
   }
 
   const entry = view.items[row - 1];
@@ -193,41 +251,51 @@ function entryCell(
       : model.selected.has(entry.key)
         ? "[x]"
         : "[ ]";
+  if (width < 11) {
+    const compact = fit(`${marker} ${entry.name}`, width);
+    if (focused) return style.focus(compact);
+    return model.selected.has(entry.key) ? style.selected(compact) : compact;
+  }
   const exposure = section === null ? null : sharedExposure(section);
   const differs = exposure === null || entry.exposedTo.join(" ") !== exposure;
   const note = entry.note ?? (differs ? entry.exposedTo.join(" ") : "");
   const nameWidth = Math.max(6, Math.min(44, width - 22));
   const head = `${marker} ${fit(entry.name, nameWidth)} `;
   const tail = fit(note, Math.max(0, width - nameWidth - 5));
-  if (focused) return inverse(fit(head + tail, width));
-  return `${fit(head, nameWidth + 5)}${dim(tail)}`;
+  if (focused) return style.focus(fit(head + tail, width));
+  const styledHead = model.selected.has(entry.key)
+    ? style.selected(fit(head, nameWidth + 5))
+    : fit(head, nameWidth + 5);
+  return `${styledHead}${style.muted(tail)}`;
 }
 
-function scrollMark(pane: TuiPaneView<unknown>, row: number): string {
+function renderCompactBrowse(
+  rows: number,
+  usable: number,
+  style: TuiPaint,
+): readonly string[] {
+  const lines = [
+    style.title("skill-cleaner"),
+    style.warning("Resize the terminal"),
+    style.muted("q quit"),
+  ];
+  return lines.slice(0, Math.max(0, rows - 1)).map((line) => fit(line, usable));
+}
+
+function scrollMark(
+  pane: TuiPaneView<unknown>,
+  row: number,
+  style: TuiPaint,
+): string {
   if (pane.total <= pane.height) return " ";
   const span = Math.max(
     1,
     Math.round((pane.height / pane.total) * pane.height),
   );
   const start = Math.round((pane.offset / pane.total) * pane.height);
-  return row >= start && row < start + span ? "█" : "│";
-}
-
-/** Greedy word wrap, so a long description reads instead of being cut off. */
-function wrap(text: string, width: number): readonly string[] {
-  if (text === "" || width <= 0) return [];
-  const lines: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/u).filter(Boolean)) {
-    if (line === "") line = word;
-    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
-    else {
-      lines.push(line);
-      line = word;
-    }
-  }
-  if (line !== "") lines.push(line);
-  return lines;
+  return row >= start && row < start + span
+    ? style.active("█")
+    : style.border("│");
 }
 
 const escape = String.fromCharCode(27);
@@ -235,10 +303,55 @@ const ansi = new RegExp(`${escape}\\[[0-9;]*m`, "gu");
 const stripAnsi = (value: string): string => value.replace(ansi, "");
 const visibleLength = (value: string): number => [...stripAnsi(value)].length;
 const plain = (value: string): string => value;
-const bold = (value: string): string => `${escape}[1m${value}${escape}[0m`;
-const dim = (value: string): string => `${escape}[2m${value}${escape}[0m`;
-const inverse = (value: string): string => `${escape}[7m${value}${escape}[0m`;
-const accent = (value: string): string => `${escape}[36m${value}${escape}[0m`;
+
+type TuiPaint = Readonly<Record<TuiStyleRole, (value: string) => string>>;
+
+function createPaint(theme: TuiTheme): TuiPaint {
+  const paint =
+    (role: TuiStyleRole) =>
+    (value: string): string =>
+      styleTui(theme, role, value);
+  return {
+    title: paint("title"),
+    active: paint("active"),
+    muted: paint("muted"),
+    border: paint("border"),
+    focus: paint("focus"),
+    selected: paint("selected"),
+    success: paint("success"),
+    info: paint("info"),
+    warning: paint("warning"),
+    error: paint("error"),
+    path: paint("path"),
+  };
+}
+
+function fitStyledSegments(
+  segments: readonly {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  }[],
+  width: number,
+  paintEllipsis: (value: string) => string,
+): string {
+  if (width <= 0) return "";
+  const length = segments.reduce(
+    (total, segment) => total + [...segment.text].length,
+    0,
+  );
+  const truncated = length > width;
+  let remaining = truncated ? width - 1 : width;
+  let result = "";
+  for (const segment of segments) {
+    if (remaining <= 0) break;
+    const characters = [...segment.text];
+    const visible = characters.slice(0, remaining).join("");
+    result += segment.paint(visible);
+    remaining -= Math.min(characters.length, remaining);
+  }
+  if (truncated) return result + paintEllipsis("…");
+  return result + " ".repeat(remaining);
+}
 
 /** Fits to an exact visible width. Styling is applied after, never before. */
 function fit(value: string, width: number): string {
@@ -249,64 +362,98 @@ function fit(value: string, width: number): string {
   return `${[...stripAnsi(value)].slice(0, Math.max(0, width - 1)).join("")}…`;
 }
 
-function renderPlan(state: TuiPlanState): string {
+function renderPlan(state: TuiPlanState, style: TuiPaint): string {
   const removalPlan = state.plan;
   const lines = [
-    `skill-cleaner — ${removalPlan.intent.mode === "brute-force" ? "Separate fallback plan" : "Removal plan"}`,
+    style.title(
+      `skill-cleaner — ${removalPlan.intent.mode === "brute-force" ? "Separate fallback plan" : "Removal plan"}`,
+    ),
     "",
-    `Selection: ${state.label}`,
-    `Plan: ${removalPlan.id}`,
-    `Targets (${removalPlan.targets.length}):`,
+    `Selection: ${style.active(state.label)}`,
+    style.muted(`Plan: ${removalPlan.id}`),
+    style.active(`Targets (${removalPlan.targets.length}):`),
     ...indented(removalPlan.targets.map(describeTarget)),
-    `Actions (${removalPlan.actions.length}):`,
+    style.active(`Actions (${removalPlan.actions.length}):`),
     ...indented(removalPlan.actions.map(describeAction)),
-    `Blocks (${removalPlan.blocks.length}):`,
-    ...indented(orNone(removalPlan.blocks.map(describeBlock))),
-    `Warnings (${removalPlan.warnings.length}):`,
-    ...indented(orNone(removalPlan.warnings.map(describeWarning))),
-    `Verification (${removalPlan.verificationChecks.length}):`,
+    (removalPlan.blocks.length === 0 ? style.active : style.error)(
+      `Blocks (${removalPlan.blocks.length}):`,
+    ),
+    ...indented(
+      removalPlan.blocks.length === 0
+        ? [style.muted("none")]
+        : removalPlan.blocks.map(describeBlock).map(style.error),
+    ),
+    (removalPlan.warnings.length === 0 ? style.active : style.warning)(
+      `Warnings (${removalPlan.warnings.length}):`,
+    ),
+    ...indented(
+      removalPlan.warnings.length === 0
+        ? [style.muted("none")]
+        : removalPlan.warnings.map(describeWarning).map(style.warning),
+    ),
+    style.active(`Verification (${removalPlan.verificationChecks.length}):`),
     ...indented(
       orNone(removalPlan.verificationChecks.map(describeVerification)),
     ),
-    "Approvals shown by this plan:",
-    ...indented(orNone(planApprovals(removalPlan).map(describeApproval))),
+    style.info("Approvals shown by this plan:"),
+    ...indented(
+      orNone(planApprovals(removalPlan).map(describeApproval)).map(style.info),
+    ),
     "",
   ];
   if (removalPlan.blocks.length === 0) {
     lines.push(
-      "Nothing has been changed. Press y to grant the exact approvals above and execute this plan.",
+      style.success(
+        "Nothing has been changed. Press y to grant the exact approvals above and execute this plan.",
+      ),
       removalPlan.intent.mode === "brute-force"
-        ? "This brute-force action quarantines files and is separate from the failed managed removal."
-        : "A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately.",
-      "y confirm   n/Esc cancel   Ctrl-C quit",
+        ? style.warning(
+            "This brute-force action quarantines files and is separate from the failed managed removal.",
+          )
+        : style.muted(
+            "A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately.",
+          ),
+      style.active("y confirm") +
+        style.muted("   n/Esc cancel   q/Ctrl-C quit"),
     );
   } else if (removalPlan.blocks.every((block) => block.overridable)) {
     lines.push(
-      "This plan is blocked and cannot execute as shown.",
-      "f create a force-override plan   n/Esc cancel   Ctrl-C quit",
+      style.warning("This plan is blocked and cannot execute as shown."),
+      style.active("f create a force-override plan") +
+        style.muted("   n/Esc cancel   q/Ctrl-C quit"),
     );
   } else {
     lines.push(
-      "This plan contains a non-overridable block and cannot execute.",
-      "n/Esc return to inventory   Ctrl-C quit",
+      style.error(
+        "This plan contains a non-overridable block and cannot execute.",
+      ),
+      style.muted("n/Esc return to inventory   q/Ctrl-C quit"),
     );
   }
   return `${lines.join("\n")}\n`;
 }
 
-function renderReport(state: TuiReportState): string {
+function renderReport(state: TuiReportState, style: TuiPaint): string {
   const report = state.report;
+  const statusStyle =
+    report.status === "succeeded"
+      ? style.success
+      : report.status === "partial"
+        ? style.warning
+        : style.error;
   const lines = [
-    `skill-cleaner — Execution ${report.status}`,
+    style.title("skill-cleaner — ") + statusStyle(`Execution ${report.status}`),
     "",
-    `Plan: ${report.planId}`,
-    `Final inventory: ${report.finalInventoryId ?? "unavailable"}`,
+    style.muted(`Plan: ${report.planId}`),
+    `Final inventory: ${style.info(report.finalInventoryId ?? "unavailable")}`,
     ...(report.rescanError === null
       ? []
       : [
-          `Rescan error: ${report.rescanError.code}: ${report.rescanError.message}`,
+          style.error(
+            `Rescan error: ${report.rescanError.code}: ${report.rescanError.message}`,
+          ),
         ]),
-    `Targets (${report.targetResults.length}):`,
+    style.active(`Targets (${report.targetResults.length}):`),
     ...indented(
       orNone(
         report.targetResults.map(
@@ -315,7 +462,7 @@ function renderReport(state: TuiReportState): string {
         ),
       ),
     ),
-    `Actions (${report.actionResults.length}):`,
+    style.active(`Actions (${report.actionResults.length}):`),
     ...indented(
       orNone(
         report.actionResults.map(
@@ -324,7 +471,7 @@ function renderReport(state: TuiReportState): string {
         ),
       ),
     ),
-    `Verification (${report.verificationResults.length}):`,
+    style.active(`Verification (${report.verificationResults.length}):`),
     ...indented(
       orNone(
         report.verificationResults.map(
@@ -333,21 +480,25 @@ function renderReport(state: TuiReportState): string {
         ),
       ),
     ),
-    `Separate brute-force fallbacks (${report.fallbackPlans.length}):`,
+    style.warning(
+      `Separate brute-force fallbacks (${report.fallbackPlans.length}):`,
+    ),
   ];
-  if (report.fallbackPlans.length === 0) lines.push("  none");
+  if (report.fallbackPlans.length === 0) lines.push(style.muted("  none"));
   else
     report.fallbackPlans.forEach((fallback, index) => {
+      const line = `${index === state.fallbackCursor ? ">" : " "} ${index + 1}. ${fallback.id} — ${fallback.targets.length} target(s), ${fallback.actions.length} action(s), ${fallback.blocks.length} block(s)`;
       lines.push(
-        `${index === state.fallbackCursor ? ">" : " "} ${index + 1}. ${fallback.id} — ${fallback.targets.length} target(s), ${fallback.actions.length} action(s), ${fallback.blocks.length} block(s)`,
+        index === state.fallbackCursor ? style.focus(line) : style.muted(line),
       );
     });
   lines.push(
     "",
     report.fallbackPlans.length > 0
-      ? "↑/↓ choose fallback   f review selected fallback   Esc/q finish"
-      : "Esc/q finish",
-    "Fallback plans are never executed automatically.",
+      ? style.active("↑/↓ choose fallback   f review selected fallback") +
+          style.muted("   Esc/q finish")
+      : style.muted("Esc/q finish"),
+    style.muted("Fallback plans are never executed automatically."),
   );
   return `${lines.join("\n")}\n`;
 }

@@ -385,7 +385,10 @@ function moreSpecificRoot(
     return null;
   }
   // A declared root may narrow only toward protection. Widening what is
-  // removable requires a root the caller supplied for this invocation.
+  // removable requires a root the caller supplied for this invocation, except
+  // for System Skills: an explicit root is still not authority to expose an
+  // inseparable runtime subtree to removal.
+  if (outer.kind === "system" && inner.kind !== "system") return outer;
   if (
     !explicitRootKeys.has(pathComparisonKey(inner.path)) &&
     rootWithholdsRemoval(outer) &&

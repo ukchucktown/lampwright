@@ -68,8 +68,9 @@ do not contain one another remain a contradiction and are rejected. A declared
 root — a default or one an Adapter supplies — may only narrow toward
 protection, so a nested Adapter root can never widen what is removable inside a
 `source`, `cache-or-vendor`, `system`, or `unknown` root. A root the caller
-supplied for the current invocation may narrow in either direction, because the
-caller named that absolute path deliberately.
+supplied for the current invocation may narrow in either direction except that
+it can never widen a marked `system` boundary: an explicit path is discovery
+authority, not authority to make inseparable runtime content removable.
 
 Claude's standalone Skill roots are bounded to `<CLAUDE_CONFIG_DIR>/skills` and
 `<workspace>/.claude/skills`, defaulting to `~/.claude` when the variable is
@@ -81,6 +82,13 @@ collateral is not materialized again as a separate Installation. A link to an
 unmanaged target stays a distinct Installation at its own path and joins its
 target's Logical Skill through canonical-target evidence, so removing the Skill
 covers both while removing one Installation removes only that entry.
+
+Claude may expose capabilities compiled into its runtime that do not correspond
+to a filesystem `SKILL.md`, installed Plugin, or manager record. Inventory does
+not invent findings for those capabilities: there is no bounded artifact to
+inspect or safe removal boundary to plan. This differs from Codex System Skills,
+whose marked runtime subtree contains filesystem Skills that can be shown as
+visible, immutable evidence.
 
 Codex marks the Skills shipped with its own runtime. When
 `<CODEX_HOME>/skills/.system/.codex-system-skills.marker` is a regular file,

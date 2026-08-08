@@ -2635,6 +2635,40 @@ describe("Inventory scan", () => {
     });
   });
 
+  it("never lets an explicit nested root deprotect a marked System Skill", async () => {
+    const environment = await createTestEnvironment();
+    const systemRoot = join(environment.home, ".codex", "skills", ".system");
+    const nestedRoot = join(systemRoot, "imagegen");
+    await createSkill(nestedRoot, { name: "imagegen" });
+    await writeFile(
+      join(systemRoot, ".codex-system-skills.marker"),
+      "marker\n",
+      "utf8",
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({
+      roots: [
+        {
+          kind: "user",
+          path: nestedRoot,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations).toEqual([]);
+    expect(inventory.otherFindings).toEqual([
+      expect.objectContaining({
+        skill: expect.objectContaining({ name: "imagegen" }),
+        classification: "system-skill",
+      }),
+    ]);
+  });
+
   it("leaves a Codex subtree ordinary when the marker is absent or is a link", async () => {
     const environment = await createTestEnvironment();
     const systemRoot = join(environment.home, ".codex", "skills", ".system");

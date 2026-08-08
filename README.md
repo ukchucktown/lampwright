@@ -4,10 +4,12 @@
 safely removing AI agent Skills whether they were installed as standalone
 files, by a Manager, or through a Plugin system.
 
-The primary interface is an interactive fuzzy-search inventory:
+The primary interface is an interactive terminal inventory. Until publication, build and run it from a trusted checkout:
 
 ```console
-npx skill-cleaner
+npm ci
+npm run build
+node dist/cli.js
 ```
 
 No npm version has been published yet. Until the first explicitly approved

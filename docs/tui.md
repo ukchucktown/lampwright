@@ -8,11 +8,16 @@ requirements to Execution.
 
 ## Layout
 
-Two panes over a detail area, in a fixed grid. The left pane lists sections,
-the right lists the entries of the focused section, and the area below shows
-the focused entry in full. Panes never grow to fit their contents: each owns a
-viewport that scrolls under a stationary frame, so nothing below shifts as you
-move.
+Two navigation panes sit over a read-only detail pane in a fixed grid. The left
+pane lists sections, the right lists the entries of the focused section, and
+the pane below shows the focused entry. Each pane owns an independent viewport
+that scrolls under a stationary frame, so long detail content remains reachable
+without moving the rest of the interface.
+
+When detail content overflows, its right edge draws a scrollbar and the status
+row reports the visible range. Moving to another entry resets detail scrolling
+to the top. Resizing the window or detail pane clamps the range to the content,
+so an old offset can never leave the pane blank.
 
 Two rules keep the frame still, and both are covered by tests. Every line is
 clipped one column short of the terminal width, because writing into the last
@@ -21,11 +26,49 @@ fitted before it is styled, because fitting strips escape codes when it
 truncates, which would otherwise leave the same column dim on one row and plain
 on the next.
 
-Arrows move; left and right change pane; Page Up and Page Down step exactly one
-viewport; shift with left or right moves the pane split and with up or down
-changes the detail height. A pointer can click a row to focus it, double-click to select it, wheel over
-either pane, and drag the divider to resize. The wheel moves the cursor rather
-than only the viewport, so the focused row cannot scroll out from under it.
+## Theme and color
+
+The built-in `Nightfall` theme follows the restrained Subliminal Nightfall
+palette used by Ghostty, Yazi, and tmux. Muted blue-gray borders keep the grid
+quiet; cyan identifies structure and paths; yellow identifies the active or
+selected item; green marks success; blue marks information; and pink-red marks
+errors. Focused rows use a light foreground over a slate selection background.
+The application never paints a base background, so terminal transparency and
+blur remain owned by the terminal.
+
+The inventory hint row presents each navigation or action key in bold cyan and
+its description in muted text. Its contents follow the active pane: navigation
+panes show movement and selection, while detail shows scrolling, paging, and
+resizing. Pointer focus, pane changes, review, back, and quit remain separate
+key/action pairs. Separators remain muted, so the row does not conflate
+navigation with selection. Segment styling is applied after clipping,
+preserving emphasis and reset boundaries on narrow terminals.
+
+Colors are semantic decoration, not state. Checkboxes, focus position, labels,
+and words such as `protected`, `broken`, and `failed` preserve the same meaning
+when color is unavailable. Raw terminals select true color, 256-color ANSI, or
+16-color ANSI from their advertised capabilities. `NO_COLOR`, `TERM=dumb`, and
+non-TTY line output use the monochrome theme. No shell command, terminal probe,
+or platform-specific executable is required.
+
+Up and down move the highlighted row in a navigation pane or scroll a focused
+detail pane. Page Up and Page Down step exactly one active viewport. Tab and
+Shift-Tab cycle through sections, entries, and detail; left and right remain
+shortcuts between the side-by-side navigation panes. Shift with left or right
+moves the vertical pane split, and Shift with up or down changes the detail
+height.
+
+A single click focuses a navigation row or the detail pane. A double-click on a
+navigation row focuses it and toggles its selection, matching space on the
+keyboard; detail remains read-only. The wheel focuses the pane under the
+pointer and moves or scrolls only that pane. Dragging the vertical divider
+resizes the navigation panes, while dragging the horizontal divider resizes
+detail. Pointer motion alone does nothing unless a divider drag is active.
+Terminal resize events update the viewport immediately, including while a plan
+or report is open. Every terminal or pane-size change redraws the complete
+frame from the new dimensions. If the window becomes too small for the grid,
+the UI draws only a clipped resize prompt until the grid fits again; it never
+draws beyond the real terminal or relies on wrapping to hide stale content.
 The interactive terminal runs on the alternate screen. That is not decoration:
 on the normal buffer a terminal treats the wheel as its own scrollback and never
 forwards it, so a pane could not scroll however the application asked. Leaving
@@ -37,7 +80,11 @@ Reports are read from the raw input stream rather than from keypress events,
 because Node's readline splits one report into eight separate keypresses; no
 single event carries a whole report, and the leftover digits would otherwise be
 typed into the filter. Motion is ignored unless a divider drag is in progress, since
-otherwise every twitch of the pointer would re-select the row beneath it.
+otherwise every twitch of the pointer would re-select the row beneath it. SGR
+reports are framed across raw-stream chunk boundaries after the complete SGR
+sentinel (`ESC[<`) identifies mouse input, so split report data remains one
+pointer action and its fragments do not become filter input. Incomplete or
+malformed escape sequences remain ordinary keyboard input.
 
 ## Sections
 
@@ -65,7 +112,8 @@ Typing filters every section at once; sections keep their identity while their
 contents shrink. A term matches a name as a subsequence, or a section label,
 agent, or path as a substring. Descriptions are deliberately excluded: they are
 ordinary English, so a two-letter query matched almost everything through words
-like "can" and "because".
+like "can" and "because". Richer metadata matching and field-filter syntax are
+deferred for separate TUI prototyping.
 
 `space` on an entry selects it. `space` on a section takes or clears the whole
 section, so a bundle of twenty-two is one keystroke; the left pane shows `[ ]`,
@@ -78,7 +126,8 @@ than a list of its members; a partial selection stays a list of Logical Skill
 targets; a Plugin row is its own boundary. With nothing selected, `enter`
 reviews the row under the cursor.
 
-`esc` unwinds the narrowest thing first — the filter, then the pane, then the
+`q` exits the TUI immediately from every screen; Ctrl-C remains an alternate
+exit. `esc` unwinds the narrowest thing first — the filter, then the pane, then the
 selection — and only leaves once there is nothing left to undo, so a stray
 keypress cannot discard a selection.
 
@@ -102,9 +151,10 @@ verification outcomes, rescan failure, and any still-available fallbacks.
 
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, enter a query directly or use `search <query>`,
-`up`, `down`, `expand`, `select`, `clear`, and `quit`. Plan screens accept
-`yes`, `no`, `force`, and `quit`; report screens accept `up`, `down`,
-`fallback`, and `quit`. End-of-input cancels safely.
+`up`, `down`, `in`, `out`, `detail`, `pageup`, `pagedown`, `grow-detail`,
+`shrink-detail`, `take`, `clear`, and `quit`. Plan screens accept `yes`, `no`,
+`force`, and `quit`; report screens accept `up`, `down`, `fallback`, and
+`quit`. End-of-input cancels safely.
 
 Read-only scanning, searching, expanding, cancellation, and plan review create
 no files or persistent state. The terminal UI does not scan paths, infer
@@ -118,3 +168,9 @@ functions using the public Inventory, RemovalPlanIntent, RemovalPlan,
 ApprovalRequirement, and ExecutionReport values. `TuiTerminal` consumes
 rendered state through `render`, supplies semantic `TuiAction` values through
 `readAction`, and is always closed when the session ends.
+
+`renderTui(state, theme?)` and `renderBrowseLines(state, theme?)` accept a
+declarative `TuiTheme`. `createNodeTuiTerminal(input?, output?, options?)`
+accepts an explicit theme for embedding; otherwise it selects a Nightfall color
+mode from the output terminal and environment. `createNightfallTheme(mode)`,
+`nightfallTheme`, and `plainTuiTheme` are exported with the theme types.

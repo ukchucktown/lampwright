@@ -1,7 +1,7 @@
 # skill-cleaner v1 specification
 
-Status: Accepted product direction; implementation not started  
-Last updated: 2026-08-06
+Status: Accepted product direction; implementation under active refinement
+Last updated: 2026-08-08
 
 ## 1. Summary
 
@@ -9,7 +9,7 @@ Last updated: 2026-08-06
 
 The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to make that target unavailable in the selected scope. The cleaner determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
 
-The primary interface is an interactive fuzzy-search terminal UI invoked with `npx skill-cleaner`. A compact non-interactive interface and JSON output support automation and future agent sessions.
+The primary interface is an interactive terminal UI. Until an explicitly approved npm publication, it runs from a trusted checkout as `node dist/cli.js`. A compact non-interactive interface and JSON output support automation and future agent sessions.
 
 ## 2. Product principles
 
@@ -56,7 +56,8 @@ The primary interface is an interactive fuzzy-search terminal UI invoked with `n
 - Runtime: Node.js 20 or newer.
 - Distribution: npm package named `skill-cleaner`.
 - Executable: `skill-cleaner`.
-- Primary invocation: `npx skill-cleaner`.
+- Current invocation from a trusted checkout: `node dist/cli.js` after build.
+- Future published invocation: `npx skill-cleaner`.
 - License: MIT.
 - Supported operating systems: current macOS, mainstream Linux distributions, and supported Windows releases.
 
@@ -88,7 +89,7 @@ Every finding is classified as one of:
 - System skill
 - Unknown
 
-Source, cache, vendor, system, and unknown findings are hidden from ordinary cleanup results unless the user enables the relevant inspection filter. Their discovery never authorizes deletion.
+Source, cache, vendor, and unknown findings are hidden from ordinary cleanup results unless the user enables the relevant inspection filter. System Skills remain visible in their own non-selectable section so their protected status is clear. Their discovery never authorizes deletion.
 
 ### 6.3 Inventory fields
 
@@ -124,17 +125,24 @@ Installations may be grouped into a Logical Skill only with strong evidence:
 
 Matching names or hashes are displayed as possible relationships but never merge records automatically.
 
+Installation Groups are a separate navigational batch-selection mechanism. In v1 they form only from declared manager-and-source evidence in one Scope; structural grouping is deferred until a concrete discovery path and safety boundary justify it.
+
 ## 7. Search and terminal UI
 
-Running `npx skill-cleaner` without a subcommand opens the terminal UI.
+Running `node dist/cli.js` from a built trusted checkout without a subcommand opens the terminal UI. `npx skill-cleaner` is the future published invocation.
 
 The UI must:
 
-- Fuzzy-search normalized metadata and adapter-specific namespaced fields.
-- Support concise field filters such as `plugin:`, `agent:`, `scope:`, `source:`, `manager:`, and `status:`.
+- Filter names, section labels, agents, and paths using the current terminal matching behavior. Namespaced metadata search and concise field filters are deferred for further TUI prototyping.
 - Show one row per Logical Skill by default.
-- Expand a logical row into individual Installations.
-- Permit selection of a Logical Skill, one Installation, or a Plugin boundary.
+- Show the focused Logical Skill's physical paths in the detail pane. Selecting
+  an individual Installation in the terminal is deferred; the CLI accepts that
+  target directly.
+- Keep long descriptions and physical paths reachable through an independently
+  scrollable and resizable detail pane. Detail navigation never changes the
+  selected Removal Targets.
+- Permit terminal selection of a Logical Skill, declared Installation Group, or
+  Plugin boundary. The CLI permits an individual Installation target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.
 - Clearly distinguish removable, blocked, unresolved, and source-only findings.
 
@@ -292,9 +300,14 @@ Network access is not required for scanning, search, planning, quarantine, resto
 
 The v1 MVP is complete when:
 
-1. A user can run the package through `npx` on macOS, Linux, and Windows.
+1. A published package can run through `npx` on macOS, Linux, and Windows.
+   Before publication, the built executable is run from a trusted checkout;
+   publication and `npx` verification require separate explicit approval.
 2. A zero-footprint scan inventories generic, Vercel, Claude Code, Codex, and Gemini skill installations from isolated fixtures.
-3. The TUI can fuzzy-search metadata, show logical groups, and select logical or physical targets.
+3. The TUI can filter its current browse fields and select Logical Skills,
+   declared Installation Groups, and Plugin boundaries. The non-interactive CLI
+   additionally accepts an individual Installation target; exposing individual
+   paths in the TUI remains future prototyping work.
 4. The planner reports ownership, dependencies, plugin impact, Git protection, and exact actions.
 5. Supported managers/plugins are used for removal when available.
 6. Failed managed removal never silently triggers fallback.

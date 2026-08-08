@@ -53,6 +53,10 @@ export class TuiController {
         this.stateValue = { screen: "done", report: null };
       return;
     }
+    if (action.kind === "viewport") {
+      this.stateValue = resizeState(state, action.viewport);
+      return;
+    }
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "plan") await this.planAction(state, action);
@@ -81,10 +85,13 @@ export class TuiController {
         };
         return;
       }
-      if (model.focus === "entries") {
+      if (model.focus === "entries" || model.focus === "detail") {
         this.stateValue = {
           ...state,
-          model: reduceBrowse(model, { kind: "focus", pane: "sections" }),
+          model: reduceBrowse(model, {
+            kind: "focus",
+            pane: model.focus === "detail" ? "entries" : "sections",
+          }),
         };
         return;
       }
@@ -225,6 +232,40 @@ export class TuiController {
   }
 }
 
+function resizeState(
+  state: TuiBrowseState | TuiPlanState | TuiReportState,
+  viewport: TuiBrowseState["model"]["viewport"],
+): TuiBrowseState | TuiPlanState | TuiReportState {
+  if (state.screen === "browse")
+    return {
+      ...state,
+      model: reduceBrowse(state.model, { kind: "viewport", viewport }),
+    };
+  if (state.screen === "report")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  return {
+    ...state,
+    browse: resizeBrowse(state.browse, viewport),
+    returnReport:
+      state.returnReport === null
+        ? null
+        : {
+            ...state.returnReport,
+            browse: resizeBrowse(state.returnReport.browse, viewport),
+          },
+  };
+}
+
+function resizeBrowse(
+  browse: TuiPlanState["browse"],
+  viewport: TuiBrowseState["model"]["viewport"],
+): TuiPlanState["browse"] {
+  return {
+    ...browse,
+    model: reduceBrowse(browse.model, { kind: "viewport", viewport }),
+  };
+}
+
 export function approvalGrants(
   removalPlan: RemovalPlan,
 ): readonly ApprovalRequirement[] {
@@ -249,6 +290,12 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
       return { kind: "backspace" };
     case "move":
       return { kind: "move", delta: action.delta };
+    case "move-pane":
+      return {
+        kind: "move-pane",
+        pane: action.pane,
+        delta: action.delta,
+      };
     case "page":
       return { kind: "page", delta: action.delta };
     case "focus":
@@ -257,12 +304,20 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
       return { kind: "point-section", index: action.index };
     case "point-entry":
       return { kind: "point-entry", index: action.index };
+    case "point-toggle":
+      return {
+        kind: "point-toggle",
+        pane: action.pane,
+        index: action.index,
+      };
     case "resize-panes":
       return { kind: "resize-panes", delta: action.delta };
     case "set-left-percent":
       return { kind: "set-left-percent", percent: action.percent };
     case "resize-detail":
       return { kind: "resize-detail", delta: action.delta };
+    case "set-detail-rows":
+      return { kind: "set-detail-rows", rows: action.rows };
     case "viewport":
       return { kind: "viewport", viewport: action.viewport };
     case "toggle-select":
