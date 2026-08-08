@@ -191,9 +191,19 @@ export type TuiBrowseCommand =
   | { readonly kind: "viewport"; readonly viewport: TuiViewport }
   | { readonly kind: "focus"; readonly pane: "sections" | "entries" }
   | { readonly kind: "move"; readonly delta: number }
+  | {
+      readonly kind: "move-pane";
+      readonly pane: "sections" | "entries";
+      readonly delta: number;
+    }
   | { readonly kind: "page"; readonly delta: number }
   | { readonly kind: "point-section"; readonly index: number }
   | { readonly kind: "point-entry"; readonly index: number }
+  | {
+      readonly kind: "point-toggle";
+      readonly pane: "sections" | "entries";
+      readonly index: number;
+    }
   | { readonly kind: "resize-panes"; readonly delta: number }
   | { readonly kind: "set-left-percent"; readonly percent: number }
   | { readonly kind: "resize-detail"; readonly delta: number }
@@ -218,6 +228,8 @@ export function reduceBrowse(
     }
     case "move":
       return settle(move(next, command.delta));
+    case "move-pane":
+      return settle(move({ ...next, focus: command.pane }, command.delta));
     case "page":
       return settle(
         move(
@@ -238,6 +250,20 @@ export function reduceBrowse(
       });
     case "point-entry":
       return settle({ ...next, focus: "entries", entryIndex: command.index });
+    case "point-toggle": {
+      const pointed = settle(
+        command.pane === "sections"
+          ? {
+              ...next,
+              focus: "sections",
+              sectionIndex: command.index,
+              entryIndex: 0,
+              entryScroll: 0,
+            }
+          : { ...next, focus: "entries", entryIndex: command.index },
+      );
+      return toggleSelect(pointed);
+    }
     case "resize-panes":
       return settle({
         ...next,

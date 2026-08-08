@@ -31,11 +31,12 @@ errors. Focused rows use a light foreground over a slate selection background.
 The application never paints a base background, so terminal transparency and
 blur remain owned by the terminal.
 
-The inventory hint row presents each navigation or action key in bold cyan
-and its description in muted text. Separators remain muted, so the row reads as
-distinct key/action pairs instead of one undifferentiated instruction. Segment
-styling is applied after clipping, preserving emphasis and reset boundaries on
-narrow terminals.
+The inventory hint row presents each navigation or action key in bold cyan and
+its description in muted text. Movement (`↑↓` or wheel), pointer focus (single
+click), selection (space or double-click), pane changes, review, back, and quit
+are separate key/action pairs. Separators remain muted, so the row does not
+conflate navigation with selection. Segment styling is applied after clipping,
+preserving emphasis and reset boundaries on narrow terminals.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
@@ -44,11 +45,14 @@ when color is unavailable. Raw terminals select true color, 256-color ANSI, or
 non-TTY line output use the monochrome theme. No shell command, terminal probe,
 or platform-specific executable is required.
 
-Arrows move; left and right change pane; Page Up and Page Down step exactly one
-viewport; shift with left or right moves the pane split and with up or down
-changes the detail height. A pointer can click a row to focus it, double-click to select it, wheel over
-either pane, and drag the divider to resize. The wheel moves the cursor rather
-than only the viewport, so the focused row cannot scroll out from under it.
+Up and down move the highlighted row in the focused pane; left and right change
+pane. Page Up and Page Down step exactly one viewport; shift with left or right
+moves the pane split and with up or down changes the detail height. A single
+click focuses and highlights its exact row. A double-click focuses that same row
+and toggles its selection, matching space on the keyboard. The wheel focuses
+the pane under the pointer and moves its highlighted row rather than scrolling
+an unfocused viewport. Wheel input over chrome, a divider, or the detail area is
+ignored. Pointer motion alone does nothing. Dragging the divider resizes it.
 Terminal resize events update the viewport immediately, including while a plan
 or report is open. Every terminal or pane-size change redraws the complete
 frame from the new dimensions. If the window becomes too small for the grid,

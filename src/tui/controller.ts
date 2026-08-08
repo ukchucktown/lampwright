@@ -287,6 +287,12 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
       return { kind: "backspace" };
     case "move":
       return { kind: "move", delta: action.delta };
+    case "move-pane":
+      return {
+        kind: "move-pane",
+        pane: action.pane,
+        delta: action.delta,
+      };
     case "page":
       return { kind: "page", delta: action.delta };
     case "focus":
@@ -295,6 +301,12 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
       return { kind: "point-section", index: action.index };
     case "point-entry":
       return { kind: "point-entry", index: action.index };
+    case "point-toggle":
+      return {
+        kind: "point-toggle",
+        pane: action.pane,
+        index: action.index,
+      };
     case "resize-panes":
       return { kind: "resize-panes", delta: action.delta };
     case "set-left-percent":

@@ -44,6 +44,11 @@ interface MouseReport {
   readonly pressed: boolean;
 }
 
+interface PointerRow {
+  readonly pane: "sections" | "entries";
+  readonly index: number;
+}
+
 export function parseMouseReport(sequence: string): MouseReport | null {
   const match = SGR_MOUSE.exec(sequence);
   if (match === null) return null;
@@ -123,16 +128,20 @@ export function mouseAction(
   context: { dragging: boolean; doubleClick: boolean },
 ): TuiAction {
   if (state.screen !== "browse") return { kind: "noop" };
-  const { paneRows, leftWidth, columns } = layout(state.model);
-  const view = panes(state.model);
+  const { leftWidth, columns } = layout(state.model);
 
-  if ((report.button & 64) !== 0)
+  if ((report.button & 64) !== 0) {
+    const pane = pointerPane(state, report);
+    if (pane === null) return { kind: "noop" };
     return {
-      kind: "move",
+      kind: "move-pane",
+      pane,
       delta: (report.button & 1) === 0 ? -1 : 1,
     };
+  }
 
   if (!report.pressed) return { kind: "noop" };
+  if ((report.button & 3) !== 0) return { kind: "noop" };
 
   if (context.dragging || report.column === leftWidth + 1)
     return {
@@ -142,23 +151,41 @@ export function mouseAction(
 
   if ((report.button & 32) !== 0) return { kind: "noop" };
 
+  const target = pointedRow(state, report);
+  if (target === null) return { kind: "noop" };
+  if (context.doubleClick) return { kind: "point-toggle", ...target };
+  return target.pane === "sections"
+    ? { kind: "point-section", index: target.index }
+    : { kind: "point-entry", index: target.index };
+}
+
+function pointerPane(
+  state: TuiState,
+  report: MouseReport,
+): "sections" | "entries" | null {
+  if (state.screen !== "browse") return null;
+  const { paneRows, leftWidth, usable } = layout(state.model);
   const paneRow = report.row - PANE_TOP - 1;
-  if (paneRow < 0 || paneRow >= paneRows) return { kind: "noop" };
+  if (paneRow < 0 || paneRow >= paneRows) return null;
+  if (report.column >= 1 && report.column <= leftWidth) return "sections";
+  if (report.column > leftWidth + 1 && report.column <= usable)
+    return "entries";
+  return null;
+}
 
-  if (report.column <= leftWidth) {
+function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
+  if (state.screen !== "browse") return null;
+  const pane = pointerPane(state, report);
+  if (pane === null) return null;
+  const paneRow = report.row - PANE_TOP - 1;
+  const view = panes(state.model);
+  if (pane === "sections") {
     const index = view.sections.offset + paneRow;
-    if (index >= view.sections.total) return { kind: "noop" };
-    return context.doubleClick
-      ? { kind: "toggle-select" }
-      : { kind: "point-section", index };
+    return index < view.sections.total ? { pane, index } : null;
   }
-
-  if (paneRow === 0) return { kind: "noop" }; // section header row
+  if (paneRow === 0) return null; // section header row
   const index = view.entries.offset + paneRow - 1;
-  if (index >= view.entries.total) return { kind: "noop" };
-  return context.doubleClick
-    ? { kind: "toggle-select" }
-    : { kind: "point-entry", index };
+  return index < view.entries.total ? { pane, index } : null;
 }
 
 type TerminalInput = NodeJS.ReadStream;
@@ -237,7 +264,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
 class RawTuiTerminal implements TuiTerminal {
   private dragging = false;
   private ignoringKeys = false;
-  private lastClick = { row: -1, at: 0 };
+  private lastClick = { target: "", at: 0 };
   private readonly mouse: MouseReport[] = [];
   private readonly mouseFramer = new MouseReportFramer();
   private readonly pending: { readonly text: string; readonly key: Key }[] = [];
@@ -308,7 +335,7 @@ class RawTuiTerminal implements TuiTerminal {
 
       const report = this.mouse.shift();
       if (report !== undefined) {
-        const doubleClick = this.registerClick(report);
+        const doubleClick = this.registerClick(state, report);
         const action = mouseAction(state, report, {
           dragging: this.dragging,
           doubleClick,
@@ -330,14 +357,22 @@ class RawTuiTerminal implements TuiTerminal {
     }
   }
 
-  /** A second press on the same row shortly after the first. */
-  private registerClick(report: MouseReport): boolean {
-    if (!report.pressed || (report.button & 96) !== 0) return false;
+  /** A second primary-button press on the same pane row shortly after the first. */
+  private registerClick(state: TuiState, report: MouseReport): boolean {
+    if (
+      !report.pressed ||
+      (report.button & 96) !== 0 ||
+      (report.button & 3) !== 0
+    )
+      return false;
+    const pointed = pointedRow(state, report);
+    if (pointed === null) return false;
+    const target = `${pointed.pane}:${String(pointed.index)}`;
     const now = Date.now();
     const repeat =
-      report.row === this.lastClick.row &&
+      target === this.lastClick.target &&
       now - this.lastClick.at < DOUBLE_CLICK_MS;
-    this.lastClick = { row: report.row, at: repeat ? 0 : now };
+    this.lastClick = { target, at: repeat ? 0 : now };
     return repeat;
   }
 

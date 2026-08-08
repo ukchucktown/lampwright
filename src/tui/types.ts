@@ -178,10 +178,20 @@ export type TuiAction =
   | { readonly kind: "append-query"; readonly value: string }
   | { readonly kind: "delete-query" }
   | { readonly kind: "move"; readonly delta: number }
+  | {
+      readonly kind: "move-pane";
+      readonly pane: "sections" | "entries";
+      readonly delta: number;
+    }
   | { readonly kind: "page"; readonly delta: number }
   | { readonly kind: "focus"; readonly pane: "sections" | "entries" }
   | { readonly kind: "point-section"; readonly index: number }
   | { readonly kind: "point-entry"; readonly index: number }
+  | {
+      readonly kind: "point-toggle";
+      readonly pane: "sections" | "entries";
+      readonly index: number;
+    }
   | { readonly kind: "resize-panes"; readonly delta: number }
   | { readonly kind: "set-left-percent"; readonly percent: number }
   | { readonly kind: "resize-detail"; readonly delta: number }

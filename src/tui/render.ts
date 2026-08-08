@@ -87,12 +87,14 @@ export function renderBrowseLines(
   out.push(
     fitStyledSegments(
       [
-        { text: "↑↓/click/wheel", paint: style.title },
+        { text: "↑↓/wheel", paint: style.title },
         { text: " move · ", paint: style.muted },
+        { text: "click", paint: style.title },
+        { text: " focus · ", paint: style.muted },
+        { text: "space/dbl-click", paint: style.title },
+        { text: " select · ", paint: style.muted },
         { text: "←→", paint: style.title },
         { text: " pane · ", paint: style.muted },
-        { text: "space", paint: style.title },
-        { text: " select (section takes all) · ", paint: style.muted },
         { text: "enter", paint: style.title },
         { text: " review · ", paint: style.muted },
         { text: "esc", paint: style.title },

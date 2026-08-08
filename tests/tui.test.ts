@@ -230,20 +230,22 @@ describe("terminal theme", () => {
     const inventory = groupedInventory();
     const model = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
-      columns: 140,
+      columns: 100,
     });
     const state: TuiState = { screen: "browse", inventory, model };
     const theme = createNightfallTheme("truecolor");
     const colored = renderBrowseLines(state, theme)[1]!;
     const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
 
-    expect(colored).toContain(styleTui(theme, "title", "↑↓/click/wheel"));
-    expect(colored).toContain(styleTui(theme, "title", "space"));
+    expect(colored).toContain(styleTui(theme, "title", "↑↓/wheel"));
+    expect(colored).toContain(styleTui(theme, "title", "click"));
+    expect(colored).toContain(styleTui(theme, "title", "space/dbl-click"));
     expect(colored).toContain(styleTui(theme, "muted", " move · "));
     expect(colored.replace(ansi, "")).toBe(plain);
-    expect(plain).toContain("space select (section takes all)");
+    expect(plain).toContain("↑↓/wheel move · click focus");
+    expect(plain).toContain("space/dbl-click select");
     expect(plain).toContain("q quit");
-    expect(visibleWidth(colored)).toBe(139);
+    expect(visibleWidth(colored)).toBe(99);
 
     const narrow = renderBrowseLines(
       {
@@ -255,7 +257,7 @@ describe("terminal theme", () => {
       },
       theme,
     )[1]!;
-    expect(narrow).toContain(styleTui(theme, "title", "↑↓/click/wheel"));
+    expect(narrow).toContain(styleTui(theme, "title", "↑↓/wheel"));
     expect(visibleWidth(narrow)).toBe(61);
   });
 
@@ -424,6 +426,35 @@ describe("terminal pane navigation", () => {
       previousScroll = next.entryScroll;
       model = next;
     }
+  });
+
+  it("renders the same focused row after equivalent keyboard and click movement", () => {
+    const inventory = groupedInventory();
+    const sections = createTuiSections(inventory);
+    const initial = createBrowseModel(sections, viewport);
+    const keyboard = reduceBrowse(
+      reduceBrowse(initial, { kind: "focus", pane: "entries" }),
+      { kind: "move", delta: 1 },
+    );
+    const clicked = reduceBrowse(initial, { kind: "point-entry", index: 1 });
+
+    expect(clicked.focus).toBe("entries");
+    expect(clicked.entryIndex).toBe(1);
+    expect(renderTui({ screen: "browse", inventory, model: clicked })).toBe(
+      renderTui({ screen: "browse", inventory, model: keyboard }),
+    );
+    expect(
+      renderTui({ screen: "browse", inventory, model: clicked }),
+    ).toContain("48;2;72;78;91");
+
+    const doubleClicked = reduceBrowse(initial, {
+      kind: "point-toggle",
+      pane: "entries",
+      index: 1,
+    });
+    expect(doubleClicked.focus).toBe("entries");
+    expect(doubleClicked.entryIndex).toBe(1);
+    expect(doubleClicked.selected).toContain(sections[0]!.entries[1]!.key);
   });
 
   it("takes a whole section from the section pane and refuses a protected one", () => {
@@ -797,23 +828,41 @@ describe("terminal pointer input", () => {
   it("selects on a double click rather than a single one", () => {
     expect(
       mouseAction(browse, press(4, 5), { dragging: false, doubleClick: true }),
-    ).toEqual({ kind: "toggle-select" });
+    ).toEqual({ kind: "point-toggle", pane: "sections", index: 0 });
   });
 
-  it("moves one row per wheel report, whichever way and with modifiers", () => {
+  it("moves the pane under the wheel and ignores non-pane wheel input", () => {
+    const { leftWidth } = layout(browse.model);
     expect(mouseAction(browse, press(4, 6, 64), idle)).toEqual({
-      kind: "move",
+      kind: "move-pane",
+      pane: "sections",
       delta: -1,
     });
-    expect(mouseAction(browse, press(4, 6, 65), idle)).toEqual({
-      kind: "move",
+    expect(mouseAction(browse, press(leftWidth + 8, 6, 65), idle)).toEqual({
+      kind: "move-pane",
+      pane: "entries",
       delta: 1,
     });
     // Bit 2 is a modifier; the wheel still reports through bits 6 and 0.
     expect(mouseAction(browse, press(4, 6, 69), idle)).toEqual({
-      kind: "move",
+      kind: "move-pane",
+      pane: "sections",
       delta: 1,
     });
+    expect(mouseAction(browse, press(leftWidth + 1, 6, 65), idle)).toEqual({
+      kind: "noop",
+    });
+    expect(mouseAction(browse, press(4, 20, 65), idle)).toEqual({
+      kind: "noop",
+    });
+    const moved = reduceBrowse(browse.model, {
+      kind: "move-pane",
+      pane: "entries",
+      delta: 1,
+    });
+    expect(moved.focus).toBe("entries");
+    expect(moved.entryIndex).toBe(1);
+    expect(moved.sectionIndex).toBe(browse.model.sectionIndex);
   });
 
   it("resizes from the divider and ignores motion that is not a drag", () => {
@@ -839,6 +888,7 @@ describe("terminal pointer input", () => {
       kind: "noop",
     });
     expect(mouseAction(browse, press(4, 90), idle)).toEqual({ kind: "noop" });
+    expect(mouseAction(browse, press(4, 5, 2), idle)).toEqual({ kind: "noop" });
   });
 });
 
@@ -941,6 +991,56 @@ describe("raw terminal pointer input", () => {
 
     input.write("q");
     await expect(terminal.readAction(state)).resolves.toEqual({ kind: "quit" });
+    terminal.close();
+  });
+
+  it("recognizes a double click only on the same pane row", async () => {
+    const inventory = groupedInventory();
+    const section = createTuiSections(inventory)[0]!;
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(
+        [section, { ...section, key: "second-section", label: "Second" }],
+        { rows: 24, columns: 100 },
+      ),
+    };
+    const { leftWidth } = layout(state.model);
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    input.write(`${ESC}[<0;4;6M`);
+    await expect(terminal.readAction(state)).resolves.toEqual({
+      kind: "point-section",
+      index: 1,
+    });
+    const sectionState: TuiState = {
+      ...state,
+      model: reduceBrowse(state.model, { kind: "point-section", index: 1 }),
+    };
+
+    input.write(`${ESC}[<0;${String(leftWidth + 8)};6M`);
+    await expect(terminal.readAction(sectionState)).resolves.toEqual({
+      kind: "point-entry",
+      index: 0,
+    });
+    const entryState: TuiState = {
+      ...sectionState,
+      model: reduceBrowse(sectionState.model, {
+        kind: "point-entry",
+        index: 0,
+      }),
+    };
+
+    input.write(`${ESC}[<0;${String(leftWidth + 8)};6M`);
+    await expect(terminal.readAction(entryState)).resolves.toEqual({
+      kind: "point-toggle",
+      pane: "entries",
+      index: 0,
+    });
     terminal.close();
   });
 
