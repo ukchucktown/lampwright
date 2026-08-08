@@ -1,6 +1,6 @@
 # Skill Cleanup
 
-This context describes how `skill-cleaner` identifies AI agent skills, attributes lifecycle ownership, and removes installed capabilities without damaging unrelated tools or project source.
+This context describes how `skill-cleaner` identifies AI agent skills, attributes lifecycle ownership, controls their availability, and removes installed capabilities without damaging unrelated tools or project source.
 
 ## Installed capabilities
 
@@ -14,6 +14,10 @@ The provenance-backed identity of a Skill. A matching name or content hash alone
 **Installation**:
 A concrete occurrence of a Skill that an agent can discover, including a copied directory, link, manager entry, or plugin-owned resource. A broken lock-only manager record remains an Installation for diagnosis even when no agent can currently load it.
 _Avoid_: Skill, copy
+
+**Harness Exposure**:
+The relationship through which one agent harness can discover and load an Installation. One Installation may have several independently enabled or disabled Harness Exposures.
+_Avoid_: Agent, installation
 
 **Logical Skill**:
 A group of Installations known through strong evidence to share one Skill Identity.
@@ -55,6 +59,28 @@ A selected Logical Skill, individual Installation, declared Installation Group, 
 
 **Removal Plan**:
 The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to remove one or more Removal Targets.
+
+**Availability Target**:
+A selected Logical Skill, individual Installation, or declared Installation Group whose Harness Exposures the user intends to disable or enable without removal.
+
+**Availability Plan**:
+The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to disable or enable one or more Availability Targets.
+
+**Native Disable**:
+A reversible change through a harness-supported control that keeps the Installation at its original location.
+_Avoid_: Remove, uninstall
+
+**Suspended Disable**:
+A reversible change that makes an independently filesystem-owned Installation unavailable by displacing it from every discovery location.
+_Avoid_: Remove, quarantine
+
+**Disabled Storage**:
+Inert, non-expiring recoverable storage for Installations displaced by Suspended Disable.
+_Avoid_: Quarantine, Trash
+
+**Enable**:
+The reversal of Native Disable or Suspended Disable that makes the affected Harness Exposures available again.
+_Avoid_: Restore, install
 
 **Managed Removal**:
 Removal performed through an available Owner's supported lifecycle operation.

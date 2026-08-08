@@ -5,9 +5,9 @@ Last updated: 2026-08-08
 
 ## 1. Summary
 
-`skill-cleaner` is a cross-platform terminal application that discovers and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
+`skill-cleaner` is a cross-platform terminal application that discovers, disables, enables, and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
 
-The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to make that target unavailable in the selected scope. The cleaner determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
+The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend an independently filesystem-owned Installation when no safe native control exists. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
 
 The primary interface is an interactive terminal UI. Until an explicitly approved npm publication, it runs from a trusted checkout as `node dist/cli.js`. A compact non-interactive interface and JSON output support automation and future agent sessions.
 
@@ -18,11 +18,12 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 3. **Managed removal first.** Use an available owner's lifecycle operation before direct filesystem cleanup.
 4. **Explicit fallback.** Never silently replace a failed managed removal with brute-force deletion.
 5. **Recoverability.** Brute-force cleanup moves artifacts into quarantine instead of permanently deleting them.
-6. **Strong identity.** Skill names and content hashes alone never merge installations into one logical skill.
-7. **Project source is protected.** Files inside a Git worktree are immutable unless Git classifies them as ignored.
-8. **Pluggable support without executable extensions.** Tool support is described through local, versioned JSONC adapters.
-9. **Cross-platform behavior.** macOS, Linux, and Windows are first-class; adapters do not assume a shell or POSIX paths.
-10. **Small command surface.** The v1 interface stays focused on scan, remove, restore, and purge.
+6. **Native disable before suspension.** Prefer a harness-supported availability control and displace only independently filesystem-owned Installations when no safe native control exists.
+7. **Strong identity.** Skill names and content hashes alone never merge installations into one logical skill or authorize a name-wide availability change.
+8. **Project source is protected.** Files inside a Git worktree are immutable unless Git classifies them as ignored.
+9. **Pluggable support without executable extensions.** Tool support is described through local, versioned JSONC adapters.
+10. **Cross-platform behavior.** macOS, Linux, and Windows are first-class; adapters do not assume a shell or POSIX paths.
+11. **Small command surface.** The interface stays focused on scan, disable, enable, remove, restore, and purge.
 
 ## 3. Goals
 
@@ -30,6 +31,7 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 - Search installed skills by normalized and tool-specific metadata.
 - Distinguish logical skills from their physical installations.
 - Explain who owns each installation and what else would be affected by removal.
+- Disable unused standalone Skills without deleting their content, and enable them again.
 - Remove standalone, manager-owned, and independently selectable plugin-owned skills.
 - Explicitly uninstall non-default containing plugins when the user includes
   plugins in a CLI plan.
@@ -41,7 +43,6 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 ## 4. Non-goals for v1
 
 - Installing skill managers, agent runtimes, or plugins globally or into a project.
-- Enabling or disabling skills without removing them.
 - Executable adapter plugins or remote adapter downloads.
 - A public adapter registry.
 - Telemetry or transmission of local inventory data.
@@ -50,6 +51,7 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 - Removing system skills supplied as inseparable runtime components.
 - Silently uninstalling plugins as part of an ordinary remove-all operation.
 - Providing transactional rollback across external managers.
+- Measuring or promising an exact token saving from disabled Skills.
 
 ## 5. Runtime and distribution
 
@@ -103,6 +105,7 @@ The normalized inventory schema includes:
 - Plugin identifier and version
 - Manager and adapter identifiers
 - Agent and scope
+- Per-harness enabled or disabled status and native availability-control evidence
 - Filesystem path and canonical path
 - Link type and target
 - Content hash and modification time
@@ -162,6 +165,16 @@ The UI must:
   Installation or non-default Plugin boundary target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.
 - Clearly distinguish removable, blocked, unresolved, and source-only findings.
+- Present `Inventory | Disabled (N) | Trash (N)` as peer views. Inventory shows
+  every Skill with at least one enabled Harness Exposure; Disabled shows every
+  Skill with a natively disabled Harness Exposure plus every Suspended Disable.
+  A partially disabled Skill may appear in both views with its per-harness state
+  explained.
+- Let an Inventory selection open a Disable review and let a Disabled selection
+  open an Enable review. Both reviews name every affected harness, distinguish
+  Native Disable from Suspended Disable, and remain scrollable before execution.
+- Keep Disabled Storage separate from Trash. Disabled items do not expire and
+  the Disabled view offers no purge action.
 - Lead Removal Plan review with a plain-language outcome, affected capabilities,
   actions, warnings, blocks, recovery behavior, and verification summary. Keep
   exact commands and internal records available through an explicit technical
@@ -185,6 +198,8 @@ An adapter may declare:
 - Ownership and grouping rules
 - Hard-dependency declarations
 - Managed removal actions
+- Native enable and disable actions when the harness exposes a safe declarative
+  lifecycle control
 - Ephemeral package runner actions
 - Verification rules
 
@@ -235,6 +250,27 @@ Removing a Plugin must show all owned skills, agents, commands, hooks, configura
 
 For every path inside a Git worktree, the planner asks Git whether the path is ignored. If Git does not classify it as ignored, the path is Git-protected and no cleaner action may mutate it. This invariant is not bypassed by force.
 
+### 9.3 Availability planning
+
+Every disable or enable mutation starts with an Availability Plan built from a
+fresh Inventory and the current Disabled Storage entries. A disable target
+expands to every represented Harness Exposure. The plan succeeds only when the
+selected capability will be unavailable across all of those exposures; a
+partial result must not be presented as fully disabled.
+
+Codex path-based skill configuration, Claude Code skill overrides, and Gemini
+CLI disabled-skill settings are the initial Native Disable controls. A
+name-based control is blocked when it could affect another Skill Identity with
+the same harness-visible name. Plugin-owned and System Skills are never
+individually disabled by the cleaner.
+
+When any exposure lacks a safe native control, Planning may choose one
+Suspended Disable for the complete Installation only when it is independently
+filesystem-owned, writable, outside Git protection, and outside Plugin or
+Manager ownership. Hard Dependencies block disabling by default. Force may
+override dependency or ambiguity safeguards, but never ownership, Git, System
+Skill, filesystem, integrity, or configuration-protection blocks.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal
@@ -262,6 +298,16 @@ Filesystem artifacts are moved into Quarantine rather than permanently deleted. 
 
 Execution follows dependency order. A failed action blocks its dependents but independent actions continue. The final result reports removed, unchanged, partially removed, blocked, and unresolved targets. A final rescan verifies outcomes.
 
+### 10.5 Disable and enable execution
+
+Availability execution accepts only the native configuration mutations or
+Suspended Disable paths contained in an approved fresh plan. Native mutations
+validate exact configuration preimages and preserve unrelated settings.
+Suspension and re-enablement use Disabled Storage rather than Quarantine.
+Enabling never overwrites an occupied or changed destination. A final rescan
+and Disabled Storage listing verify every affected exposure and report blocked,
+partial, failed, unchanged, disabled, or enabled outcomes honestly.
+
 ## 11. Quarantine and local state
 
 Read-only scans, TUI browsing, and dry runs create no files.
@@ -272,6 +318,7 @@ Persistent state is created lazily only for:
 - Ephemeral package trust decisions
 - Removal audit records
 - Quarantine manifests and content
+- Disabled Storage manifests and suspended content
 - Optional rebuildable search cache
 
 State follows operating-system conventions and supports an explicit directory override.
@@ -280,6 +327,12 @@ Quarantine entries record original path, link information, content hash, ownersh
 
 Restoration must not overwrite an occupied destination without an explicit conflict decision. Managed uninstalls are logged but are not represented as automatically reversible unless the Owner itself supports restoration.
 
+Disabled Storage is a separate, non-expiring lifecycle store. It records the
+original Artifact Location, integrity, affected Harness Exposures, Skill
+identity and ownership evidence, disable time, and exact re-enablement metadata.
+It has no retention purge and never appears in Trash. Native disabled state
+remains live harness evidence and is not copied into Disabled Storage.
+
 ## 12. Command-line interface
 
 The intended minimal command surface is:
@@ -287,6 +340,8 @@ The intended minimal command surface is:
 ```console
 skill-cleaner                  # interactive fuzzy-search UI
 skill-cleaner scan             # print inventory
+skill-cleaner disable <target> # disable selected target(s) without removal
+skill-cleaner enable <target>  # enable native or suspended target(s)
 skill-cleaner remove <target>  # plan and remove selected target(s)
 skill-cleaner restore <entry>  # restore quarantined artifacts
 skill-cleaner purge <entry>    # permanently delete quarantine entries
@@ -300,7 +355,7 @@ Shared automation options include:
 - `--force` to override removable safety blocks such as dependencies or ambiguity
 - `--adapter <path>` to load a local adapter
 
-The exact target-selector syntax will be finalized with the core inventory model. Interactive and non-interactive paths must call the same planner and executor.
+The exact target-selector syntax will be finalized with the core inventory model. Interactive and non-interactive paths must call the same planners, executors, and Disabled Storage module.
 
 ## 13. Cross-platform requirements
 
@@ -340,6 +395,9 @@ The v1 MVP is complete when:
 10. Non-interactive scan, dry-run, remove, restore, and purge workflows produce stable JSON.
 11. A final rescan verifies and reports the result of every removal.
 12. Tests demonstrate that unrelated installations, plugin resources, and project files remain untouched.
+13. Native and suspended disable operations can be enabled again without
+    deleting Skill content, while System, Plugin-owned, Manager-owned fallback,
+    ambiguous-name, and Git-protected cases remain untouched.
 
 ## 16. Delivery sequence
 

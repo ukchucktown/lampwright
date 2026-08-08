@@ -34,3 +34,11 @@ After #8, the following issues can be assigned independently:
 - [#15 Complete cross-platform end-to-end hardening and npm release readiness](https://github.com/ukchucktown/skill-cleaner/issues/15) after #9–#14
 
 Issue #15 prepares a release but explicitly does not publish to npm or make the repository public without separate approval.
+
+## Post-MVP lifecycle refinement
+
+- [#70 Epic: add reversible Skill disable and enable workflows](https://github.com/ukchucktown/skill-cleaner/issues/70)
+  1. [#71 Add non-expiring Disabled Storage for suspended Skills](https://github.com/ukchucktown/skill-cleaner/issues/71) and [#72 Materialize per-harness Skill availability in Inventory](https://github.com/ukchucktown/skill-cleaner/issues/72) can proceed in parallel.
+  2. [#73 Plan and execute reversible Skill availability changes](https://github.com/ukchucktown/skill-cleaner/issues/73) follows both foundations.
+  3. [#74 Add Disabled Skill management to the TUI](https://github.com/ukchucktown/skill-cleaner/issues/74) and [#75 Add disable and enable workflows to the CLI](https://github.com/ukchucktown/skill-cleaner/issues/75) can proceed in parallel after #73.
+  4. [#76 Harden reversible Skill availability across platforms](https://github.com/ukchucktown/skill-cleaner/issues/76) closes the feature.
