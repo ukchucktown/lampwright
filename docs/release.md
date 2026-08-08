@@ -34,9 +34,10 @@ The release configuration follows these current primary-source requirements:
   before a publish job runs. See
   [GitHub deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
 
-As verified on 2026-08-07, the GitHub repository is private and
-`npm view skill-cleaner` returns `E404`; the name must still be rechecked before
-publication. The checked-in publish workflow deliberately rejects a private
+As verified on 2026-08-08, the GitHub repository is public and
+`npm view skill-cleaner` returns `E404`. Do not reserve or publish the name
+now; recheck its availability only at explicitly approved release time. The
+checked-in publish workflow deliberately rejects a private
 repository, so it cannot emit a provenance-less release. Changing visibility
 and publishing remain separate, explicit maintainer decisions.
 

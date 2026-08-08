@@ -22,6 +22,10 @@ const SGR_MOUSE = new RegExp(
   `${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])`,
   "u",
 );
+const SGR_MOUSE_INCOMPLETE = new RegExp(
+  `${String.fromCharCode(27)}\\[<\\d*(?:;\\d*(?:;\\d*)?)?$`,
+  "u",
+);
 const DOUBLE_CLICK_MS = 400;
 
 /** Rows above the panes: title, hints, filter, top rule. */
@@ -61,6 +65,42 @@ export function parseMouseReports(chunk: string): readonly MouseReport[] {
     row: Number(match[3]),
     pressed: match[4] === "M",
   }));
+}
+
+/** Frames SGR reports when terminal data events split them arbitrarily. */
+export class MouseReportFramer {
+  private buffer = "";
+
+  push(chunk: string): readonly MouseReport[] {
+    const input = this.buffer + chunk;
+    const pattern = new RegExp(SGR_MOUSE.source, "gu");
+    const reports: MouseReport[] = [];
+    let end = 0;
+    for (const match of input.matchAll(pattern)) {
+      reports.push({
+        button: Number(match[1]),
+        column: Number(match[2]),
+        row: Number(match[3]),
+        pressed: match[4] === "M",
+      });
+      end = (match.index ?? 0) + match[0].length;
+    }
+    const tail = input.slice(end);
+    this.buffer = pendingSgrPrefix(tail) ? tail : "";
+    return reports;
+  }
+
+  get pending(): boolean {
+    return this.buffer.length > 0;
+  }
+}
+
+function pendingSgrPrefix(value: string): boolean {
+  const prefix = `${String.fromCharCode(27)}[<`;
+  // Do not hold Esc or an ordinary CSI sequence: raw-terminal cancellation
+  // must remain responsive. Once the SGR sentinel is complete, retain only a
+  // syntactically possible unfinished report.
+  return value.startsWith(prefix) && SGR_MOUSE_INCOMPLETE.test(value);
 }
 
 /**
@@ -175,6 +215,7 @@ class RawTuiTerminal implements TuiTerminal {
   private ignoringKeys = false;
   private lastClick = { row: -1, at: 0 };
   private readonly mouse: MouseReport[] = [];
+  private readonly mouseFramer = new MouseReportFramer();
   private readonly pending: { readonly text: string; readonly key: Key }[] = [];
   private waiter: (() => void) | null = null;
   private readonly onKeypress = (text: string, key: Key): void => {
@@ -206,11 +247,17 @@ class RawTuiTerminal implements TuiTerminal {
   }
 
   private readonly onData = (chunk: Buffer | string): void => {
-    const reports = parseMouseReports(chunk.toString("utf8"));
-    if (reports.length === 0) return;
+    const wasPending = this.mouseFramer.pending;
+    const reports = this.mouseFramer.push(chunk.toString("utf8"));
+    if (reports.length === 0 && !this.mouseFramer.pending) {
+      // A continuation proved the held prefix was not mouse input. Release it
+      // before readline emits keypresses for this same data event.
+      if (wasPending) this.ignoringKeys = false;
+      return;
+    }
     this.ignoringKeys = true;
     queueMicrotask(() => {
-      this.ignoringKeys = false;
+      if (!this.mouseFramer.pending) this.ignoringKeys = false;
     });
     for (const report of reports) this.mouse.push(report);
     this.wake();

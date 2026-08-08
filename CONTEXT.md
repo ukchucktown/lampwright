@@ -12,7 +12,7 @@ _Avoid_: Prompt, rule, extension
 The provenance-backed identity of a Skill. A matching name or content hash alone is evidence, but is not sufficient to establish identity.
 
 **Installation**:
-A concrete occurrence of a Skill that an agent can discover, including a copied directory, link, manager entry, or plugin-owned resource.
+A concrete occurrence of a Skill that an agent can discover, including a copied directory, link, manager entry, or plugin-owned resource. A broken lock-only manager record remains an Installation for diagnosis even when no agent can currently load it.
 _Avoid_: Skill, copy
 
 **Logical Skill**:
@@ -51,7 +51,7 @@ A live, disposable snapshot of discovered Installations, ownership evidence, dep
 _Avoid_: Registry, database
 
 **Removal Target**:
-A selected Logical Skill, individual Installation, or Plugin ownership boundary that the user intends to remove.
+A selected Logical Skill, individual Installation, declared Installation Group, or Plugin ownership boundary that the user intends to remove.
 
 **Removal Plan**:
 The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to remove one or more Removal Targets.
@@ -85,3 +85,6 @@ An artifact inside a Git worktree that Git does not classify as ignored. Git-pro
 
 **Scope**:
 The availability boundary of an Installation, such as user-wide, workspace-local, or agent-specific.
+
+**Installation Group**:
+A navigational batch-selection group made only from declared Manager, source, and Scope evidence. It is not a Skill Identity claim and does not merge its member Skills. Structural grouping is deferred until separately justified.

@@ -37,7 +37,11 @@ Reports are read from the raw input stream rather than from keypress events,
 because Node's readline splits one report into eight separate keypresses; no
 single event carries a whole report, and the leftover digits would otherwise be
 typed into the filter. Motion is ignored unless a divider drag is in progress, since
-otherwise every twitch of the pointer would re-select the row beneath it.
+otherwise every twitch of the pointer would re-select the row beneath it. SGR
+reports are framed across raw-stream chunk boundaries after the complete SGR
+sentinel (`ESC[<`) identifies mouse input, so split report data remains one
+pointer action and its fragments do not become filter input. Incomplete or
+malformed escape sequences remain ordinary keyboard input.
 
 ## Sections
 
@@ -65,7 +69,8 @@ Typing filters every section at once; sections keep their identity while their
 contents shrink. A term matches a name as a subsequence, or a section label,
 agent, or path as a substring. Descriptions are deliberately excluded: they are
 ordinary English, so a two-letter query matched almost everything through words
-like "can" and "because".
+like "can" and "because". Richer metadata matching and field-filter syntax are
+deferred for separate TUI prototyping.
 
 `space` on an entry selects it. `space` on a section takes or clears the whole
 section, so a bundle of twenty-two is one keystroke; the left pane shows `[ ]`,

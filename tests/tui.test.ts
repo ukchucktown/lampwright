@@ -29,6 +29,7 @@ import {
   type TuiState,
   type TuiTerminal,
 } from "../src/index.js";
+import { MouseReportFramer } from "../src/tui/terminal.js";
 import {
   buildExecutionReport,
   buildInstallation,
@@ -637,6 +638,32 @@ describe("raw terminal pointer input", () => {
     expect(parseMouseReports("no mouse here")).toEqual([]);
   });
 
+  it("frames every report-data split after the SGR sentinel", () => {
+    const report = `${ESC}[<0;4;5M`;
+    // Before `ESC[<` is complete, input remains ordinary terminal input so
+    // Esc/cancel cannot be held indefinitely. Every report-data boundary is
+    // framed once the SGR sentinel identifies it as mouse input.
+    for (let split = 3; split < report.length; split += 1) {
+      const framer = new MouseReportFramer();
+      expect(framer.push(report.slice(0, split))).toEqual([]);
+      expect(framer.pending).toBe(true);
+      expect(framer.push(report.slice(split))).toEqual([
+        { button: 0, column: 4, row: 5, pressed: true },
+      ]);
+      expect(framer.pending).toBe(false);
+    }
+  });
+
+  it("does not hold incomplete or malformed keyboard escape sequences", () => {
+    const framer = new MouseReportFramer();
+    expect(framer.push(ESC)).toEqual([]);
+    expect(framer.pending).toBe(false);
+    expect(framer.push(`${ESC}[A`)).toEqual([]);
+    expect(framer.pending).toBe(false);
+    expect(framer.push(`${ESC}[<x`)).toEqual([]);
+    expect(framer.pending).toBe(false);
+  });
+
   it("reads a report readline would shred, without typing its digits", async () => {
     const inventory = groupedInventory();
     const state: TuiState = {
@@ -671,5 +698,60 @@ describe("raw terminal pointer input", () => {
     expect(codes).toContain("[?1006h");
     expect(codes).toContain("[?1049l");
     expect(codes).toContain("[?1006l");
+  });
+
+  it("reads a report split after its SGR sentinel without typing fragments", async () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    input.write(`${ESC}[<`);
+    input.write("0;4;5M");
+    await expect(terminal.readAction(state)).resolves.toEqual({
+      kind: "point-section",
+      index: 0,
+    });
+    terminal.close();
+  });
+
+  it("releases a malformed held SGR prefix for ordinary keyboard input", async () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    input.write(`${ESC}[<`);
+    input.write("x");
+    input.write("j");
+    await expect(terminal.readAction(state)).resolves.toEqual({
+      kind: "append-query",
+      value: "x",
+    });
+    await expect(terminal.readAction(state)).resolves.toEqual({
+      kind: "append-query",
+      value: "j",
+    });
+    terminal.close();
   });
 });
