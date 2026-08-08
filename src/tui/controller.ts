@@ -10,6 +10,7 @@ import {
   reduceBrowse,
   type TuiBrowseCommand,
 } from "./browse.js";
+import { planScrollMetrics } from "./render.js";
 import { createTuiSections, selectionTargets } from "./sections.js";
 import type {
   TuiAction,
@@ -130,7 +131,9 @@ export class TuiController {
         force: false,
         mode: "managed-first",
       }),
-      label: planLabel(state, targets.length),
+      label: planLabel(state),
+      technicalDetails: false,
+      scrollOffset: 0,
       returnReport: null,
     };
   }
@@ -164,6 +167,27 @@ export class TuiController {
       };
       return;
     }
+    if (action.kind === "toggle-details") {
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const metrics = planScrollMetrics(state);
+      const distance =
+        action.kind === "page" ? Math.max(1, metrics.pageRows) : 1;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + action.delta * distance),
+        ),
+      };
+      return;
+    }
     if (action.kind === "force") {
       if (
         state.plan.blocks.length === 0 ||
@@ -177,6 +201,7 @@ export class TuiController {
       this.stateValue = {
         ...state,
         plan: this.dependencies.plan(state.browse.inventory, intent),
+        scrollOffset: 0,
       };
       return;
     }
@@ -219,7 +244,9 @@ export class TuiController {
       screen: "plan",
       browse: state.browse,
       plan: fallbackPlan,
-      label: `Brute-force fallback ${state.fallbackCursor + 1}`,
+      label: browseSelectionLabel(state.browse.model),
+      technicalDetails: false,
+      scrollOffset: 0,
       returnReport: state,
     };
   }
@@ -329,10 +356,24 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
   }
 }
 
-function planLabel(state: TuiBrowseState, targets: number): string {
+function planLabel(state: TuiBrowseState): string {
   if (state.model.selected.size === 0)
-    return currentEntry(state.model)?.name ?? "selection";
-  return `${String(targets)} target${targets === 1 ? "" : "s"}`;
+    return currentEntry(state.model)?.name ?? "selected capability";
+  return browseSelectionLabel(state.model);
+}
+
+function browseSelectionLabel(model: TuiBrowseState["model"]): string {
+  if (model.selected.size === 0)
+    return currentEntry(model)?.name ?? "selected capability";
+  if (model.selected.size === 1) {
+    const key = model.selected.values().next().value;
+    return (
+      model.sections
+        .flatMap((section) => section.entries)
+        .find((entry) => entry.key === key)?.name ?? "selected capability"
+    );
+  }
+  return `${String(model.selected.size)} selected capabilities`;
 }
 
 function movedCursor(current: number, length: number, delta: number): number {

@@ -5,8 +5,8 @@ import type {
   PlanBlock,
   PlanWarning,
   RemovalAction,
-  RemovalPlan,
   RemovalTarget,
+  RemovalPlan,
   VerificationCheck,
 } from "../model/types.js";
 import {
@@ -19,6 +19,7 @@ import {
 } from "./browse.js";
 import {
   nightfallTheme,
+  plainTuiTheme,
   styleTui,
   type TuiStyleRole,
   type TuiTheme,
@@ -363,74 +364,436 @@ function fit(value: string, width: number): string {
 }
 
 function renderPlan(state: TuiPlanState, style: TuiPaint): string {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return renderCompactPlan(state, style);
+  const body = planBodyLines(state, style);
+  const footer = planFooterLines(state, style);
+  const metrics = planScrollMetricsFor(state, body.length, footer.length);
+  const offset = Math.min(
+    Math.max(0, state.scrollOffset),
+    metrics.maximumOffset,
+  );
+  const overflow = metrics.maximumOffset > 0;
+  const visibleBody = overflow
+    ? body.slice(offset, offset + metrics.pageRows)
+    : body;
+  const range = overflow
+    ? [
+        style.muted(
+          `review ${String(offset + 1)}-${String(Math.min(body.length, offset + metrics.pageRows))}/${String(body.length)}  ↑↓/PgUp/PgDn scroll`,
+        ),
+      ]
+    : [];
+  const width = Math.max(0, state.browse.model.viewport.columns - 1);
+  return `${[...visibleBody, ...range, ...footer]
+    .slice(0, Math.max(0, state.browse.model.viewport.rows - 1))
+    .map((line) => fit(line, width))
+    .join("\n")}\n`;
+}
+
+function renderCompactPlan(state: TuiPlanState, style: TuiPaint): string {
+  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
+  const width = Math.max(0, state.browse.model.viewport.columns - 1);
+  return `${[
+    style.title("skill-cleaner"),
+    style.warning("Resize the terminal"),
+    style.muted("q quit"),
+  ]
+    .slice(0, rows)
+    .map((line) => fit(line, width))
+    .join("\n")}\n`;
+}
+
+function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
   const removalPlan = state.plan;
+  const ready = removalPlan.blocks.length === 0;
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
   const lines = [
-    style.title(
-      `skill-cleaner — ${removalPlan.intent.mode === "brute-force" ? "Separate fallback plan" : "Removal plan"}`,
-    ),
+    style.title("skill-cleaner — Review removal"),
     "",
-    `Selection: ${style.active(state.label)}`,
-    style.muted(`Plan: ${removalPlan.id}`),
-    style.active(`Targets (${removalPlan.targets.length}):`),
-    ...indented(removalPlan.targets.map(describeTarget)),
-    style.active(`Actions (${removalPlan.actions.length}):`),
-    ...indented(removalPlan.actions.map(describeAction)),
-    (removalPlan.blocks.length === 0 ? style.active : style.error)(
-      `Blocks (${removalPlan.blocks.length}):`,
-    ),
-    ...indented(
-      removalPlan.blocks.length === 0
-        ? [style.muted("none")]
-        : removalPlan.blocks.map(describeBlock).map(style.error),
-    ),
-    (removalPlan.warnings.length === 0 ? style.active : style.warning)(
-      `Warnings (${removalPlan.warnings.length}):`,
-    ),
-    ...indented(
-      removalPlan.warnings.length === 0
-        ? [style.muted("none")]
-        : removalPlan.warnings.map(describeWarning).map(style.warning),
-    ),
-    style.active(`Verification (${removalPlan.verificationChecks.length}):`),
-    ...indented(
-      orNone(removalPlan.verificationChecks.map(describeVerification)),
-    ),
-    style.info("Approvals shown by this plan:"),
-    ...indented(
-      orNone(planApprovals(removalPlan).map(describeApproval)).map(style.info),
-    ),
+    style.title(`Remove ${state.label}?`),
     "",
-  ];
-  if (removalPlan.blocks.length === 0) {
-    lines.push(
-      style.success(
-        "Nothing has been changed. Press y to grant the exact approvals above and execute this plan.",
-      ),
-      removalPlan.intent.mode === "brute-force"
-        ? style.warning(
-            "This brute-force action quarantines files and is separate from the failed managed removal.",
-          )
-        : style.muted(
-            "A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately.",
+    !ready
+      ? style.error("CANNOT REMOVE")
+      : removalPlan.warnings.length > 0
+        ? style.warning("REVIEW BEFORE REMOVING")
+        : style.success("READY TO REMOVE"),
+    ...(ready && removalPlan.warnings.length === 0
+      ? [style.muted("No blockers or warnings were found.")]
+      : []),
+    "",
+    ...(removalPlan.blocks.length === 0
+      ? []
+      : [
+          style.error("Why it cannot be removed"),
+          ...wrapPlanLines(
+            removalPlan.blocks.flatMap(describePlainBlock),
+            width,
+          ).map(style.error),
+          "",
+        ]),
+    ...(removalPlan.warnings.length === 0
+      ? []
+      : [
+          style.warning(
+            removalPlan.warnings.length === 1
+              ? "Review this warning"
+              : "Review these warnings",
           ),
-      style.active("y confirm") +
-        style.muted("   n/Esc cancel   q/Ctrl-C quit"),
+          ...removalPlan.warnings
+            .flatMap(describePlainWarning)
+            .flatMap((line) => wrapPlanLine(line, width))
+            .map(style.warning),
+          "",
+        ]),
+    ...(removalPlan.actions.length === 0
+      ? []
+      : [
+          style.title("What will happen"),
+          ...removalPlan.actions.flatMap((action, index) =>
+            wrapPlanLines(describePlainAction(state, action, index), width),
+          ),
+          "",
+        ]),
+    ...(removalPlan.verificationChecks.length === 0
+      ? []
+      : [
+          style.title("After removal, skill-cleaner will verify"),
+          ...removalPlan.verificationChecks.flatMap((check) =>
+            wrapPlanLine(
+              `  • ${describePlainVerification(state, check)}`,
+              width,
+            ),
+          ),
+          "",
+        ]),
+  ];
+  if (state.technicalDetails)
+    lines.push(...technicalPlanLines(removalPlan, style, width), "");
+  return lines;
+}
+
+function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
+  const removalPlan = state.plan;
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const lines: string[] = [];
+  if (removalPlan.blocks.length === 0) {
+    const hasManagedRemoval = removalPlan.actions.some(
+      (action) => action.kind === "managed-removal",
+    );
+    const hasRecoverableRemoval = removalPlan.actions.some(
+      (action) => action.kind === "quarantine",
+    );
+    const recoveryMessage =
+      removalPlan.intent.mode === "brute-force"
+        ? "This is a separate recoverable removal after the managed attempt failed."
+        : hasManagedRemoval
+          ? "A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately."
+          : hasRecoverableRemoval
+            ? "Files are not permanently deleted. They can be restored from the recovery area."
+            : "No filesystem content will be permanently deleted.";
+    const recoveryStyle =
+      removalPlan.intent.mode === "brute-force" ? style.warning : style.muted;
+    lines.push(
+      style.success("Nothing has changed yet."),
+      ...wrapPlanLine(recoveryMessage, width).map(recoveryStyle),
+      ...planControlLines(state, style, "ready"),
     );
   } else if (removalPlan.blocks.every((block) => block.overridable)) {
     lines.push(
       style.warning("This plan is blocked and cannot execute as shown."),
-      style.active("f create a force-override plan") +
-        style.muted("   n/Esc cancel   q/Ctrl-C quit"),
+      ...planControlLines(state, style, "force"),
     );
   } else {
     lines.push(
       style.error(
         "This plan contains a non-overridable block and cannot execute.",
       ),
-      style.muted("n/Esc return to inventory   q/Ctrl-C quit"),
+      ...planControlLines(state, style, "blocked"),
     );
   }
-  return `${lines.join("\n")}\n`;
+  return lines;
+}
+
+function planControlLines(
+  state: TuiPlanState,
+  style: TuiPaint,
+  kind: "ready" | "force" | "blocked",
+): readonly string[] {
+  const details = state.technicalDetails
+    ? "hide technical details"
+    : "technical details";
+  if (kind === "ready") {
+    const first =
+      style.title("y") +
+      style.muted(" remove   ") +
+      style.title("Esc") +
+      style.muted(" go back");
+    const second =
+      style.title("d") +
+      style.muted(` ${details}   `) +
+      style.title("q") +
+      style.muted(" quit");
+    return state.browse.model.viewport.columns < 72
+      ? [first, second]
+      : [first + style.muted("   ") + second];
+  }
+  if (kind === "force")
+    return [
+      style.title("f") + style.muted(" review removal despite these risks"),
+      style.title("d") + style.muted(` ${details}`),
+      style.title("Esc") +
+        style.muted(" go back   ") +
+        style.title("q") +
+        style.muted(" quit"),
+    ];
+  return [
+    style.title("d") + style.muted(` ${details}`),
+    style.title("Esc") +
+      style.muted(" return to inventory   ") +
+      style.title("q") +
+      style.muted(" quit"),
+  ];
+}
+
+export function planScrollMetrics(state: TuiPlanState): {
+  readonly pageRows: number;
+  readonly maximumOffset: number;
+} {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return { pageRows: 0, maximumOffset: 0 };
+  const style = createPaint(plainTuiTheme);
+  return planScrollMetricsFor(
+    state,
+    planBodyLines(state, style).length,
+    planFooterLines(state, style).length,
+  );
+}
+
+function planScrollMetricsFor(
+  state: TuiPlanState,
+  bodyRows: number,
+  footerRows: number,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  const usableRows = Math.max(0, state.browse.model.viewport.rows - 1);
+  const overflows = bodyRows + footerRows > usableRows;
+  const pageRows = Math.max(
+    0,
+    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
+  );
+  return {
+    pageRows,
+    maximumOffset: Math.max(0, bodyRows - pageRows),
+  };
+}
+
+function technicalPlanLines(
+  plan: RemovalPlan,
+  style: TuiPaint,
+  width: number,
+): readonly string[] {
+  return [
+    style.info("Technical details"),
+    ...wrapPlanLine(`Plan: ${plan.id}`, width).map(style.muted),
+    style.info(`Targets (${plan.targets.length}):`),
+    ...wrapPlanLines(indented(plan.targets.map(describeTarget)), width),
+    style.info(`Actions (${plan.actions.length}):`),
+    ...wrapPlanLines(indented(plan.actions.map(describeAction)), width),
+    style.info(`Blocks (${plan.blocks.length}):`),
+    ...wrapPlanLines(indented(orNone(plan.blocks.map(describeBlock))), width),
+    style.info(`Warnings (${plan.warnings.length}):`),
+    ...wrapPlanLines(
+      indented(orNone(plan.warnings.map(describeWarning))),
+      width,
+    ),
+    style.info(`Verification (${plan.verificationChecks.length}):`),
+    ...wrapPlanLines(
+      indented(orNone(plan.verificationChecks.map(describeVerification))),
+      width,
+    ),
+    style.info("Approvals:"),
+    ...wrapPlanLines(
+      indented(orNone(planApprovals(plan).map(describeApproval))),
+      width,
+    ),
+  ];
+}
+
+function wrapPlanLines(
+  lines: readonly string[],
+  width: number,
+): readonly string[] {
+  return lines.flatMap((line) => wrapPlanLine(line, width));
+}
+
+function wrapPlanLine(value: string, width: number): readonly string[] {
+  if (width <= 0 || [...value].length <= width) return [value];
+  const indentation = value.match(/^\s*/u)?.[0] ?? "";
+  const result: string[] = [];
+  let remaining = value;
+
+  while ([...remaining].length > width) {
+    const characters = [...remaining];
+    const candidate = characters.slice(0, width).join("");
+    const lastSpace = candidate.search(/\s+\S*$/u);
+    const lastPathSeparator = Math.max(
+      candidate.lastIndexOf("/") + 1,
+      candidate.lastIndexOf("\\") + 1,
+    );
+    const minimumUsefulBreak = Math.max(
+      indentation.length + 1,
+      Math.floor(width / 2),
+    );
+    const preferredBreak = Math.max(lastSpace, lastPathSeparator);
+    const cut = preferredBreak >= minimumUsefulBreak ? preferredBreak : width;
+    result.push(characters.slice(0, cut).join("").trimEnd());
+    remaining = `${indentation}${characters.slice(cut).join("").trimStart()}`;
+  }
+  result.push(remaining);
+  return result;
+}
+
+function describePlainAction(
+  state: TuiPlanState,
+  action: RemovalAction,
+  index: number,
+): readonly string[] {
+  const prefix = `  ${String(index + 1)}. `;
+  if (action.kind === "quarantine")
+    return [
+      `${prefix}Move ${targetLabel(state, action.target)} to the recovery area`,
+      stylelessDetail(`From: ${action.location.path}`),
+      stylelessDetail("You can restore it later."),
+    ];
+  if (action.kind === "managed-removal") {
+    const owner =
+      action.owner.kind === "manager"
+        ? action.owner.managerId
+        : `Plugin ${action.owner.pluginId}`;
+    return [
+      `${prefix}Ask ${owner} to remove ${targetLabel(state, action.target)}`,
+      stylelessDetail(`Uses ${owner}'s supported removal command.`),
+    ];
+  }
+  return [
+    `${prefix}Update the installation record`,
+    stylelessDetail(`Record: ${action.location.path}`),
+  ];
+}
+
+function describePlainBlock(block: PlanBlock): readonly string[] {
+  if (block.kind === "hard-dependency")
+    return [
+      `  • Another installed capability requires this: ${block.dependency.reason}`,
+      "    A force override can bypass this dependency block.",
+    ];
+  if (block.kind === "ambiguous-ownership")
+    return [
+      `  • skill-cleaner cannot determine who owns it: ${block.reason}`,
+      "    A force override can bypass this ownership block.",
+    ];
+  if (block.kind === "git-protection")
+    return [
+      `  • Protected project file: ${block.path}`,
+      "    This protection cannot be bypassed.",
+    ];
+  if (block.kind === "system-skill")
+    return [
+      `  • This is a built-in System Skill supplied by ${block.agentId}.`,
+      "    System Skills cannot be removed.",
+    ];
+  if (block.kind === "filesystem-permission")
+    return [
+      `  • skill-cleaner cannot modify ${block.path}: ${block.reason}`,
+      "    Fix the filesystem permission before trying again.",
+    ];
+  if (block.kind === "cleanup-conflict")
+    return [
+      `  • The removal record changed at ${block.path}: ${block.reason}`,
+      "    Scan again before trying to remove it.",
+    ];
+  if (block.kind === "adapter-trust")
+    return [
+      `  • The local adapter ${block.adapterId} is not trusted to run removal commands.`,
+    ];
+  if (block.kind === "plugin-boundary")
+    return [
+      `  • This capability belongs to Plugin ${block.pluginId}. Select that Plugin to review its full impact.`,
+    ];
+  return [
+    `  • The managing tool cannot remove this capability: ${block.reason}`,
+  ];
+}
+
+function describePlainWarning(warning: PlanWarning): readonly string[] {
+  if (warning.kind === "soft-reference")
+    return [
+      `  • Another installed capability may refer to this: ${warning.reference.evidence}`,
+    ];
+  if (warning.kind === "plugin-impact")
+    return [
+      `  • Removing Plugin ${warning.pluginId} also affects: ${warning.affectedResources.join(", ") || "other Plugin resources"}`,
+    ];
+  if (warning.kind === "ephemeral-download") {
+    const item = warning.packageExecution;
+    return [
+      `  • May download ${item.packageName}@${item.packageVersion} using ${item.runner}.`,
+      `    Adapter identity: ${item.adapterHash}`,
+    ];
+  }
+  return [
+    `  • The managing tool may still list this capability after removal: ${warning.reason}`,
+  ];
+}
+
+function stylelessDetail(value: string): string {
+  return `     ${value}`;
+}
+
+function describePlainVerification(
+  state: TuiPlanState,
+  check: VerificationCheck,
+): string {
+  if (check.kind === "target-unavailable")
+    return `${targetLabel(state, check.target)} is no longer available to agents`;
+  if (check.kind === "path-absent")
+    return `The original location is no longer active: ${check.path}`;
+  if (check.kind === "owner-state-absent")
+    return "The managing tool no longer reports the capability as installed";
+  if (check.kind === "record-absent")
+    return "The installation record no longer lists the capability";
+  return "The removal command succeeds";
+}
+
+function targetLabel(state: TuiPlanState, target: RemovalTarget): string {
+  const inventory = state.browse.inventory;
+  if (target.kind === "installation")
+    return (
+      inventory.installations.find(
+        (installation) => installation.id === target.installationId,
+      )?.skill.name ?? state.label
+    );
+  if (target.kind === "logical-skill")
+    return (
+      inventory.logicalSkills.find(
+        (logicalSkill) => logicalSkill.id === target.logicalSkillId,
+      )?.skill.name ?? state.label
+    );
+  if (target.kind === "source-group")
+    return (
+      inventory.groups.find((group) => group.id === target.groupId)?.label ??
+      state.label
+    );
+  return (
+    inventory.plugins.find((plugin) => plugin.id === target.pluginBoundaryId)
+      ?.pluginId ?? state.label
+  );
 }
 
 function renderReport(state: TuiReportState, style: TuiPaint): string {

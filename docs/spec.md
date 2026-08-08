@@ -145,6 +145,10 @@ The UI must:
   Plugin boundary. The CLI permits an individual Installation target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.
 - Clearly distinguish removable, blocked, unresolved, and source-only findings.
+- Lead Removal Plan review with a plain-language outcome, affected capabilities,
+  actions, warnings, blocks, recovery behavior, and verification summary. Keep
+  exact commands and internal records available through an explicit technical
+  details view, and keep long reviews scrollable within the terminal.
 
 Selecting a Logical Skill means making that identity unavailable across all selected installations. Selecting one Installation limits removal to that occurrence.
 

@@ -133,11 +133,22 @@ keypress cannot discard a selection.
 
 ## Plans, fallback, and reports
 
-The review screen renders exact targets, actions, blocks, warnings,
-verifications, commands, paths, and approval tuples. A blocked plan cannot be
-confirmed. `f` asks Planning for a force plan only when every reported block is
-marked overridable; force cannot override Git, System Skill, filesystem,
-adapter-trust, Plugin-boundary, or unavailable-managed-removal blocks.
+The review screen leads with the decision a person must make: what is selected,
+whether removal is ready or blocked, what will happen, whether files remain
+recoverable, and how the result will be checked. Actions use capability names
+and readable sub-lines for methods, paths, and recovery behavior. Empty warning
+and block sections are omitted. Safety warnings and blocks remain prominent and
+use plain explanations; package-download consent still shows the exact pinned
+package, runner, and adapter identity.
+
+`d` toggles technical details containing exact targets, action and verification
+identifiers, commands, hashes, and approval records. Up and down, Page Up and
+Page Down, and the mouse wheel scroll an overflowing review while its action
+row remains visible. The status row reports the visible range. A blocked plan
+cannot be confirmed. `f` asks Planning for a force plan only when every reported
+block is marked overridable; force cannot override Git, System Skill,
+filesystem, adapter-trust, Plugin-boundary, or unavailable-managed-removal
+blocks.
 
 Pressing `y` on an unblocked plan is the mutation boundary. Package trust is
 shown as an exact runner/package/version/adapter-hash tuple before this
@@ -153,8 +164,9 @@ When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, enter a query directly or use `search <query>`,
 `up`, `down`, `in`, `out`, `detail`, `pageup`, `pagedown`, `grow-detail`,
 `shrink-detail`, `take`, `clear`, and `quit`. Plan screens accept `yes`, `no`,
-`force`, and `quit`; report screens accept `up`, `down`, `fallback`, and
-`quit`. End-of-input cancels safely.
+`details`, `up`, `down`, `pageup`, `pagedown`, `force`, and `quit`; report
+screens accept `up`, `down`, `fallback`, and `quit`. End-of-input cancels
+safely.
 
 Read-only scanning, searching, expanding, cancellation, and plan review create
 no files or persistent state. The terminal UI does not scan paths, infer

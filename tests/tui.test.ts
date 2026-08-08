@@ -707,6 +707,177 @@ describe("terminal pane navigation", () => {
 });
 
 describe("terminal removal interactions", () => {
+  it("presents a ready recoverable plan in plain language", async () => {
+    const inventory = buildInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 30, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    const rendered = renderTui(controller.state, plainTuiTheme);
+
+    expect(rendered).toContain("Remove example-skill?");
+    expect(rendered).toContain("READY TO REMOVE");
+    expect(rendered).toContain("What will happen");
+    expect(rendered).toContain("Move example-skill to the recovery area");
+    expect(rendered).toContain("You can restore it later.");
+    expect(rendered).toContain("Files are not permanently deleted.");
+    expect(rendered).not.toContain("failed managed removal");
+    expect(rendered).not.toContain("removal-plan-");
+    expect(rendered).not.toContain("action-");
+    expect(rendered).not.toContain("Blocks (0)");
+    expect(rendered).not.toContain("ordinary confirmation");
+  });
+
+  it("explains an executable download warning before the actions", async () => {
+    const inventory = buildInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan: (current, intent) => ({
+          ...plan(current, intent),
+          warnings: [
+            {
+              kind: "ephemeral-download" as const,
+              target: {
+                kind: "installation" as const,
+                installationId: inventory.installations[0]!.id,
+              },
+              packageExecution: {
+                runner: "npx" as const,
+                packageName: "fixture-manager",
+                packageVersion: "1.2.3",
+                adapterHash: "sha256:fixture",
+                mayDownload: true as const,
+              },
+            },
+          ],
+        }),
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 30, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    const rendered = renderTui(controller.state, plainTuiTheme);
+
+    expect(rendered).toContain("REVIEW BEFORE REMOVING");
+    expect(rendered).toContain("May download fixture-manager@1.2.3 using npx");
+    expect(rendered).toContain("Adapter identity: sha256:fixture");
+    expect(rendered).toContain("Review this warning");
+    expect(rendered).not.toContain("ephemeral-download");
+  });
+
+  it("reveals exact plan records only when technical details are requested", async () => {
+    const inventory = buildInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 50, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    const summary = renderTui(controller.state, plainTuiTheme);
+
+    await controller.dispatch({ kind: "toggle-details" });
+    const details = renderTui(controller.state, plainTuiTheme);
+
+    expect(summary).not.toContain("removal-plan-");
+    expect(details).toContain("Technical details");
+    expect(details).toContain("Plan: removal-plan-");
+    expect(details).toContain("Installation installation-1");
+    expect(details).toContain("ordinary confirmation");
+    expect(details).toContain("d hide technical details");
+  });
+
+  it("scrolls an overflowing plan inside the terminal with controls pinned", async () => {
+    const inventory = buildInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 14, columns: 60 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    await controller.dispatch({ kind: "toggle-details" });
+    const first = renderTui(controller.state, plainTuiTheme);
+
+    await controller.dispatch({ kind: "page", delta: 1 });
+    await controller.dispatch({ kind: "page", delta: 1 });
+    const second = renderTui(controller.state, plainTuiTheme);
+
+    expect(first.split("\n").length - 1).toBeLessThanOrEqual(13);
+    expect(second.split("\n").length - 1).toBeLessThanOrEqual(13);
+    expect(first).toContain("review 1-");
+    expect(second).toContain("Technical details");
+    expect(second).toContain("y remove");
+    expect(second).not.toBe(first);
+  });
+
+  it("uses a compact plan prompt when the terminal is too small", async () => {
+    const inventory = buildInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 4, columns: 20 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+
+    const rendered = renderTui(controller.state, plainTuiTheme);
+    expect(rendered.split("\n").length - 1).toBeLessThanOrEqual(3);
+    expect(rendered).toContain("Resize the terminal");
+    expect(rendered).toContain("q quit");
+    expect(rendered).not.toContain("review 1-0");
+  });
+
+  it("keeps the end of a long affected path reachable on a narrow terminal", async () => {
+    const path =
+      "/fixtures/a-very-long-skill-location/with/several/directories/important-tail";
+    const inventory = buildInventory({
+      installations: [
+        buildInstallation({
+          location: {
+            path,
+            canonicalPath: path,
+            artifactType: { kind: "directory" },
+          },
+        }),
+      ],
+    });
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 14, columns: 42 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+
+    const pages: string[] = [];
+    for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+      pages.push(renderTui(controller.state, plainTuiTheme));
+      await controller.dispatch({ kind: "page", delta: 1 });
+    }
+    expect(pages.join("\n")).toContain("important-tail");
+  });
+
   it("renders blocked plans and cannot execute them", async () => {
     const inventory = buildInventory({
       installations: [
@@ -733,8 +904,13 @@ describe("terminal removal interactions", () => {
 
     expect(outcome.status).toBe("cancelled");
     expect(execute).not.toHaveBeenCalled();
-    expect(terminal.frames.join("\n")).toContain("git-protection");
-    expect(terminal.frames.join("\n")).toContain("cannot execute");
+    const frames = terminal.frames.join("\n");
+    expect(frames).toContain("CANNOT REMOVE");
+    expect(frames).toContain("Protected project file");
+    expect(frames).toContain("/fixtures/skills/example-skill");
+    expect(frames).toContain("This protection cannot be bypassed");
+    expect(frames.replace(ansi, "")).toContain("d technical details");
+    expect(frames).not.toContain("git-protection");
   });
 
   it("does not mutate on cancellation and executes only after plan confirmation", async () => {
@@ -782,7 +958,7 @@ describe("terminal removal interactions", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.approvals).toContainEqual({ kind: "confirmation" });
     expect(confirmedTerminal.frames.join("\n")).toContain(
-      "Nothing has been changed",
+      "Nothing has changed yet",
     );
     expect(confirmedTerminal.frames.join("\n")).toContain(
       "Execution succeeded",
@@ -864,8 +1040,11 @@ describe("terminal removal interactions", () => {
     });
     const frames = terminal.frames.join("\n");
     expect(frames).toContain("Fallback plans are never executed automatically");
-    expect(frames).toContain("Separate fallback plan");
-    expect(frames).toContain("quarantines files");
+    expect(frames).toContain("Remove example-skill?");
+    expect(frames).toContain(
+      "This is a separate recoverable removal after the managed attempt failed",
+    );
+    expect(frames).not.toContain("Remove Brute-force fallback");
   });
 
   it("supports command-oriented input when raw terminal controls are unavailable", () => {
@@ -902,28 +1081,35 @@ describe("terminal removal interactions", () => {
       kind: "resize-detail",
       delta: 1,
     });
-    expect(
-      parseLineTuiAction(
-        {
-          screen: "plan",
-          browse,
-          plan: plan(inventory, {
-            kind: "targets",
-            targets: [
-              {
-                kind: "installation",
-                installationId: inventory.installations[0]!.id,
-              },
-            ],
-            force: false,
-            mode: "managed-first",
-          }),
-          label: "example-skill",
-          returnReport: null,
-        },
-        "yes",
-      ),
-    ).toEqual({ kind: "confirm" });
+    const removalPlan: TuiState = {
+      screen: "plan",
+      browse,
+      plan: plan(inventory, {
+        kind: "targets",
+        targets: [
+          {
+            kind: "installation",
+            installationId: inventory.installations[0]!.id,
+          },
+        ],
+        force: false,
+        mode: "managed-first",
+      }),
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+      returnReport: null,
+    };
+    expect(parseLineTuiAction(removalPlan, "yes")).toEqual({
+      kind: "confirm",
+    });
+    expect(parseLineTuiAction(removalPlan, "details")).toEqual({
+      kind: "toggle-details",
+    });
+    expect(parseLineTuiAction(removalPlan, "pagedown")).toEqual({
+      kind: "page",
+      delta: 1,
+    });
   });
 });
 
@@ -956,6 +1142,40 @@ describe("terminal pointer input", () => {
       parseMouseReport(`${String.fromCharCode(27)}[<0;12;7m`)?.pressed,
     ).toBe(false);
     expect(parseMouseReport(`${String.fromCharCode(27)}[A`)).toBeNull();
+  });
+
+  it("scrolls a removal review with the wheel without changing it", () => {
+    const simpleInventory = buildInventory();
+    const planState: TuiState = {
+      screen: "plan",
+      browse: {
+        inventory: simpleInventory,
+        model: createBrowseModel(createTuiSections(simpleInventory), {
+          rows: 24,
+          columns: 100,
+        }),
+      },
+      plan: plan(simpleInventory, {
+        kind: "targets",
+        targets: [
+          {
+            kind: "installation",
+            installationId: simpleInventory.installations[0]!.id,
+          },
+        ],
+        force: false,
+        mode: "managed-first",
+      }),
+      label: "example-skill",
+      technicalDetails: true,
+      scrollOffset: 0,
+      returnReport: null,
+    };
+
+    expect(mouseAction(planState, press(4, 8, 65), idle)).toEqual({
+      kind: "move",
+      delta: 1,
+    });
   });
 
   it("maps a click to the row beneath it in either pane", () => {
@@ -1205,6 +1425,52 @@ describe("raw terminal pointer input", () => {
     await expect(terminal.readAction(detail)).resolves.toEqual({
       kind: "focus",
       pane: "entries",
+    });
+    terminal.close();
+  });
+
+  it("toggles removal-plan details from the raw keyboard", async () => {
+    const inventory = buildInventory();
+    const browse = {
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const state: TuiState = {
+      screen: "plan",
+      browse,
+      plan: plan(inventory, {
+        kind: "targets",
+        targets: [
+          {
+            kind: "installation",
+            installationId: inventory.installations[0]!.id,
+          },
+        ],
+        force: false,
+        mode: "managed-first",
+      }),
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+      returnReport: null,
+    };
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    input.write("d");
+    await expect(terminal.readAction(state)).resolves.toEqual({
+      kind: "toggle-details",
+    });
+    input.write(`${ESC}[6~`);
+    await expect(terminal.readAction(state)).resolves.toEqual({
+      kind: "page",
+      delta: 1,
     });
     terminal.close();
   });
