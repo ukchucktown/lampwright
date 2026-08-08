@@ -1210,6 +1210,7 @@ async function createPluginBoundaries(
       pluginId: root.plugin.id,
       version: root.plugin.version,
       adapterId: root.adapterId,
+      exposedTo: [root.agentId],
       ownership: {
         kind: "plugin",
         pluginId: root.plugin.id,

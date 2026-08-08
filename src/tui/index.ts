@@ -13,6 +13,7 @@ export {
   visibleSections,
 } from "./browse.js";
 export { createTuiSections, selectionTargets } from "./sections.js";
+export { createTrashSections } from "./trash.js";
 export {
   createSearchModel,
   reduceSearch,
@@ -22,7 +23,7 @@ export {
   searchRows,
 } from "./search.js";
 export { approvalGrants, TuiController } from "./controller.js";
-export { renderTui, renderBrowseLines } from "./render.js";
+export { browseTabHitboxes, renderTui, renderBrowseLines } from "./render.js";
 export { runTui } from "./runtime.js";
 export {
   createNightfallTheme,

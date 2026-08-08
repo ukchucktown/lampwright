@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { searchLayout } from "./search.js";
-import { renderTui } from "./render.js";
+import { browseTabHitboxes, renderTui } from "./render.js";
 import {
   createNightfallTheme,
   detectTuiColorMode,
@@ -135,6 +135,14 @@ export function mouseAction(
     return (report.button & 64) !== 0
       ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
       : { kind: "noop" };
+  if (state.screen === "trash-review")
+    return (report.button & 64) !== 0
+      ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
+      : { kind: "noop" };
+  if (state.screen === "trash-report")
+    return (report.button & 64) !== 0
+      ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
+      : { kind: "noop" };
   if (state.screen === "search") {
     const grid = searchLayout(state.model.viewport);
     if (grid.compact) return { kind: "noop" };
@@ -158,6 +166,13 @@ export function mouseAction(
     return { kind: "point-search-result", index };
   }
   if (state.screen !== "browse") return { kind: "noop" };
+  if (report.pressed && report.row === 1 && (report.button & 3) === 0) {
+    const tabs = browseTabHitboxes(state);
+    if (inColumns(report.column, tabs.inventory))
+      return { kind: "switch-view", view: "inventory" };
+    if (inColumns(report.column, tabs.trash))
+      return { kind: "switch-view", view: "trash" };
+  }
   const grid = layout(state.model);
   const { leftWidth, columns, paneRows, rows } = grid;
   const detailDividerRow = BROWSE_PANE_TOP + paneRows + 1;
@@ -199,10 +214,19 @@ export function mouseAction(
 
   const target = pointedRow(state, report);
   if (target === null) return { kind: "noop" };
-  if (context.doubleClick) return { kind: "point-toggle", ...target };
+  if (context.doubleClick)
+    return state.view === "trash"
+      ? target.pane === "entries"
+        ? { kind: "select" }
+        : { kind: "noop" }
+      : { kind: "point-toggle", ...target };
   return target.pane === "sections"
     ? { kind: "point-section", index: target.index }
     : { kind: "point-entry", index: target.index };
+}
+
+function inColumns(column: number, range: readonly [number, number]): boolean {
+  return column >= range[0] && column <= range[1];
 }
 
 function pointerPane(state: TuiState, report: MouseReport): PointerPane | null {
@@ -290,9 +314,15 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "none") return { kind: "clear-selection" };
     if (value === "select" || value === "open" || value === "review")
       return { kind: "select" };
+    if (value === "trash") return { kind: "switch-view", view: "trash" };
+    if (value === "inventory")
+      return { kind: "switch-view", view: "inventory" };
+    if (value === "restore") return { kind: "restore-review" };
+    if (value === "purge" || value === "p") return { kind: "purge-review" };
     if (value === "clear") return { kind: "clear-selection" };
     if (value === "backspace") return { kind: "delete-query" };
     if (value === "quit" || value === "q") return { kind: "quit" };
+    if (state.view === "trash") return { kind: "noop" };
     if (value.startsWith("search "))
       return { kind: "append-query", value: value.slice("search ".length) };
     if (value.startsWith("/"))
@@ -335,6 +365,29 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "fallback" || value === "f") return { kind: "fallback" };
     if (value === "quit" || value === "q" || value === "done")
       return { kind: "quit" };
+    return { kind: "noop" };
+  }
+  if (state.screen === "trash-review") {
+    if (value === "details" || value === "d") return { kind: "toggle-details" };
+    if (value === "up" || value === "k") return { kind: "move", delta: -1 };
+    if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "pageup") return { kind: "page", delta: -1 };
+    if (value === "pagedown") return { kind: "page", delta: 1 };
+    if (value === "yes" || value === "y") return { kind: "confirm" };
+    if (value === "cancel" || value === "back" || value === "no")
+      return { kind: "cancel" };
+    if (value === "quit" || value === "q") return { kind: "quit" };
+    return { kind: "noop" };
+  }
+  if (state.screen === "trash-report") {
+    if (value === "details" || value === "d") return { kind: "toggle-details" };
+    if (value === "up" || value === "k") return { kind: "move", delta: -1 };
+    if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "pageup") return { kind: "page", delta: -1 };
+    if (value === "pagedown") return { kind: "page", delta: 1 };
+    if (value === "cancel" || value === "back" || value === "done")
+      return { kind: "cancel" };
+    if (value === "quit" || value === "q") return { kind: "quit" };
     return { kind: "noop" };
   }
   if (state.screen === "error") return { kind: "quit" };
@@ -531,6 +584,12 @@ export function parseRawTuiAction(
   if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
   if (state.screen === "browse") {
     if (key.name === "escape") return { kind: "cancel" };
+    if (key.ctrl && key.name === "t")
+      return {
+        kind: "switch-view",
+        view: state.view === "trash" ? "inventory" : "trash",
+      };
+    if (text === "p" && state.view === "trash") return { kind: "purge-review" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
     if (key.name === "right" && key.shift)
@@ -554,11 +613,15 @@ export function parseRawTuiAction(
     if (key.name === "left") return { kind: "focus", pane: "sections" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
     if (key.name === "pagedown") return { kind: "page", delta: 1 };
-    if (key.name === "space" || text === " ") return { kind: "toggle-select" };
+    if (key.name === "space" || text === " ")
+      return state.view === "trash"
+        ? { kind: "noop" }
+        : { kind: "toggle-select" };
     if (key.ctrl && key.name === "a") return { kind: "clear-selection" };
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
+    if (state.view === "trash") return { kind: "noop" };
     if (!key.ctrl && !key.meta && text.length > 0)
       return { kind: "append-query", value: text };
     return { kind: "noop" };
@@ -594,6 +657,21 @@ export function parseRawTuiAction(
     if (key.name === "left") return { kind: "select-fallback", delta: -1 };
     if (key.name === "right") return { kind: "select-fallback", delta: 1 };
     if (text === "f") return { kind: "fallback" };
+    return { kind: "noop" };
+  }
+  if (state.screen === "trash-review") {
+    if (key.name === "escape") return { kind: "cancel" };
+    if (text === "d") return { kind: "toggle-details" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
+    if (text === "y") return { kind: "confirm" };
+    return { kind: "noop" };
+  }
+  if (state.screen === "trash-report") {
+    if (key.name === "escape") return { kind: "cancel" };
+    if (text === "d") return { kind: "toggle-details" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
     return { kind: "noop" };
   }
   if (state.screen === "error") return { kind: "quit" };

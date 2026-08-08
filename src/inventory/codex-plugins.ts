@@ -468,6 +468,7 @@ async function materializePlugin(input: {
       pluginId: input.entry.pluginId,
       version: input.entry.version,
       adapterId: CODEX_PLUGIN_ADAPTER_ID,
+      exposedTo: [agentId],
       ownership: {
         kind: "plugin",
         pluginId: input.entry.pluginId,

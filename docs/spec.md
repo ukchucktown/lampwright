@@ -31,7 +31,8 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 - Distinguish logical skills from their physical installations.
 - Explain who owns each installation and what else would be affected by removal.
 - Remove standalone, manager-owned, and independently selectable plugin-owned skills.
-- Explicitly uninstall containing plugins when the user includes plugins in the plan.
+- Explicitly uninstall non-default containing plugins when the user includes
+  plugins in a CLI plan.
 - Fall back to recoverable brute-force cleanup when managed removal cannot be used.
 - Preserve a reliable audit trail without maintaining an installation database.
 - Allow new tool support through local declarative adapters.
@@ -155,8 +156,10 @@ The UI must:
 - Keep long descriptions and physical paths reachable through an independently
   scrollable and resizable detail pane. Detail navigation never changes the
   selected Removal Targets.
-- Permit terminal selection of a Logical Skill, declared Installation Group, or
-  Plugin boundary. The CLI permits an individual Installation target.
+- Permit terminal selection of a Logical Skill or declared Installation Group.
+  Show Plugin boundaries and their owning agent harnesses for context, but do
+  not make them selectable in the terminal. The CLI permits an individual
+  Installation or non-default Plugin boundary target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.
 - Clearly distinguish removable, blocked, unresolved, and source-only findings.
 - Lead Removal Plan review with a plain-language outcome, affected capabilities,
@@ -224,9 +227,9 @@ Hard dependencies block removal by default. Soft references warn but do not bloc
 
 ### 9.1 Plugin boundaries
 
-A plugin-owned skill may be removed independently only when the owning plugin or adapter declares that its skills are independently selectable. Otherwise the skill is blocked as an individual target and the plan offers the containing Plugin as a separate target.
+A plugin-owned skill may be removed independently only when the owning plugin or adapter declares that its skills are independently selectable. Otherwise the skill is blocked as an individual target. The containing Plugin remains visible in the terminal for ownership context and may be addressed only through an explicit CLI Plugin target.
 
-Removing a Plugin must show all owned skills, agents, commands, hooks, configuration, and other known resources. Ordinary `--all` removal excludes plugins; including them requires an explicit `--include-plugins` choice.
+Removing a Plugin must show all owned skills, agents, commands, hooks, configuration, and other known resources. Ordinary `--all` removal excludes plugins; including them requires an explicit `--include-plugins` choice. A runtime-default Plugin supplied by an agent harness is never removable, including when explicitly targeted or forced.
 
 ### 9.2 Project protection
 
@@ -323,10 +326,11 @@ The v1 MVP is complete when:
    publication and `npx` verification require separate explicit approval.
 2. A zero-footprint scan inventories generic, Vercel, Claude Code, Codex, and Gemini skill installations from isolated fixtures.
 3. The TUI provides additive, name-only regular-expression search and can
-   select Logical Skills, declared Installation Groups, and Plugin boundaries.
-   The non-interactive CLI additionally accepts an individual Installation
-   target; exposing individual paths in the TUI remains future prototyping
-   work.
+   select Logical Skills and declared Installation Groups. Plugin boundaries
+   and their owning harnesses remain visible but non-selectable. The
+   non-interactive CLI additionally accepts an individual Installation or
+   non-default Plugin boundary target; exposing individual paths in the TUI
+   remains future prototyping work.
 4. The planner reports ownership, dependencies, plugin impact, Git protection, and exact actions.
 5. Supported managers/plugins are used for removal when available.
 6. Failed managed removal never silently triggers fallback.

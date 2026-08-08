@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createBrowseModel,
+  createTrashSections,
   createSearchModel,
   createNightfallTheme,
   createNodeTuiTerminal,
@@ -35,7 +36,9 @@ import {
   type Inventory,
   type RemovalEvidence,
   type RemovalPlan,
+  type QuarantineOperation,
   type TuiAction,
+  type TuiDependencies,
   type TuiState,
   type TuiTerminal,
 } from "../src/index.js";
@@ -52,6 +55,592 @@ import {
 const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
 const visibleWidth = (value: string): number =>
   [...value.replace(ansi, "")].length;
+
+describe("Trash projection", () => {
+  it("separates recoverable, expired, and blocked operations without scanning", () => {
+    const operation = (id: string, expiresAt: string): QuarantineOperation =>
+      ({
+        id,
+        displayNames: [id],
+        entries: [
+          {
+            originalLocation: { path: `/trash/${id}` },
+          } as never,
+        ],
+        removedAt: "2026-01-01T00:00:00.000Z",
+        expiresAt,
+      }) as QuarantineOperation;
+    const recoverable = operation("recoverable", "2026-02-01T00:00:00.000Z");
+    const expired = operation("expired", "2025-12-31T00:00:00.000Z");
+    const blocked = operation("blocked", "2026-02-01T00:00:00.000Z");
+    const unavailable = operation("unavailable", "2026-02-01T00:00:00.000Z");
+    const sections = createTrashSections(
+      [recoverable, expired, blocked, unavailable],
+      new Map([
+        [
+          "blocked",
+          {
+            schemaVersion: 1,
+            operationId: "blocked",
+            status: "blocked",
+            entries: [],
+          },
+        ],
+        [
+          "unavailable",
+          {
+            status: "preview-unavailable",
+            message: "local state cannot be read",
+          },
+        ],
+      ]),
+      new Date("2026-01-01T00:00:00.000Z"),
+    );
+    expect(
+      sections.map((section) => [section.label, section.entries.length]),
+    ).toEqual([
+      ["Recoverable", 1],
+      ["Past retention date", 1],
+      ["Needs attention", 2],
+    ]);
+  });
+
+  it("uses readable Trash review/report text, with IDs only in technical details", () => {
+    const operation = trashOperation(
+      Array.from({ length: 18 }, (_, index) => `entry-${String(index)}`),
+    );
+    const browse = trashBrowse(operation, { rows: 10, columns: 76 });
+    const review: Extract<TuiState, { screen: "trash-review" }> = {
+      screen: "trash-review",
+      browse,
+      operation,
+      kind: "restore",
+      preview: {
+        schemaVersion: 1 as const,
+        operationId: operation.id,
+        status: "would-restore",
+        entries: operation.entries.map((entry) => ({
+          schemaVersion: 1 as const,
+          status: "would-restore" as const,
+          entryId: entry.id,
+          destination: entry.originalLocation.path,
+        })),
+      },
+      technicalDetails: false,
+      scrollOffset: 0,
+      message: null,
+    };
+    expect(renderTui(review, plainTuiTheme)).toContain(
+      "Restore /tmp/trash-entry-0",
+    );
+    expect(renderTui(review, plainTuiTheme)).not.toContain("Entry ID:");
+    expect(
+      renderTui(
+        { ...review, technicalDetails: true, scrollOffset: 26 },
+        plainTuiTheme,
+      ),
+    ).toContain("Entry ID: entry-0");
+    expect(renderTui({ ...review, scrollOffset: 5 }, plainTuiTheme)).toContain(
+      "review 6-",
+    );
+    const trashFrame = renderTui(
+      {
+        screen: "browse",
+        ...trashBrowse(operation, { rows: 16, columns: 100 }),
+      },
+      plainTuiTheme,
+    );
+    expect(trashFrame).toContain("Inventory | Trash (1)");
+    expect(trashFrame).toContain("enter/dbl-click restore");
+    expect(trashFrame).toContain("p purge");
+    expect(trashFrame).toContain("esc Inventory");
+    expect(trashFrame).not.toContain("nothing selected");
+    expect(trashFrame).not.toContain("search names by regex");
+
+    const purgeReport: TuiState = {
+      screen: "trash-report",
+      browse,
+      operation,
+      kind: "purge",
+      result: {
+        operationId: operation.id,
+        purgedAt: "2026-01-01T00:00:00.000Z",
+        entries: [
+          {
+            entryId: operation.entries[0]!.id,
+            status: "blocked",
+            reason: "integrity-failed",
+          },
+        ],
+      },
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    expect(renderTui(purgeReport, plainTuiTheme)).toContain(
+      "Could not permanently purge",
+    );
+
+    const longOperation = trashOperation([
+      "a-very-long-entry-name-that-keeps-a-deeply-nested-original-location-readable",
+    ]);
+    const narrow = renderTui(
+      {
+        ...review,
+        operation: longOperation,
+        browse: trashBrowse(longOperation, { rows: 8, columns: 38 }),
+        preview: {
+          schemaVersion: 1 as const,
+          operationId: longOperation.id,
+          status: "would-restore",
+          entries: longOperation.entries.map((entry) => ({
+            schemaVersion: 1 as const,
+            status: "would-restore" as const,
+            entryId: entry.id,
+            destination: entry.originalLocation.path,
+          })),
+        },
+      },
+      plainTuiTheme,
+    );
+    expect(narrow.split("\n").every((line) => visibleWidth(line) <= 37)).toBe(
+      true,
+    );
+  });
+
+  it("uses cyan title styling for the active tab and maps tabs plus Trash keys", () => {
+    const operation = trashOperation(["entry-1"]);
+    const browse = trashBrowse(operation, { rows: 20, columns: 100 });
+    const themed = renderTui(
+      { screen: "browse", ...browse },
+      createNightfallTheme("truecolor"),
+    );
+    expect(themed).toContain(
+      styleTui(createNightfallTheme("truecolor"), "title", "Trash (1)"),
+    );
+    expect(
+      parseLineTuiAction({ screen: "browse", ...browse }, "restore"),
+    ).toEqual({ kind: "restore-review" });
+    expect(
+      parseRawTuiAction({ screen: "browse", ...browse }, "p", {
+        name: "p",
+        ctrl: false,
+      }),
+    ).toEqual({ kind: "purge-review" });
+    expect(
+      mouseAction(
+        { screen: "browse", ...browse },
+        { button: 0, column: 27, row: 1, pressed: true },
+        { dragging: false, doubleClick: false },
+      ),
+    ).toEqual({ kind: "switch-view", view: "trash" });
+    expect(
+      mouseAction(
+        { screen: "browse", ...browse },
+        { button: 0, column: 4, row: 5, pressed: true },
+        { dragging: false, doubleClick: true },
+      ),
+    ).toEqual({ kind: "noop" });
+    expect(
+      mouseAction(
+        { screen: "browse", ...browse },
+        { button: 0, column: 70, row: 6, pressed: true },
+        { dragging: false, doubleClick: true },
+      ),
+    ).toEqual({ kind: "select" });
+  });
+
+  it("returns Escape from Trash to the preserved Inventory and does not mutate during review", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(["entry-1"]);
+    const restoreOperation = vi.fn(async () => ({
+      operationId: operation.id,
+      status: "restored" as const,
+      entries: [
+        {
+          status: "restored" as const,
+          entryId: operation.entries[0]!.id,
+          destination: operation.entries[0]!.originalLocation.path,
+          restoredAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    }));
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+        quarantine: fakeTrash(operation, restoreOperation),
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+      },
+      { rows: 12, columns: 80 },
+    );
+    await controller.start();
+    const original = controller.state;
+    await controller.dispatch({ kind: "switch-view", view: "trash" });
+    await controller.dispatch({ kind: "select" });
+    expect(controller.state.screen).toBe("trash-review");
+    expect(restoreOperation).not.toHaveBeenCalled();
+    await controller.dispatch({ kind: "cancel" });
+    expect(controller.state.screen).toBe("browse");
+    if (controller.state.screen !== "browse")
+      throw new Error("expected browse");
+    expect(controller.state.view).toBe("trash");
+    await controller.dispatch({ kind: "cancel" });
+    if (controller.state.screen !== "browse")
+      throw new Error("expected inventory");
+    expect(controller.state.view).toBe("inventory");
+    expect(controller.state).toEqual(original);
+  });
+
+  it("keeps a blocked restore review non-mutating when y is pressed", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(["entry-1"]);
+    const restore = vi.fn();
+    const blocked = {
+      schemaVersion: 1 as const,
+      operationId: operation.id,
+      status: "blocked" as const,
+      entries: [
+        {
+          schemaVersion: 1 as const,
+          status: "blocked" as const,
+          entryId: operation.entries[0]!.id,
+          reason: "destination-occupied" as const,
+          path: operation.entries[0]!.originalLocation.path,
+        },
+      ],
+    };
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: async () => buildExecutionReport(),
+      quarantine: {
+        ...fakeTrash(operation, restore),
+        previewRestoreOperation: async () => blocked,
+      } as NonNullable<TuiDependencies["quarantine"]>,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-view", view: "trash" });
+    await controller.dispatch({ kind: "move", delta: 2 });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "select" });
+    await controller.dispatch({ kind: "confirm" });
+    expect(controller.state.screen).toBe("trash-review");
+    if (controller.state.screen === "trash-review")
+      expect(controller.state.message).toContain("no items were changed");
+    expect(restore).not.toHaveBeenCalled();
+  });
+
+  it("runs confirmed purge through execution and renders partial restore outcomes honestly", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(["entry-1"]);
+    const purge = vi.fn(async () => ({
+      operationId: operation.id,
+      purgedAt: "2026-01-01T00:00:00.000Z",
+      entries: [
+        { entryId: operation.entries[0]!.id, status: "purged" as const },
+      ],
+    }));
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: async () => buildExecutionReport(),
+      quarantine: {
+        ...fakeTrash(operation),
+        purgeOperation: purge,
+      } as NonNullable<TuiDependencies["quarantine"]>,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    await controller.start();
+    const original = controller.state;
+    await controller.dispatch({ kind: "switch-view", view: "trash" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "purge-review" });
+    expect(controller.state.screen).toBe("trash-review");
+    await controller.dispatch({ kind: "confirm" });
+    expect(controller.state.screen).toBe("trash-executing");
+    await controller.waitForTrashExecution();
+    expect(controller.state.screen).toBe("trash-report");
+    expect(purge).toHaveBeenCalledTimes(1);
+
+    const report = controller.state as Extract<
+      TuiState,
+      { screen: "trash-report" }
+    >;
+    expect(
+      renderTui(
+        {
+          ...report,
+          kind: "restore",
+          result: {
+            operationId: operation.id,
+            status: "partial",
+            entries: [
+              {
+                status: "restored",
+                entryId: operation.entries[0]!.id,
+                destination: operation.entries[0]!.originalLocation.path,
+                restoredAt: "2026-01-01T00:00:00.000Z",
+              },
+            ],
+          },
+        },
+        plainTuiTheme,
+      ),
+    ).toContain("Restored with concerns");
+    await controller.dispatch({ kind: "cancel" });
+    await controller.dispatch({ kind: "cancel" });
+    expect(controller.state).toEqual(original);
+  });
+
+  it("keeps the current position and selection when clicking the active tab", async () => {
+    const inventory = groupedInventory(["alpha", "beta"]);
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: async () => buildExecutionReport(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "toggle-select" });
+    const before = controller.state;
+    await controller.dispatch({ kind: "switch-view", view: "inventory" });
+    expect(controller.state).toEqual(before);
+  });
+
+  it("preserves Inventory Trash state through search and plan round trips", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(["entry-1"]);
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: async () => buildExecutionReport(),
+      quarantine: fakeTrash(operation),
+    });
+    await controller.start();
+    const beforeSearch = controller.state;
+    await controller.dispatch({ kind: "open-search" });
+    await controller.dispatch({ kind: "cancel" });
+    expect(controller.state).toEqual(beforeSearch);
+    await controller.dispatch({ kind: "select" });
+    await controller.dispatch({ kind: "cancel" });
+    expect(controller.state).toEqual(beforeSearch);
+  });
+
+  it("pages, wheels, and clamps an overflowing Trash review on resize", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(
+      Array.from({ length: 30 }, (_, index) => `entry-${String(index)}`),
+    );
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+        quarantine: fakeTrash(operation),
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+      },
+      { rows: 10, columns: 60 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "switch-view", view: "trash" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "select" });
+    await controller.dispatch({ kind: "page", delta: 1 });
+    if (controller.state.screen !== "trash-review")
+      throw new Error("expected review");
+    expect(controller.state.scrollOffset).toBeGreaterThan(0);
+    expect(
+      mouseAction(
+        controller.state,
+        { button: 65, column: 2, row: 2, pressed: true },
+        { dragging: false, doubleClick: false },
+      ),
+    ).toEqual({ kind: "move", delta: 1 });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 7, columns: 24 },
+    });
+    if (controller.state.screen !== "trash-review")
+      throw new Error("expected review");
+    expect(controller.state.scrollOffset).toBeGreaterThanOrEqual(0);
+  });
+
+  it("renders Trash execution before the confirmed restore mutates", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(["entry-1"]);
+    const terminal = new ScriptedTerminal([
+      { kind: "switch-view", view: "trash" },
+      { kind: "select" },
+      { kind: "confirm" },
+      { kind: "quit" },
+    ]);
+    const restore = vi.fn(async () => {
+      expect(terminal.frames.join("\n")).toContain("Restoring Example skill");
+      return {
+        operationId: operation.id,
+        status: "restored" as const,
+        entries: [
+          {
+            status: "restored" as const,
+            entryId: operation.entries[0]!.id,
+            destination: operation.entries[0]!.originalLocation.path,
+            restoredAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      };
+    });
+    await runTui(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+        quarantine: fakeTrash(operation, restore),
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+      },
+      terminal,
+    );
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Trash open with an honest notice when a second restore preview fails", async () => {
+    const inventory = groupedInventory();
+    const operation = trashOperation(["entry-1"]);
+    let previews = 0;
+    const quarantine = {
+      ...fakeTrash(operation),
+      previewRestoreOperation: async () => {
+        previews += 1;
+        if (previews > 1) throw new Error("state unavailable");
+        return {
+          schemaVersion: 1 as const,
+          operationId: operation.id,
+          status: "would-restore" as const,
+          entries: [],
+        };
+      },
+    } as NonNullable<TuiDependencies["quarantine"]>;
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: async () => buildExecutionReport(),
+      quarantine,
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-view", view: "trash" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "select" });
+    if (controller.state.screen !== "browse") throw new Error("expected Trash");
+    expect(controller.state.model.notice).toContain("could not be previewed");
+    expect(renderTui(controller.state, plainTuiTheme)).not.toContain(
+      "integrity failed",
+    );
+  });
+});
+
+function trashOperation(ids: readonly string[]): QuarantineOperation {
+  return {
+    id: "plan-trash-1",
+    displayNames: ["Example skill"],
+    removedAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2026-02-01T00:00:00.000Z",
+    entries: ids.map((id) => ({
+      schemaVersion: 1,
+      id: id as never,
+      kind: "displaced-artifact",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      removedAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-02-01T00:00:00.000Z",
+      originalLocation: {
+        path: `/tmp/trash-${id}`,
+        canonicalPath: `/tmp/trash-${id}`,
+        artifactType: { kind: "file" },
+      },
+      integrity: { algorithm: "sha256", digest: "0".repeat(64) },
+      provenance: {} as never,
+      restoration: { mode: null, modifiedAt: null },
+    })) as never,
+  };
+}
+
+function trashBrowse(
+  operation: QuarantineOperation,
+  viewport: { readonly rows: number; readonly columns: number },
+) {
+  const inventory = buildInventory();
+  return {
+    inventory,
+    model: createBrowseModel(
+      createTrashSections(
+        [operation],
+        new Map([
+          [
+            operation.id,
+            {
+              schemaVersion: 1,
+              operationId: operation.id,
+              status: "would-restore",
+              entries: [],
+            },
+          ],
+        ]),
+        new Date("2026-01-01T00:00:00.000Z"),
+      ),
+      viewport,
+    ),
+    view: "trash" as const,
+    operations: new Map([[`trash-operation:${operation.id}`, operation]]),
+  };
+}
+
+function fakeTrash(
+  operation: QuarantineOperation,
+  restoreOperation = vi.fn(),
+): NonNullable<TuiDependencies["quarantine"]> {
+  return {
+    list: async () => operation.entries,
+    listOperations: async () => [operation],
+    quarantine: async () => {
+      throw new Error("not used");
+    },
+    restore: async () => {
+      throw new Error("not used");
+    },
+    previewRestore: async () => {
+      throw new Error("not used");
+    },
+    purge: async () => ({ purgedAt: "2026-01-01T00:00:00.000Z", entries: [] }),
+    previewPurge: async () => ({ schemaVersion: 1, entries: [] }),
+    previewRestoreOperation: async () => ({
+      schemaVersion: 1,
+      operationId: operation.id,
+      status: "would-restore",
+      entries: operation.entries.map((entry) => ({
+        schemaVersion: 1,
+        status: "would-restore" as const,
+        entryId: entry.id,
+        destination: entry.originalLocation.path,
+      })),
+    }),
+    restoreOperation,
+    previewPurgeOperation: async () => ({
+      schemaVersion: 1,
+      operationId: operation.id,
+      entries: operation.entries.map((entry) => ({
+        entryId: entry.id,
+        status: "would-purge" as const,
+      })),
+    }),
+    purgeOperation: async () => ({
+      operationId: operation.id,
+      purgedAt: "2026-01-01T00:00:00.000Z",
+      entries: [],
+    }),
+  } as never;
+}
 
 class ScriptedTerminal implements TuiTerminal {
   readonly frames: string[] = [];
@@ -332,7 +921,7 @@ describe("terminal section projection", () => {
       sections.map((section) => [section.label, section.selectable]),
     ).toEqual([
       ["No shared source", true],
-      ["Plugins", true],
+      ["Plugins", false],
       ["System skills", false],
     ]);
     expect(
@@ -364,15 +953,37 @@ describe("terminal section projection", () => {
     });
   });
 
-  it("offers a Plugin as its own boundary rather than its owned Skills", () => {
-    const sections = createTuiSections(
-      buildInventory({ installations: [], plugins: [buildPluginBoundary()] }),
-    );
-
-    expect(sections[0]?.entries[0]?.target).toEqual({
-      kind: "plugin",
-      pluginBoundaryId: "fixture-plugin",
+  it("shows a Plugin and its harness without offering a Removal Target", () => {
+    const inventory = buildInventory({
+      installations: [],
+      plugins: [buildPluginBoundary()],
     });
+    const sections = createTuiSections(inventory);
+
+    expect(sections[0]).toMatchObject({
+      label: "Plugins",
+      selectable: false,
+      entries: [
+        {
+          exposedTo: ["fixture-agent"],
+          target: null,
+        },
+      ],
+    });
+
+    const focused = reduceBrowse(
+      createBrowseModel(sections, { rows: 24, columns: 100 }),
+      { kind: "focus", pane: "entries" },
+    );
+    const attempted = reduceBrowse(focused, { kind: "toggle-select" });
+    expect(attempted.selected).toEqual(new Set());
+    expect(attempted.notice).toBe("Plugins cannot be removed here.");
+    expect(
+      renderBrowseLines(
+        { screen: "browse", inventory, model: attempted },
+        plainTuiTheme,
+      ).join("\n"),
+    ).toContain("fixture-agent");
   });
 });
 
@@ -1122,7 +1733,7 @@ describe("terminal removal interactions", () => {
     expect(rendered).toContain("Remove example-skill?");
     expect(rendered).toContain("READY TO REMOVE");
     expect(rendered).toContain("What will happen");
-    expect(rendered).toContain("Move example-skill to the recovery area");
+    expect(rendered).toContain("Move example-skill to Trash");
     expect(rendered).toContain("You can restore it later.");
     expect(rendered).toContain("Files are not permanently deleted.");
     expect(rendered).not.toContain("failed managed removal");
@@ -1130,6 +1741,29 @@ describe("terminal removal interactions", () => {
     expect(rendered).not.toContain("action-");
     expect(rendered).not.toContain("Blocks (0)");
     expect(rendered).not.toContain("ordinary confirmation");
+  });
+
+  it("makes managed-removal recovery limits explicit before confirmation", async () => {
+    const inventory = buildInventory({
+      installations: [managedInstallation()],
+    });
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 40, columns: 120 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    const rendered = renderTui(controller.state, plainTuiTheme);
+    expect(rendered).toContain(
+      "will not enter Trash and cannot be restored by skill-cleaner",
+    );
+    expect(rendered).toContain(
+      "Managed removal is not recoverable by skill-cleaner and will not enter Trash",
+    );
   });
 
   it("summarizes repeated actions and checks for a large selected Group", async () => {
@@ -1185,9 +1819,7 @@ describe("terminal removal interactions", () => {
     await controller.dispatch({ kind: "select" });
 
     const summary = renderTui(controller.state, plainTuiTheme);
-    expect(summary).toContain(
-      "Move 22 selected capabilities to the recovery area",
-    );
+    expect(summary).toContain("Move 22 selected capabilities to Trash");
     expect(summary).toContain("All 22 original locations are no longer active");
     expect(summary.match(/original locations?/gu)).toHaveLength(2);
 

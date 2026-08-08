@@ -461,6 +461,18 @@ function addBoundaryAmbiguityAndProtectionBlocks(
 ): void {
   for (const state of states) {
     const target = state.resolved.target;
+    if (
+      target.kind === "plugin" &&
+      state.resolved.plugin?.runtimeDefault === true
+    ) {
+      addBlock(state, {
+        kind: "runtime-default-plugin",
+        target,
+        pluginId: state.resolved.plugin.pluginId,
+        exposedTo: state.resolved.plugin.exposedTo,
+        overridable: false,
+      });
+    }
     if (target.kind !== "plugin") {
       const nonSelectablePlugins = state.resolved.installations.filter(
         (installation) =>

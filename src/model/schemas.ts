@@ -528,6 +528,7 @@ const pluginBoundarySchema = z.strictObject({
   pluginId: nonEmptyString,
   version: nonEmptyString.nullable(),
   adapterId: nonEmptyString.nullable(),
+  exposedTo: z.array(nonEmptyString).min(1),
   ownership: pluginOwnershipSchema,
   runtimeDefault: z.boolean(),
   installationIds: z.array(modelId),
@@ -648,6 +649,16 @@ const planBlockSchema = z.discriminatedUnion("kind", [
     kind: z.literal("system-skill"),
     target: removalTargetSchema,
     agentId: nonEmptyString,
+    overridable: z.literal(false),
+  }),
+  z.strictObject({
+    kind: z.literal("runtime-default-plugin"),
+    target: z.strictObject({
+      kind: z.literal("plugin"),
+      pluginBoundaryId: nonEmptyString,
+    }),
+    pluginId: nonEmptyString,
+    exposedTo: z.array(nonEmptyString),
     overridable: z.literal(false),
   }),
   z.strictObject({

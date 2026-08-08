@@ -8,6 +8,22 @@ requirements to Execution.
 
 ## Layout
 
+The header provides `Inventory | Trash (N)`. `ctrl-t` and either header label
+switch views. Trash browsing and previews are read-only presentations backed by
+Quarantine; a `y`-confirmed restore or purge mutates only through Quarantine's
+safety checks. Trash groups only entries with persisted approved-plan
+provenance, while legacy entries remain individually accessible. Its sections
+are Recoverable, Past retention date, and Needs attention. Details preserve
+names, Brute-force Removal method, locations, timestamps, retention, item count,
+and restore readiness.
+
+Enter opens a non-mutating restore review and `p` opens permanent-purge review.
+Both preview every item; a known conflict blocks the whole restore and `y` is
+the mutation boundary. A race can report an honest partial result but never
+overwrites an occupied path, bypasses Git protection, or ignores integrity.
+Purge is explicitly irreversible. Managed removals do not enter Trash because
+their content is not recoverable by skill-cleaner.
+
 Two navigation panes sit over a read-only detail pane in a fixed grid. The left
 pane lists sections, the right lists the entries of the focused section, and
 the pane below shows the focused entry. Each pane owns an independent viewport
@@ -103,9 +119,9 @@ Sections come from declared evidence, never from a name or a path:
 - One section per Installation Group, labelled with its source.
 - `No shared source` for Skills no Owner records together, including an
   Installation that belongs to no Logical Skill.
-- `Plugins`, listing each Plugin boundary rather than its owned Skills, since
-  the boundary is what can be removed. A Plugin the agent runtime ships with
-  itself is marked.
+- `Plugins`, listing each Plugin boundary and the agent harness tied to it as
+  ownership context. Plugin rows are informational and cannot be selected. A
+  Plugin the agent runtime ships with itself is marked.
 - `System skills`, present but not selectable. Its rows draw no checkbox,
   because offering one would invite a click that can only be refused.
 
@@ -147,8 +163,9 @@ Skills from several bundles can be reviewed together.
 Selection resolves to Removal Targets through the same rule the command line
 uses. A fully selected Group collapses into one `source-group` target rather
 than a list of its members; a partial selection stays a list of Logical Skill
-targets; a Plugin row is its own boundary. With nothing selected, `enter`
-reviews the row under the cursor.
+targets. Plugin and System Skill rows remain visible but have no Removal Target.
+With nothing selected, `enter` reviews the removable row under the cursor and
+does nothing on an informational row.
 
 `q` exits the TUI immediately from every screen except search, where it is valid
 regex input; Ctrl-C remains an alternate exit everywhere. In the inventory,

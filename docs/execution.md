@@ -85,10 +85,11 @@ declared verification evidence, and validation requires each concrete check to
 match that evidence or the action's exact declared effect. Record checks for
 cleanup bind to the expected record hash, allowing array compaction without
 mistaking a shifted unrelated value for the removed record; a changed object
-property is not treated as absent. The report retains the planned
-`inventoryId`, final rescan result, action results, target results, verification
-results, and zero or more complete fallback plans. Target status distinguishes
-`removed`, `unchanged`, `partially-removed`, `blocked`, `failed`, and
+property is not treated as absent. Successful Quarantine action details state
+that content entered Trash and record its retention deadline. The report retains
+the planned `inventoryId`, final rescan result, action results, target results,
+verification results, and zero or more complete fallback plans. Target status
+distinguishes `removed`, `unchanged`, `partially-removed`, `blocked`, `failed`, and
 `unresolved`; top-level status distinguishes `succeeded`, `partial`, `failed`,
 and `blocked`.
 

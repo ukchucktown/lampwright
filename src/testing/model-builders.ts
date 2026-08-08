@@ -212,6 +212,7 @@ export function buildPluginBoundary(
         pluginId: "fixture-plugin",
         version: "1.0.0",
         adapterId: "fixture-adapter",
+        exposedTo: ["fixture-agent"],
         ownership: {
           kind: "plugin",
           pluginId: "fixture-plugin",

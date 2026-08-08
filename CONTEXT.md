@@ -68,6 +68,11 @@ _Avoid_: Force, purge
 Inert recoverable storage for artifacts displaced by Brute-force Removal.
 _Avoid_: Trash, backup
 
+**Trash**:
+The approachable presentation of Quarantine entries and removal operations.
+Trash is not storage and does not imply permanent deletion.
+_Avoid_: Quarantine (when referring to the user interface)
+
 **Purge**:
 Permanent deletion of quarantined artifacts.
 _Avoid_: Remove, force

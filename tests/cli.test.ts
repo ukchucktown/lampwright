@@ -191,11 +191,16 @@ function quarantineFixture(entries: readonly QuarantineEntry[] = [entry()]): {
     previewPurge,
     module: {
       list: vi.fn(async () => entries),
+      listOperations: vi.fn(async () => []),
       quarantine: vi.fn(),
       restore,
       previewRestore,
       purge,
       previewPurge,
+      previewRestoreOperation: vi.fn(),
+      restoreOperation: vi.fn(),
+      previewPurgeOperation: vi.fn(),
+      purgeOperation: vi.fn(),
     },
   };
 }
