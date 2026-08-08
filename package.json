@@ -39,7 +39,8 @@
     "prepack": "npm run build",
     "release:candidate": "npm run pack:check && node scripts/create-release-candidate.mjs",
     "test": "npm run build && vitest run",
-    "typecheck": "tsc --project tsconfig.json"
+    "typecheck": "tsc --project tsconfig.json",
+    "test:linux": "node scripts/test-linux.mjs"
   },
   "repository": {
     "type": "git",
