@@ -44,7 +44,7 @@ export function renderTui(
   if (state.screen === "loading")
     return `${style.title("skill-cleaner")}\n\n${style.info("Scanning known skill roots…")}\n`;
   if (state.screen === "error")
-    return `${style.title("skill-cleaner")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or Ctrl-C to exit.")}\n`;
+    return `${style.title("skill-cleaner")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or ctrl-c to exit.")}\n`;
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
@@ -100,52 +100,36 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
     ),
     fitStyledSegments(
       [
-        { text: "> ", paint: style.title },
-        ...(model.query === ""
-          ? [{ text: "type a name regex", paint: style.muted }]
-          : [{ text: model.query, paint: style.active }]),
-      ],
-      usable,
-      style.muted,
-    ),
-    fitStyledSegments(
-      [
         { text: "↑↓", paint: style.title },
         { text: " move · ", paint: style.muted },
         { text: "space", paint: style.title },
         { text: " stage · ", paint: style.muted },
-        { text: "Ctrl-A", paint: style.title },
+        { text: "ctrl-a", paint: style.title },
         { text: " all · ", paint: style.muted },
         { text: "enter", paint: style.title },
         { text: " done · ", paint: style.muted },
         { text: "esc", paint: style.title },
         { text: " cancel · ", paint: style.muted },
-        { text: "Ctrl-U", paint: style.title },
-        { text: " clear", paint: style.muted },
+        { text: "ctrl-u", paint: style.title },
+        { text: " clear · ", paint: style.muted },
+        { text: "ctrl-c", paint: style.title },
+        { text: " quit", paint: style.muted },
       ],
       usable,
       style.muted,
     ),
-    model.matchError === null
-      ? fitStyledSegments(
-          [
-            { text: "matching ", paint: style.muted },
-            {
-              text: `${String(model.results.length)} ${
-                model.results.length === 1 ? "Skill" : "Skills"
-              }`,
-              paint: style.info,
-            },
-            {
-              text: model.query === "" ? " · all Skills" : "",
-              paint: style.muted,
-            },
-          ],
-          usable,
-          style.muted,
-        )
-      : style.warning(fit(model.matchError, usable)),
-    style.border(`${"─".repeat(left)}┬${"─".repeat(right)}`),
+    style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`),
+    `${style.border("│")}${fitStyledSegments(
+      [
+        { text: "> ", paint: style.title },
+        ...(model.query === ""
+          ? [{ text: "type a name regex", paint: style.muted }]
+          : [{ text: model.query, paint: style.active }]),
+      ],
+      Math.max(0, usable - 2),
+      style.muted,
+    )}${style.border("│")}`,
+    style.border(`├${"─".repeat(left)}┬${"─".repeat(right)}┤`),
   ];
   for (let row = 0; row < rows; row += 1) {
     const index = model.scroll + row;
@@ -167,18 +151,29 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
         : result !== undefined && model.staged.has(result.entry.key)
           ? style.selected(fit(text, left))
           : fit(text, left);
+    const rightCell =
+      row === 0 && focused !== undefined
+        ? style.active(fit(focused.entry.name, right))
+        : row > 0 && preview[row - 1] !== undefined
+          ? style.muted(fit(preview[row - 1]!, right))
+          : fit("", right);
     out.push(
-      `${leftCell}${style.border("│")}${row === 0 && focused !== undefined ? style.active(fit(focused.entry.name, right)) : row > 0 && preview[row - 1] !== undefined ? style.muted(fit(preview[row - 1]!, right)) : ""}`,
+      `${style.border("│")}${leftCell}${style.border("│")}${rightCell}${style.border("│")}`,
     );
   }
+  out.push(style.border(`└${"─".repeat(left)}┴${"─".repeat(right)}┘`));
   out.push(
-    style.muted(
-      fit(
-        model.notice ??
-          `result=${String(model.results.length === 0 ? 0 : model.index + 1)}/${String(model.results.length)}`,
-        usable,
-      ),
-    ),
+    model.matchError === null
+      ? style.muted(
+          fit(
+            model.notice ??
+              `matching ${String(model.results.length)} ${
+                model.results.length === 1 ? "Skill" : "Skills"
+              }${model.query === "" ? " · all Skills" : ""} · result=${String(model.results.length === 0 ? 0 : model.index + 1)}/${String(model.results.length)}`,
+            usable,
+          ),
+        )
+      : style.warning(fit(model.matchError, usable)),
   );
   return out.join("\n");
 }
@@ -263,7 +258,7 @@ export function renderBrowseLines(
           [
             { text: "/ or type", paint: style.title },
             { text: " search names by regex · ", paint: style.muted },
-            { text: "Ctrl-U", paint: style.title },
+            { text: "ctrl-u", paint: style.title },
             { text: " clear selection", paint: style.muted },
           ],
           usable,

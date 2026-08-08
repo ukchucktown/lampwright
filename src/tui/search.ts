@@ -7,8 +7,9 @@ import type {
 } from "./types.js";
 
 const SCROLL_MARGIN = 1;
+/** Header, top border, prompt, split rule, a result, bottom border, and status. */
 const SEARCH_RESULT_START_ROW = 6;
-const MINIMUM_SEARCH_ROWS = SEARCH_RESULT_START_ROW + 2;
+const MINIMUM_SEARCH_ROWS = SEARCH_RESULT_START_ROW + 3;
 
 export interface TuiSearchLayout {
   readonly rows: number;
@@ -161,18 +162,25 @@ export function searchLayout(viewport: TuiViewport): TuiSearchLayout {
   const rows = dimension(viewport.rows);
   const columns = dimension(viewport.columns);
   const usable = Math.max(0, columns - 1);
-  const leftWidth = Math.min(usable, Math.max(0, Math.floor(usable * 0.45)));
+  // The search grid is enclosed on both sides and divided in the middle.
+  // Keep the cell widths independent from those three structural columns so
+  // rendering, paging, and pointer hit-testing use the same geometry.
+  const paneWidth = Math.max(0, usable - 3);
+  const leftWidth = Math.min(
+    paneWidth,
+    Math.max(0, Math.floor(paneWidth * 0.45)),
+  );
   return {
     rows,
     columns,
     usable,
     leftWidth,
-    rightWidth: Math.max(0, usable - leftWidth - 1),
+    rightWidth: Math.max(0, paneWidth - leftWidth),
     resultStartRow: SEARCH_RESULT_START_ROW,
     compact: rows < MINIMUM_SEARCH_ROWS || columns < 20,
-    // Title, prompt, hints, status, divider, and footer precede or follow the
-    // matching rows. Keep this shared with paging and pointer hit-testing.
-    resultRows: Math.max(1, rows - (SEARCH_RESULT_START_ROW + 1)),
+    // The header, prompt frame, and footer surround the matching rows. Keep
+    // this shared with paging and pointer hit-testing.
+    resultRows: Math.max(1, rows - (SEARCH_RESULT_START_ROW + 2)),
   };
 }
 

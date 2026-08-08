@@ -139,14 +139,14 @@ export function mouseAction(
     const grid = searchLayout(state.model.viewport);
     if (grid.compact) return { kind: "noop" };
     if ((report.button & 64) !== 0)
-      return report.column >= 1 && report.column <= grid.leftWidth
+      return report.column >= 2 && report.column <= grid.leftWidth + 1
         ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
         : { kind: "noop" };
     const row = report.row - grid.resultStartRow;
     if (
       !report.pressed ||
-      report.column < 1 ||
-      report.column > grid.leftWidth ||
+      report.column < 2 ||
+      report.column > grid.leftWidth + 1 ||
       row < 0 ||
       row >= grid.resultRows
     )
@@ -449,8 +449,8 @@ class RawTuiTerminal implements TuiTerminal {
     const pointed = pointedRow(state, report);
     const searchRow =
       state.screen === "search" &&
-      report.column >= 1 &&
-      report.column <= searchLayout(state.model.viewport).leftWidth
+      report.column >= 2 &&
+      report.column <= searchLayout(state.model.viewport).leftWidth + 1
         ? report.row -
           searchLayout(state.model.viewport).resultStartRow +
           state.model.scroll
