@@ -236,7 +236,7 @@ function skill(name, category, description, owner, agents, removable = true) {
 
 let state = {
   screen: "search",
-  variant: 1,
+  variant: 0,
   query: "",
   cursor: 0,
   selected: new Set(),
@@ -424,11 +424,19 @@ function enter() {
     const available = rankedMatches().filter(
       (candidate) => candidate.removable,
     );
+    if (available.length === 0) {
+      state.notice = "No removable matching Skills to add.";
+      return;
+    }
+    const previousSize = state.selected.size;
     state.selected = new Set([
       ...state.selected,
       ...available.map((candidate) => candidate.key),
     ]);
-    closeSearch(`Selected all ${available.length} visible matches.`);
+    const added = state.selected.size - previousSize;
+    closeSearch(
+      `Added ${added} new ${added === 1 ? "Skill" : "Skills"}; ${state.selected.size} selected total.`,
+    );
     return;
   }
   if (state.variant === 1) {
@@ -566,7 +574,9 @@ function header(width) {
     paint.muted(
       fit(
         state.screen === "search"
-          ? "type search · ↑↓ move · enter apply variant behavior · esc clear/close · [ ] compare variants · ctrl-c quit"
+          ? state.variant === 0
+            ? "type search · ←→ pane · ↑↓ move · enter add matches + return · esc clear/close · ctrl-c quit"
+            : "type search · ↑↓ move · enter apply variant behavior · esc clear/close · [ ] compare variants · ctrl-c quit"
           : "/ search · [ ] compare variants · q/ctrl-c quit",
         width,
       ),
