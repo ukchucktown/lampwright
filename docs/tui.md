@@ -26,8 +26,17 @@ viewport; shift with left or right moves the pane split and with up or down
 changes the detail height. A pointer can click a row to focus it, double-click to select it, wheel over
 either pane, and drag the divider to resize. The wheel moves the cursor rather
 than only the viewport, so the focused row cannot scroll out from under it.
-Pointer reporting is enabled only for the raw terminal and is turned off again
-on exit. Motion is ignored unless a divider drag is in progress, since
+The interactive terminal runs on the alternate screen. That is not decoration:
+on the normal buffer a terminal treats the wheel as its own scrollback and never
+forwards it, so a pane could not scroll however the application asked. Leaving
+also restores whatever was on screen before. Pointer reporting is enabled only
+for the raw terminal and is turned off again on exit, alongside the screen, so a
+terminal is never left in mouse mode.
+
+Reports are read from the raw input stream rather than from keypress events,
+because Node's readline splits one report into eight separate keypresses; no
+single event carries a whole report, and the leftover digits would otherwise be
+typed into the filter. Motion is ignored unless a divider drag is in progress, since
 otherwise every twitch of the pointer would re-select the row beneath it.
 
 ## Sections

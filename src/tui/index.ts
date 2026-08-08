@@ -21,5 +21,6 @@ export {
   mouseAction,
   parseLineTuiAction,
   parseMouseReport,
+  parseMouseReports,
 } from "./terminal.js";
 export type * from "./types.js";

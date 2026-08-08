@@ -1,3 +1,5 @@
+import { PassThrough } from "node:stream";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,9 +7,11 @@ import {
   createTuiSections,
   layout,
   matches,
+  createNodeTuiTerminal,
   mouseAction,
   parseLineTuiAction,
   parseMouseReport,
+  parseMouseReports,
   reduceBrowse,
   renderBrowseLines,
   selectionTargets,
@@ -603,5 +607,69 @@ describe("terminal pointer input", () => {
       kind: "noop",
     });
     expect(mouseAction(browse, press(4, 90), idle)).toEqual({ kind: "noop" });
+  });
+});
+
+describe("raw terminal pointer input", () => {
+  const ESC = String.fromCharCode(27);
+
+  function fakeTty() {
+    const input = new PassThrough() as PassThrough & {
+      isTTY: boolean;
+      setRawMode: (value: boolean) => void;
+    };
+    input.isTTY = true;
+    input.setRawMode = () => undefined;
+    const written: string[] = [];
+    const output = {
+      isTTY: true,
+      write: (value: string) => written.push(value),
+    };
+    return { input, output, written };
+  }
+
+  it("takes every report in one read, including a wheel burst", () => {
+    expect(
+      parseMouseReports(`${ESC}[<65;3;9M${ESC}[<65;3;10M`).map(
+        (report) => report.row,
+      ),
+    ).toEqual([9, 10]);
+    expect(parseMouseReports("no mouse here")).toEqual([]);
+  });
+
+  it("reads a report readline would shred, without typing its digits", async () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const { input, output, written } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    // Readline splits this into eight keypresses; none is a whole report.
+    input.write(`${ESC}[<0;4;5M`);
+    const action = await terminal.readAction(state);
+    expect(action).toEqual({ kind: "point-section", index: 0 });
+
+    // The digits must not have reached the filter as typed characters.
+    const raced = await Promise.race([
+      terminal.readAction(state),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 30)),
+    ]);
+    expect(raced).toBeNull();
+    terminal.close();
+
+    const codes = written.join("");
+    expect(codes).toContain("[?1049h");
+    expect(codes).toContain("[?1006h");
+    expect(codes).toContain("[?1049l");
+    expect(codes).toContain("[?1006l");
   });
 });

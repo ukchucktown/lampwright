@@ -6,7 +6,16 @@ import { layout, panes } from "./browse.js";
 import { renderTui } from "./render.js";
 import type { TuiAction, TuiState, TuiTerminal } from "./types.js";
 
-/** Click, drag, and SGR coordinate reporting. */
+/**
+ * The alternate screen, then click, drag, and SGR coordinate reporting.
+ *
+ * The alternate screen is not decoration: on the normal buffer a terminal
+ * treats the wheel as its own scrollback and never forwards it, so the pane
+ * cannot scroll however the app is configured. Leaving it also restores
+ * whatever was on screen before, instead of burying it.
+ */
+const SCREEN_ON = "\u001B[?1049h";
+const SCREEN_OFF = "\u001B[?1049l";
 const MOUSE_ON = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
 const MOUSE_OFF = "\u001B[?1006l\u001B[?1002l\u001B[?1000l";
 const SGR_MOUSE = new RegExp(
@@ -34,6 +43,24 @@ export function parseMouseReport(sequence: string): MouseReport | null {
     row: Number(match[3]),
     pressed: match[4] === "M",
   };
+}
+
+/**
+ * Every mouse report in one read.
+ *
+ * Reports must be taken from the raw stream, not from keypress events: Node's
+ * readline splits `ESC[<0;12;7M` into eight separate keypresses, so no single
+ * event ever carries a whole report, and the leftover digits would be typed
+ * into the filter. A wheel spin also delivers several reports at once.
+ */
+export function parseMouseReports(chunk: string): readonly MouseReport[] {
+  const pattern = new RegExp(SGR_MOUSE.source, "gu");
+  return [...chunk.matchAll(pattern)].map((match) => ({
+    button: Number(match[1]),
+    column: Number(match[2]),
+    row: Number(match[3]),
+    pressed: match[4] === "M",
+  }));
 }
 
 /**
@@ -145,56 +172,78 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
 
 class RawTuiTerminal implements TuiTerminal {
   private dragging = false;
+  private ignoringKeys = false;
   private lastClick = { row: -1, at: 0 };
+  private readonly mouse: MouseReport[] = [];
   private readonly pending: { readonly text: string; readonly key: Key }[] = [];
-  private waiter:
-    ((value: { readonly text: string; readonly key: Key }) => void) | null =
-    null;
+  private waiter: (() => void) | null = null;
   private readonly onKeypress = (text: string, key: Key): void => {
-    const waiter = this.waiter;
-    if (waiter === null) this.pending.push({ text, key });
-    else {
-      this.waiter = null;
-      waiter({ text, key });
-    }
+    if (this.ignoringKeys) return;
+    this.pending.push({ text, key });
+    this.wake();
   };
+
+  private wake(): void {
+    const waiter = this.waiter;
+    if (waiter === null) return;
+    this.waiter = null;
+    waiter();
+  }
 
   constructor(
     private readonly input: TerminalInput,
     private readonly output: TerminalOutput,
   ) {
+    // Registered before readline attaches its own reader, so a chunk carrying
+    // mouse reports is claimed here and the keypresses readline shreds it into
+    // are ignored rather than typed into the filter.
+    input.on("data", this.onData);
     emitKeypressEvents(input);
     input.on("keypress", this.onKeypress);
     input.setRawMode(true);
     input.resume();
-    output.write(`\u001B[?25l${MOUSE_ON}`);
+    output.write(`${SCREEN_ON}\u001B[?25l${MOUSE_ON}`);
   }
+
+  private readonly onData = (chunk: Buffer | string): void => {
+    const reports = parseMouseReports(chunk.toString("utf8"));
+    if (reports.length === 0) return;
+    this.ignoringKeys = true;
+    queueMicrotask(() => {
+      this.ignoringKeys = false;
+    });
+    for (const report of reports) this.mouse.push(report);
+    this.wake();
+  };
 
   render(state: TuiState): void {
     this.output.write(`\u001B[2J\u001B[H${renderTui(state)}`);
   }
 
   async readAction(state: TuiState): Promise<TuiAction> {
-    const next =
-      this.pending.shift() ??
-      (await new Promise<{ readonly text: string; readonly key: Key }>(
-        (resolve) => {
-          this.waiter = resolve;
-        },
-      ));
-    const report = parseMouseReport(next.key.sequence ?? next.text);
-    if (report === null) {
-      this.dragging = false;
-      return keyAction(state, next.text, next.key);
-    }
+    for (;;) {
+      const report = this.mouse.shift();
+      if (report !== undefined) {
+        const doubleClick = this.registerClick(report);
+        const action = mouseAction(state, report, {
+          dragging: this.dragging,
+          doubleClick,
+        });
+        this.dragging = report.pressed && action.kind === "set-left-percent";
+        if (action.kind !== "noop") return action;
+        continue;
+      }
 
-    const doubleClick = this.registerClick(report);
-    const action = mouseAction(state, report, {
-      dragging: this.dragging,
-      doubleClick,
-    });
-    this.dragging = report.pressed && action.kind === "set-left-percent";
-    return action;
+      const next = this.pending.shift();
+      if (next !== undefined) {
+        this.dragging = false;
+        return keyAction(state, next.text, next.key);
+      }
+
+      await new Promise<void>((resolve) => {
+        this.waiter = resolve;
+      });
+    }
   }
 
   /** A second press on the same row shortly after the first. */
@@ -212,7 +261,8 @@ class RawTuiTerminal implements TuiTerminal {
     this.input.off("keypress", this.onKeypress);
     this.input.setRawMode(false);
     this.input.pause();
-    this.output.write(`${MOUSE_OFF}\u001B[?25h\n`);
+    this.input.off("data", this.onData);
+    this.output.write(`${MOUSE_OFF}\u001B[?25h${SCREEN_OFF}`);
   }
 }
 
