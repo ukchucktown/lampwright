@@ -23,6 +23,8 @@ import {
   renderBrowseLines,
   renderTui,
   runTui,
+  searchLayout,
+  searchRows,
   selectionTargets,
   styleTui,
   TuiController,
@@ -882,9 +884,14 @@ describe("global name-regex search", () => {
       ),
     };
     const rendered = renderTui(state, plainTuiTheme);
+    const lines = rendered.split("\n");
+    expect(lines[0]).toContain("skill-cleaner search");
+    expect(lines[1]!.trimEnd()).toBe("> alpha");
+    expect(lines[2]).toContain("↑↓ move");
+    expect(lines[3]).toContain("matching 1 Skill");
     expect(rendered).toContain("Category: acme/toolkit");
     expect(rendered).toContain("Path:");
-    const click = { button: 0, row: 5, pressed: true };
+    const click = { button: 0, row: 6, pressed: true };
     const pointer = { dragging: false as const, doubleClick: false };
     expect(mouseAction(state, { ...click, column: 40 }, pointer)).toEqual({
       kind: "noop",
@@ -934,6 +941,115 @@ describe("global name-regex search", () => {
     expect(mouseAction(compact, { ...click, column: 2 }, pointer)).toEqual({
       kind: "noop",
     });
+  });
+
+  it("makes the prompt clear in color and plain themes, including at narrow widths", () => {
+    const inventory = groupedInventory(["alpha"]);
+    const browse = {
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 12,
+        columns: 40,
+      }),
+    };
+    const blank: TuiState = {
+      screen: "search",
+      browse,
+      model: createSearchModel(browse.model),
+    };
+    const theme = createNightfallTheme("truecolor");
+    const colored = renderTui(blank, theme);
+    const plain = renderTui(blank, plainTuiTheme);
+    expect(colored.replace(ansi, "")).toBe(plain);
+    expect(colored).toContain(styleTui(theme, "muted", "type a name regex"));
+    expect(plain.split("\n")[1]!.trimEnd()).toBe("> type a name regex");
+    expect(plain.split("\n")[3]).toContain("matching 1 Skill");
+
+    const pluralInventory = groupedInventory(["alpha", "beta"]);
+    const pluralBrowse = createBrowseModel(createTuiSections(pluralInventory), {
+      rows: 12,
+      columns: 40,
+    });
+    expect(
+      renderTui(
+        {
+          screen: "search",
+          browse: { inventory: pluralInventory, model: pluralBrowse },
+          model: createSearchModel(pluralBrowse),
+        },
+        plainTuiTheme,
+      ).split("\n")[3],
+    ).toContain("matching 2 Skills");
+
+    const typed: TuiState = {
+      ...blank,
+      model: reduceSearch(blank.model, browse.model.sections, {
+        kind: "type",
+        value: "alpha",
+      }),
+    };
+    expect(renderTui(typed, theme)).toContain(
+      styleTui(theme, "active", "alpha"),
+    );
+    const narrow = renderTui(
+      {
+        ...typed,
+        model: {
+          ...typed.model,
+          viewport: { rows: 12, columns: 20 },
+        },
+      },
+      plainTuiTheme,
+    ).split("\n");
+    expect(narrow[1]!.trimEnd()).toBe("> alpha");
+    expect(narrow.every((line) => line.length <= 19)).toBe(true);
+  });
+
+  it("keeps search paging and pointer rows aligned after a resize", () => {
+    const inventory = groupedInventory(["alpha", "beta", "camel", "delta"]);
+    const browse = {
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 16,
+        columns: 48,
+      }),
+    };
+    const state: TuiState = {
+      screen: "search",
+      browse,
+      model: createSearchModel(browse.model),
+    };
+    expect(searchLayout(state.model.viewport)).toMatchObject({
+      compact: false,
+      resultStartRow: 6,
+      resultRows: 9,
+    });
+    expect(searchRows(state.model.viewport)).toBe(9);
+    const resized: TuiState = {
+      ...state,
+      model: reduceSearch(state.model, browse.model.sections, {
+        kind: "viewport",
+        viewport: { rows: 10, columns: 48 },
+      }),
+    };
+    expect(searchLayout(resized.model.viewport)).toMatchObject({
+      compact: false,
+      resultStartRow: 6,
+      resultRows: 3,
+    });
+    expect(searchRows(resized.model.viewport)).toBe(3);
+    expect(
+      mouseAction(
+        resized,
+        {
+          button: 0,
+          column: 4,
+          row: searchLayout(resized.model.viewport).resultStartRow + 2,
+          pressed: true,
+        },
+        { dragging: false, doubleClick: false },
+      ),
+    ).toEqual({ kind: "point-search-result", index: 2 });
   });
 });
 

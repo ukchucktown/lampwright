@@ -7,6 +7,8 @@ import type {
 } from "./types.js";
 
 const SCROLL_MARGIN = 1;
+const SEARCH_RESULT_START_ROW = 6;
+const MINIMUM_SEARCH_ROWS = SEARCH_RESULT_START_ROW + 2;
 
 export interface TuiSearchLayout {
   readonly rows: number;
@@ -14,6 +16,10 @@ export interface TuiSearchLayout {
   readonly usable: number;
   readonly leftWidth: number;
   readonly rightWidth: number;
+  /** One-based terminal row for the first matching Skill. */
+  readonly resultStartRow: number;
+  /** The overlay cannot draw one result row plus its footer below this size. */
+  readonly compact: boolean;
   readonly resultRows: number;
 }
 
@@ -162,7 +168,11 @@ export function searchLayout(viewport: TuiViewport): TuiSearchLayout {
     usable,
     leftWidth,
     rightWidth: Math.max(0, usable - leftWidth - 1),
-    resultRows: Math.max(1, rows - 6),
+    resultStartRow: SEARCH_RESULT_START_ROW,
+    compact: rows < MINIMUM_SEARCH_ROWS || columns < 20,
+    // Title, prompt, hints, status, divider, and footer precede or follow the
+    // matching rows. Keep this shared with paging and pointer hit-testing.
+    resultRows: Math.max(1, rows - (SEARCH_RESULT_START_ROW + 1)),
   };
 }
 
