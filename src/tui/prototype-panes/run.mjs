@@ -83,13 +83,18 @@ function onMouse(button, column, row, pressed) {
   const { paneRows, leftWidth, columns } = layout(state);
   const view = panes(state);
 
-  // The wheel moves the cursor, not just the viewport: scrolling past the
-  // focused row and leaving it behind makes the next keystroke jump.
-  if (button === 64 || button === 65) {
-    state = reduce(state, {
-      type: column <= leftWidth ? "focus-sections" : "focus-skills",
-    });
-    state = reduce(state, { type: "move", delta: button === 64 ? -3 : 3 });
+  // Bit 6 marks a wheel report and bit 0 its direction; the remaining bits
+  // carry modifiers, so an exact comparison misses a wheel with shift held.
+  //
+  // One row per report. A notch emits several reports and each is handled, so
+  // any larger step here multiplies into a lurch instead of a scroll.
+  if ((button & 64) !== 0) {
+    const pane = column <= leftWidth ? "sections" : "skills";
+    if (pane === "skills" && state.focus !== "skills")
+      state = reduce(state, { type: "focus-skills" });
+    if (pane === "sections" && state.focus !== "sections")
+      state = reduce(state, { type: "focus-sections" });
+    state = reduce(state, { type: "move", delta: (button & 1) === 0 ? -1 : 1 });
     return;
   }
 
@@ -98,7 +103,7 @@ function onMouse(button, column, row, pressed) {
     return;
   }
 
-  const motion = button >= 32;
+  const motion = (button & 32) !== 0;
   const onDivider = column === leftWidth + 1;
 
   if (dragging || (onDivider && !motion)) {
