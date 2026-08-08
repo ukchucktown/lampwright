@@ -4,6 +4,12 @@ import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { renderTui } from "./render.js";
+import {
+  createNightfallTheme,
+  detectTuiColorMode,
+  plainTuiTheme,
+  type TuiTheme,
+} from "./theme.js";
 import type { TuiAction, TuiState, TuiTerminal, TuiViewport } from "./types.js";
 
 /**
@@ -158,12 +164,30 @@ export function mouseAction(
 type TerminalInput = NodeJS.ReadStream;
 type TerminalOutput = NodeJS.WriteStream;
 
+export interface NodeTuiTerminalOptions {
+  readonly theme?: TuiTheme;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly platform?: string;
+}
+
 export function createNodeTuiTerminal(
   input: TerminalInput = process.stdin,
   output: TerminalOutput = process.stdout,
+  options: NodeTuiTerminalOptions = {},
 ): TuiTerminal {
   return input.isTTY && output.isTTY
-    ? new RawTuiTerminal(input, output)
+    ? new RawTuiTerminal(
+        input,
+        output,
+        options.theme ??
+          createNightfallTheme(
+            detectTuiColorMode({
+              isTTY: true,
+              platform: options.platform ?? process.platform,
+              environment: options.environment ?? process.env,
+            }),
+          ),
+      )
     : new LineTuiTerminal(input, output);
 }
 
@@ -239,6 +263,7 @@ class RawTuiTerminal implements TuiTerminal {
   constructor(
     private readonly input: TerminalInput,
     private readonly output: TerminalOutput,
+    private readonly theme: TuiTheme,
   ) {
     // Registered before readline attaches its own reader, so a chunk carrying
     // mouse reports is claimed here and the keypresses readline shreds it into
@@ -270,7 +295,7 @@ class RawTuiTerminal implements TuiTerminal {
   };
 
   render(state: TuiState): void {
-    this.output.write(`\u001B[2J\u001B[H${renderTui(state)}`);
+    this.output.write(`\u001B[2J\u001B[H${renderTui(state, this.theme)}`);
   }
 
   async readAction(state: TuiState): Promise<TuiAction> {
@@ -337,7 +362,7 @@ class LineTuiTerminal implements TuiTerminal {
   }
 
   render(state: TuiState): void {
-    this.output.write(`${renderTui(state)}\n`);
+    this.output.write(`${renderTui(state, plainTuiTheme)}\n`);
   }
 
   async readAction(state: TuiState): Promise<TuiAction> {

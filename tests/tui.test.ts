@@ -5,20 +5,24 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createBrowseModel,
+  createNightfallTheme,
+  createNodeTuiTerminal,
   createTuiSections,
+  detectTuiColorMode,
   layout,
   matches,
-  createNodeTuiTerminal,
   mouseAction,
   parseLineTuiAction,
   parseMouseReport,
   parseMouseReports,
+  plainTuiTheme,
+  plan,
   reduceBrowse,
   renderBrowseLines,
-  selectionTargets,
-  plan,
   renderTui,
   runTui,
+  selectionTargets,
+  styleTui,
   TuiController,
   type ApprovalRequirement,
   type ExecutionReport,
@@ -154,6 +158,102 @@ function groupedInventory(): Inventory {
     ],
   });
 }
+
+describe("terminal theme", () => {
+  const context = (
+    environment: Readonly<Record<string, string | undefined>>,
+    overrides: { readonly isTTY?: boolean; readonly platform?: string } = {},
+  ) => ({
+    isTTY: overrides.isTTY ?? true,
+    platform: overrides.platform ?? "linux",
+    environment,
+  });
+
+  it("selects the strongest portable color mode and honors NO_COLOR", () => {
+    expect(detectTuiColorMode(context({}, { isTTY: false }))).toBe("none");
+    expect(
+      detectTuiColorMode(context({ NO_COLOR: "", COLORTERM: "truecolor" })),
+    ).toBe("none");
+    expect(detectTuiColorMode(context({ TERM: "dumb" }))).toBe("none");
+    expect(detectTuiColorMode(context({ COLORTERM: "truecolor" }))).toBe(
+      "truecolor",
+    );
+    expect(detectTuiColorMode(context({ TERM_PROGRAM: "Ghostty" }))).toBe(
+      "truecolor",
+    );
+    expect(detectTuiColorMode(context({ TERM: "xterm-256color" }))).toBe(
+      "ansi256",
+    );
+    expect(
+      detectTuiColorMode(
+        context({ WT_SESSION: "terminal" }, { platform: "win32" }),
+      ),
+    ).toBe("truecolor");
+    expect(detectTuiColorMode(context({ TERM: "xterm" }))).toBe("ansi16");
+  });
+
+  it("uses the Nightfall semantic palette without painting a base background", () => {
+    const theme = createNightfallTheme("truecolor");
+    expect(styleTui(theme, "title", "title")).toContain(
+      "\u001B[1;38;2;130;214;214m",
+    );
+    expect(styleTui(theme, "border", "│")).toContain("\u001B[38;2;43;46;72m");
+    expect(styleTui(theme, "focus", "row")).toContain("48;2;72;78;91");
+    expect(theme.styles.title.background).toBeUndefined();
+    expect(theme.styles.border.background).toBeUndefined();
+    expect(styleTui(createNightfallTheme("ansi256"), "active", "x")).toContain(
+      "\u001B[1;38;5;",
+    );
+  });
+
+  it("keeps the same text and frame geometry with color disabled", () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const colored = renderTui(state, createNightfallTheme("truecolor"));
+    const plain = renderTui(state, plainTuiTheme);
+
+    expect(colored).toContain("\u001B[38;2;43;46;72m");
+    expect(colored.replace(ansi, "")).toBe(plain);
+    expect(plain).not.toContain(String.fromCharCode(27));
+    expect(plain).toContain("[ ]");
+    expect(plain).toContain("│");
+  });
+
+  it("keeps line-oriented terminal output monochrome", () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let written = "";
+    output.on("data", (chunk: Buffer) => {
+      written += chunk.toString("utf8");
+    });
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+      { theme: createNightfallTheme("truecolor") },
+    );
+
+    terminal.render(state);
+    terminal.close();
+    expect(written).not.toContain(String.fromCharCode(27));
+    expect(written).toContain("skill-cleaner");
+  });
+});
 
 describe("terminal section projection", () => {
   it("builds sections from declared evidence and keeps System Skills unselectable", () => {
@@ -731,6 +831,38 @@ describe("raw terminal pointer input", () => {
     });
     return { input, output, written };
   }
+
+  it("applies terminal color detection to raw rendering", () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const plainHost = fakeTty();
+    const plainTerminal = createNodeTuiTerminal(
+      plainHost.input as unknown as NodeJS.ReadStream,
+      plainHost.output as unknown as NodeJS.WriteStream,
+      { environment: { NO_COLOR: "", COLORTERM: "truecolor" } },
+    );
+    plainTerminal.render(state);
+    expect(plainHost.written.at(-1)).not.toContain("[38;");
+    expect(plainHost.written.at(-1)).not.toContain("[48;");
+    plainTerminal.close();
+
+    const colorHost = fakeTty();
+    const colorTerminal = createNodeTuiTerminal(
+      colorHost.input as unknown as NodeJS.ReadStream,
+      colorHost.output as unknown as NodeJS.WriteStream,
+      { environment: { COLORTERM: "truecolor" } },
+    );
+    colorTerminal.render(state);
+    expect(colorHost.written.at(-1)).toContain("[38;2;");
+    colorTerminal.close();
+  });
 
   it("delivers terminal resizes immediately so the controller can repaint", async () => {
     const { input, output } = fakeTty();

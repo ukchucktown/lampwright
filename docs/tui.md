@@ -21,6 +21,23 @@ fitted before it is styled, because fitting strips escape codes when it
 truncates, which would otherwise leave the same column dim on one row and plain
 on the next.
 
+## Theme and color
+
+The built-in `Nightfall` theme follows the restrained Subliminal Nightfall
+palette used by Ghostty, Yazi, and tmux. Muted blue-gray borders keep the grid
+quiet; cyan identifies structure and paths; yellow identifies the active or
+selected item; green marks success; blue marks information; and pink-red marks
+errors. Focused rows use a light foreground over a slate selection background.
+The application never paints a base background, so terminal transparency and
+blur remain owned by the terminal.
+
+Colors are semantic decoration, not state. Checkboxes, focus position, labels,
+and words such as `protected`, `broken`, and `failed` preserve the same meaning
+when color is unavailable. Raw terminals select true color, 256-color ANSI, or
+16-color ANSI from their advertised capabilities. `NO_COLOR`, `TERM=dumb`, and
+non-TTY line output use the monochrome theme. No shell command, terminal probe,
+or platform-specific executable is required.
+
 Arrows move; left and right change pane; Page Up and Page Down step exactly one
 viewport; shift with left or right moves the pane split and with up or down
 changes the detail height. A pointer can click a row to focus it, double-click to select it, wheel over
@@ -129,3 +146,9 @@ functions using the public Inventory, RemovalPlanIntent, RemovalPlan,
 ApprovalRequirement, and ExecutionReport values. `TuiTerminal` consumes
 rendered state through `render`, supplies semantic `TuiAction` values through
 `readAction`, and is always closed when the session ends.
+
+`renderTui(state, theme?)` and `renderBrowseLines(state, theme?)` accept a
+declarative `TuiTheme`. `createNodeTuiTerminal(input?, output?, options?)`
+accepts an explicit theme for embedding; otherwise it selects a Nightfall color
+mode from the output terminal and environment. `createNightfallTheme(mode)`,
+`nightfallTheme`, and `plainTuiTheme` are exported with the theme types.
