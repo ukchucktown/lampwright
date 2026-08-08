@@ -282,7 +282,15 @@ function compileQuery() {
   const query = state.query.trim();
   if (query === "") return { regex: null, error: null };
   try {
-    return { regex: new RegExp(query, "iu"), error: null };
+    const regex = new RegExp(query, "iu");
+    if (regex.test("")) {
+      return {
+        regex: null,
+        error:
+          "Pattern matches empty text; try ^c or ^c.* for names starting with c",
+      };
+    }
+    return { regex, error: null };
   } catch (error) {
     return {
       regex: null,
@@ -293,18 +301,8 @@ function compileQuery() {
 
 function matchScore(candidate, regex) {
   if (regex === null) return 0;
-  const fields = [
-    candidate.name,
-    candidate.category,
-    candidate.owner,
-    candidate.agents.join(" "),
-    candidate.path,
-  ];
-  for (const [fieldIndex, field] of fields.entries()) {
-    const match = regex.exec(field);
-    if (match !== null) return fieldIndex * 100 + (match.index ?? 0);
-  }
-  return Number.POSITIVE_INFINITY;
+  const match = regex.exec(candidate.name);
+  return match === null ? Number.POSITIVE_INFINITY : (match.index ?? 0);
 }
 
 function categories() {
@@ -409,7 +407,7 @@ function enter() {
   }
   const pattern = compileQuery();
   if (pattern.error !== null) {
-    state.notice = `Invalid regex: ${pattern.error}`;
+    state.notice = `Cannot apply regex: ${pattern.error}`;
     return;
   }
   if (state.variant === 0) {
@@ -808,7 +806,7 @@ function stateLine(width) {
   const regexError = compileQuery().error;
   return paint.info(
     fit(
-      `state screen=${state.screen} variant=${variants[state.variant].key} regex=${JSON.stringify(state.query)} cursor=${matchCount === 0 ? 0 : state.cursor + 1}/${matchCount} staged=${state.staged.size} selected=${state.selected.size}${regexError === null ? "" : ` · invalid regex: ${regexError}`}${state.notice === "" ? "" : ` · ${state.notice}`}`,
+      `state screen=${state.screen} variant=${variants[state.variant].key} regex=${JSON.stringify(state.query)} cursor=${matchCount === 0 ? 0 : state.cursor + 1}/${matchCount} staged=${state.staged.size} selected=${state.selected.size}${regexError === null ? "" : ` · regex problem: ${regexError}`}${state.notice === "" ? "" : ` · ${state.notice}`}`,
       width,
     ),
   );

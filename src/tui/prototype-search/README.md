@@ -33,15 +33,17 @@ The prototype opens directly in search. Type a case-insensitive regular
 expression to filter; use Up/Down to move, Backspace to edit, Escape to
 clear/close, `/` to reopen search from the main view, and Ctrl-C to quit. For
 example, `^react`, `typescript|camunda`, and `(test|spec)$` are valid searches.
-Incomplete or invalid expressions show an error and cannot be applied. In
+Incomplete or invalid expressions show an error and cannot be applied. Patterns
+that match empty text are also rejected because they would match every Skill;
+for example, use `^c` or `^c.*` rather than `^c*` for names starting with c. In
 variant A, Left/Right switches category/result focus. In variant B, Space stages
 one match and Ctrl-A stages every visible match. Use Tab to cycle variants at
 any time.
 
 The bottom two lines always show the variant switcher and complete relevant
-state. Regex matching is name-first, then category, Owner, agent exposure, and
-path. Descriptions are deliberately preview-only so ordinary prose does not
-flood the results.
+state. Regex matches only the Skill name, so anchors have predictable meaning.
+Category, Owner, agent exposure, path, and description are preview-only and do
+not change the result set.
 
 ## Validated direction
 
