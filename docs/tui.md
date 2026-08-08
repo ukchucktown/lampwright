@@ -136,10 +136,13 @@ keypress cannot discard a selection.
 The review screen leads with the decision a person must make: what is selected,
 whether removal is ready or blocked, what will happen, whether files remain
 recoverable, and how the result will be checked. Actions use capability names
-and readable sub-lines for methods, paths, and recovery behavior. Empty warning
-and block sections are omitted. Safety warnings and blocks remain prominent and
-use plain explanations; package-download consent still shows the exact pinned
-package, runner, and adapter identity.
+and readable sub-lines for methods, paths, and recovery behavior. Repeated
+actions that use the same removal method and Owner are shown once with an
+affected-capability count. Repeated verification types are likewise condensed
+into counted outcomes. Empty warning and block sections are omitted. Safety
+warnings and blocks remain prominent and use plain explanations;
+package-download consent still shows the exact pinned package, runner, and
+adapter identity.
 
 `d` toggles technical details containing exact targets, action and verification
 identifiers, commands, hashes, and approval records. Up and down, Page Up and

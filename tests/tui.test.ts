@@ -102,8 +102,10 @@ function managedInstallation(
   });
 }
 
-function groupedInventory(): Inventory {
-  const members = ["alpha", "beta"].map((name) =>
+function groupedInventory(
+  names: readonly string[] = ["alpha", "beta"],
+): Inventory {
+  const members = names.map((name) =>
     managedInstallation({
       id: `installation-${name}`,
       skill: { name, description: `${name} description` },
@@ -732,6 +734,71 @@ describe("terminal removal interactions", () => {
     expect(rendered).not.toContain("action-");
     expect(rendered).not.toContain("Blocks (0)");
     expect(rendered).not.toContain("ordinary confirmation");
+  });
+
+  it("summarizes repeated actions and checks for a large selected Group", async () => {
+    const names = Array.from(
+      { length: 22 },
+      (_, index) => `skill-${String(index + 1)}`,
+    );
+    const inventory = groupedInventory(names);
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 80, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "select" });
+
+    const summary = renderTui(controller.state, plainTuiTheme);
+    expect(summary).toContain(
+      "Ask fixture-manager to remove 22 selected capabilities",
+    );
+    expect(summary).toContain(
+      "All 22 selected capabilities are no longer available to agents",
+    );
+    expect(summary.match(/Ask fixture-manager to remove/gu)).toHaveLength(1);
+
+    await controller.dispatch({ kind: "toggle-details" });
+    const details = renderTui(controller.state, plainTuiTheme);
+    expect(details).toContain("Actions (22)");
+    expect(details).toContain("Verification (1)");
+  });
+
+  it("summarizes repeated location checks for a recoverable Group removal", async () => {
+    const names = Array.from(
+      { length: 22 },
+      (_, index) => `skill-${String(index + 1)}`,
+    );
+    const inventory = groupedInventory(names);
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan: (current, intent) =>
+          plan(current, { ...intent, mode: "brute-force" }),
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 80, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "select" });
+
+    const summary = renderTui(controller.state, plainTuiTheme);
+    expect(summary).toContain(
+      "Move 22 selected capabilities to the recovery area",
+    );
+    expect(summary).toContain("All 22 original locations are no longer active");
+    expect(summary.match(/original locations?/gu)).toHaveLength(2);
+
+    await controller.dispatch({ kind: "toggle-details" });
+    const details = renderTui(controller.state, plainTuiTheme);
+    expect(details).toContain("Actions (22)");
+    expect(details).toContain("Verification (23)");
   });
 
   it("explains an executable download warning before the actions", async () => {

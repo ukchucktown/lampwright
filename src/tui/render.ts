@@ -453,8 +453,8 @@ function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
       ? []
       : [
           style.title("What will happen"),
-          ...removalPlan.actions.flatMap((action, index) =>
-            wrapPlanLines(describePlainAction(state, action, index), width),
+          ...plainActionGroups(removalPlan.actions).flatMap((actions, index) =>
+            wrapPlanLines(describePlainActions(state, actions, index), width),
           ),
           "",
         ]),
@@ -462,11 +462,12 @@ function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
       ? []
       : [
           style.title("After removal, skill-cleaner will verify"),
-          ...removalPlan.verificationChecks.flatMap((check) =>
-            wrapPlanLine(
-              `  • ${describePlainVerification(state, check)}`,
-              width,
-            ),
+          ...plainVerificationGroups(removalPlan.verificationChecks).flatMap(
+            (checks) =>
+              wrapPlanLine(
+                `  • ${describePlainVerifications(state, checks)}`,
+                width,
+              ),
           ),
           "",
         ]),
@@ -659,6 +660,81 @@ function wrapPlanLine(value: string, width: number): readonly string[] {
   return result;
 }
 
+function plainActionGroups(
+  actions: readonly RemovalAction[],
+): readonly (readonly RemovalAction[])[] {
+  const groups: RemovalAction[][] = [];
+  let previousKey: string | null = null;
+  for (const action of actions) {
+    const key = plainActionGroupKey(action);
+    const group = groups.at(-1);
+    if (group === undefined || key !== previousKey) groups.push([action]);
+    else group.push(action);
+    previousKey = key;
+  }
+  return groups;
+}
+
+function plainActionGroupKey(action: RemovalAction): string {
+  if (action.kind === "quarantine") return action.kind;
+  if (action.kind === "record-cleanup")
+    return `${action.kind}:${action.format}`;
+  const owner =
+    action.owner.kind === "manager"
+      ? `manager:${action.owner.managerId}`
+      : `plugin:${action.owner.pluginId}`;
+  return `${action.kind}:${owner}`;
+}
+
+function describePlainActions(
+  state: TuiPlanState,
+  actions: readonly RemovalAction[],
+  index: number,
+): readonly string[] {
+  const action = actions[0]!;
+  if (actions.length === 1) return describePlainAction(state, action, index);
+  const prefix = `  ${String(index + 1)}. `;
+  const count = affectedInstallationCount(actions);
+  const capabilities = `${String(count)} selected ${count === 1 ? "capability" : "capabilities"}`;
+  if (action.kind === "quarantine")
+    return [
+      `${prefix}Move ${capabilities} to the recovery area`,
+      stylelessDetail(
+        `From ${String(actions.length)} original ${actions.length === 1 ? "location" : "locations"}.`,
+      ),
+      stylelessDetail("You can restore them later."),
+    ];
+  if (action.kind === "managed-removal") {
+    const owner =
+      action.owner.kind === "manager"
+        ? action.owner.managerId
+        : `Plugin ${action.owner.pluginId}`;
+    return [
+      `${prefix}Ask ${owner} to remove ${capabilities}`,
+      stylelessDetail(`Uses ${owner}'s supported removal commands.`),
+    ];
+  }
+  const records = actions.reduce(
+    (total, candidate) =>
+      total +
+      (candidate.kind === "record-cleanup" ? candidate.records.length : 0),
+    0,
+  );
+  return [
+    `${prefix}Update ${String(records)} installation record ${records === 1 ? "entry" : "entries"}`,
+    stylelessDetail(
+      `Across ${String(actions.length)} record ${actions.length === 1 ? "file" : "files"}.`,
+    ),
+  ];
+}
+
+function affectedInstallationCount(actions: readonly RemovalAction[]): number {
+  const installationIds = new Set(
+    actions.flatMap((action) => action.affectedInstallationIds),
+  );
+  return installationIds.size > 0 ? installationIds.size : actions.length;
+}
+
 function describePlainAction(
   state: TuiPlanState,
   action: RemovalAction,
@@ -760,6 +836,12 @@ function describePlainVerification(
   state: TuiPlanState,
   check: VerificationCheck,
 ): string {
+  if (
+    check.kind === "target-unavailable" &&
+    check.target.kind === "source-group" &&
+    /^\d+ selected capabilities$/u.test(state.label)
+  )
+    return `All ${state.label} are no longer available to agents`;
   if (check.kind === "target-unavailable")
     return `${targetLabel(state, check.target)} is no longer available to agents`;
   if (check.kind === "path-absent")
@@ -769,6 +851,36 @@ function describePlainVerification(
   if (check.kind === "record-absent")
     return "The installation record no longer lists the capability";
   return "The removal command succeeds";
+}
+
+function plainVerificationGroups(
+  checks: readonly VerificationCheck[],
+): readonly (readonly VerificationCheck[])[] {
+  const groups = new Map<VerificationCheck["kind"], VerificationCheck[]>();
+  for (const check of checks) {
+    const group = groups.get(check.kind);
+    if (group === undefined) groups.set(check.kind, [check]);
+    else group.push(check);
+  }
+  return [...groups.values()];
+}
+
+function describePlainVerifications(
+  state: TuiPlanState,
+  checks: readonly VerificationCheck[],
+): string {
+  const check = checks[0]!;
+  if (checks.length === 1) return describePlainVerification(state, check);
+  const count = String(checks.length);
+  if (check.kind === "path-absent")
+    return `All ${count} original locations are no longer active`;
+  if (check.kind === "target-unavailable")
+    return `All ${count} selected capabilities are no longer available to agents`;
+  if (check.kind === "owner-state-absent")
+    return `Managing tools no longer report ${count} selected capabilities as installed`;
+  if (check.kind === "record-absent")
+    return `All ${count} installation record entries no longer list the selected capabilities`;
+  return `All ${count} removal verification commands succeed`;
 }
 
 function targetLabel(state: TuiPlanState, target: RemovalTarget): string {
