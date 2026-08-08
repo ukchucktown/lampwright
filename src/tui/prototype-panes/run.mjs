@@ -26,7 +26,7 @@ let state = createState(sections, viewport());
 // Repaint in place: home, then each line erased to its end. Clearing the whole
 // screen every event tears visibly under a stream of mouse reports.
 function draw() {
-  const lines = renderLines(state);
+  const lines = renderLines(state, { lastMouse });
   process.stdout.write(
     `${ESC}[H` + lines.map((line) => `${line}${ESC}[K`).join("\n") + `${ESC}[J`,
   );
@@ -36,9 +36,38 @@ function draw() {
 
 const MOUSE_ON = `${ESC}[?1000h${ESC}[?1002h${ESC}[?1006h`;
 const MOUSE_OFF = `${ESC}[?1006l${ESC}[?1002l${ESC}[?1000l`;
-const SGR = new RegExp(`${ESC}\\[<(\\d+);(\\d+);(\\d+)([Mm])`);
+const SGR = new RegExp(`${ESC}\\[<(\\d+);(\\d+);(\\d+)([Mm])`, "g");
+const X10 = new RegExp(`${ESC}\\[M([\\s\\S])([\\s\\S])([\\s\\S])`, "g");
+
+/** Every mouse report in a chunk. A wheel spin delivers several at once. */
+function mouseEvents(chunk) {
+  const events = [];
+  SGR.lastIndex = 0;
+  for (const m of chunk.matchAll(SGR))
+    events.push({
+      button: Number(m[1]),
+      column: Number(m[2]),
+      row: Number(m[3]),
+      pressed: m[4] === "M",
+    });
+  if (events.length > 0) return events;
+  X10.lastIndex = 0;
+  for (const m of chunk.matchAll(X10)) {
+    const button = m[1].codePointAt(0) - 32;
+    events.push({
+      button: button === 3 ? 0 : button,
+      column: m[2].codePointAt(0) - 32,
+      row: m[3].codePointAt(0) - 32,
+      pressed: button !== 3,
+    });
+  }
+  return events;
+}
 
 let dragging = false;
+/** Shown in the status line so "mouse does nothing" can be told apart from
+ *  "the terminal never sent an event". */
+let lastMouse = "none";
 
 function onMouse(button, column, row, pressed) {
   const { paneRows, leftWidth, columns } = layout(state);
@@ -128,14 +157,12 @@ draw();
 process.stdin.on("data", (chunk) => {
   if (chunk === "") quit();
 
-  const mouse = SGR.exec(chunk);
-  if (mouse) {
-    onMouse(
-      Number(mouse[1]),
-      Number(mouse[2]),
-      Number(mouse[3]),
-      mouse[4] === "M",
-    );
+  const events = mouseEvents(chunk);
+  if (events.length > 0) {
+    for (const event of events) {
+      lastMouse = `${event.button}@${event.column},${event.row}${event.pressed ? "" : " up"}`;
+      onMouse(event.button, event.column, event.row, event.pressed);
+    }
     draw();
     return;
   }

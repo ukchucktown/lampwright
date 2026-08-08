@@ -339,11 +339,10 @@ function toggleSelect(state) {
   if (section === null) return state;
   if (!section.selectable)
     return { ...state, notice: `${section.label} cannot be removed here.` };
-  if (state.focus === "sections")
-    return {
-      ...state,
-      notice: "Use → to enter the section, or S to take all.",
-    };
+  // Space on a section row takes the whole section. Refusing the obvious
+  // gesture and naming a different key made bulk selection undiscoverable, and
+  // a 22-skill bundle is exactly where pressing space 22 times hurts most.
+  if (state.focus === "sections") return toggleSection(state);
   const skill = currentSkill(state);
   if (skill === null) return state;
   const selected = state.selected.includes(skill.key)

@@ -58,13 +58,17 @@ function sectionLine(state, view, row, leftWidth) {
   ).length;
   const count =
     taken > 0 ? `${taken}/${item.skills.length}` : String(item.skills.length);
+  const allTaken =
+    item.selectable && item.skills.length > 0 && taken === item.skills.length;
+  const marker = !item.selectable
+    ? " - "
+    : allTaken
+      ? "[x]"
+      : taken > 0
+        ? "[~]"
+        : "[ ]";
   const text =
-    " " +
-    fit(item.label, leftWidth - 10) +
-    " " +
-    fit(count, 6) +
-    " " +
-    (item.selectable ? " " : "x");
+    marker + " " + fit(item.label, leftWidth - 12) + " " + fit(count, 6) + " ";
   const style =
     focused && state.focus === "sections" ? INV : focused ? B : PLAIN;
   return { text: fit(text, leftWidth), style };
@@ -105,13 +109,14 @@ function skillLine(state, view, section, row, rightWidth) {
       : state.selected.includes(entry.key)
         ? "[x]"
         : "[ ]";
-  const paths = entry.paths.length > 1 ? `${entry.paths.length}p` : "  ";
+  const paths =
+    entry.paths.length > 1 ? `${entry.paths.length} paths` : "       ";
   const shared = section === null ? null : sharedExposure(section);
   const differs = shared === null || entry.exposedTo.join(" ") !== shared;
   // Descriptions live in the detail pane, where there is room to read them.
   // A row carries identity only: name, whether its exposure departs from the
   // section's, and how many physical paths it has.
-  const endWidth = 3;
+  const endWidth = 8;
   const nameWidth = Math.max(6, Math.min(44, rightWidth - endWidth - 22));
   const headWidth = nameWidth + 5;
   const tailWidth = Math.max(0, rightWidth - headWidth - endWidth);
@@ -160,7 +165,7 @@ function paint(segments) {
   return segments.map(({ text, style }) => style(text)).join("");
 }
 
-export function renderLines(state) {
+export function renderLines(state, diagnostics = {}) {
   const { columns, paneRows, detailRows, leftWidth } = layout(state);
   const usable = columns - 1;
   const rightWidth = Math.max(10, usable - leftWidth - 2);
@@ -180,7 +185,7 @@ export function renderLines(state) {
   out.push(
     D(
       fit(
-        "arrows move · click/wheel/drag · space select · S section · ^a clear · enter review · esc back · ^c quit",
+        "arrows/click move · wheel scroll · drag divider · space select (whole section from the left pane) · ^a clear · enter review · ^c quit",
         usable,
       ),
     ),
@@ -245,7 +250,7 @@ export function renderLines(state) {
       ? ACCENT(fit(`! ${state.notice}`, usable))
       : D(
           fit(
-            `focus=${state.focus} sec=${state.sectionIndex + 1}/${view.sections.total} skill=${view.skills.total === 0 ? 0 : state.skillIndex + 1}/${view.skills.total} split=${state.leftPercent}% detail=${detailRows}`,
+            `focus=${state.focus} sec=${state.sectionIndex + 1}/${view.sections.total} skill=${view.skills.total === 0 ? 0 : state.skillIndex + 1}/${view.skills.total} split=${state.leftPercent}% mouse=${diagnostics.lastMouse ?? "n/a"}`,
             usable,
           ),
         ),

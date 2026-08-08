@@ -27,9 +27,13 @@ exists to settle four things by hand:
 npm run prototype:panes
 ```
 
-Keys: `↑↓` move · `←→` switch pane · `PgUp`/`PgDn` page · `space` select · `S`
-take the whole section · `ctrl-a` clear selection · `enter` review · `esc` back
-· `ctrl-c` quit. Typing filters; backspace edits the query.
+Keys: `↑↓` move · `←→` switch pane · `PgUp`/`PgDn` page · `space` select ·
+`ctrl-a` clear selection · `enter` review · `esc` back · `ctrl-c` quit. Typing
+filters; backspace edits the query.
+
+`space` on a **section** row takes or clears the whole section, so a 22-skill
+bundle is one keystroke. `space` on a **skill** row toggles that skill. The
+left pane shows `[ ]`, `[~]`, or `[x]` for none, some, or all taken.
 
 Resize: `shift-←` / `shift-→` moves the pane split, `shift-↑` / `shift-↓`
 changes the detail height. The terminal can be resized freely and the frame
@@ -56,6 +60,12 @@ assumptions about focus, indices, and selection are visible while you drive.
 Click a section or a skill to focus it, click the `[ ]` box to toggle it, use
 the wheel over either pane to scroll it, and drag the divider to resize the
 split.
+
+The status line ends with `mouse=…`, showing the last report received. If it
+stays `none` while you click, the terminal is not sending mouse events at all
+and no amount of hit-testing will help; if it changes but nothing else does,
+the events are arriving and the mapping is wrong. SGR reporting is preferred
+with the legacy X10 encoding as a fallback.
 
 ## Known rough edges — look for these
 
