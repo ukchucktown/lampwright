@@ -29,6 +29,10 @@ export async function runTui(
       await controller.dispatch(await terminal.readAction(controller.state));
       const nextState = controller.state as TuiState;
       if (nextState.screen !== "done") terminal.render(nextState);
+      if (nextState.screen === "executing") {
+        await controller.waitForExecution();
+        terminal.render(controller.state);
+      }
     }
     if (controller.state.screen === "error")
       return { status: "failed", message: controller.state.message };

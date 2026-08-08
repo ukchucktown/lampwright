@@ -181,6 +181,14 @@ export interface TuiPlanState {
   readonly returnReport: TuiReportState | null;
 }
 
+/** An approved removal is running; Execution provides only a final report. */
+export interface TuiExecutingState {
+  readonly screen: "executing";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: RemovalPlan;
+  readonly label: string;
+}
+
 export interface TuiReportState {
   readonly screen: "report";
   readonly browse: TuiBrowseSnapshot;
@@ -203,6 +211,7 @@ export type TuiState =
   | TuiBrowseState
   | TuiSearchState
   | TuiPlanState
+  | TuiExecutingState
   | TuiReportState
   | TuiErrorState
   | TuiDoneState;

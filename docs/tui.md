@@ -179,7 +179,12 @@ blocks.
 
 Pressing `y` on an unblocked plan is the mutation boundary. Package trust is
 shown as an exact runner/package/version/adapter-hash tuple before this
-confirmation. A managed-removal failure is reported without running a
+confirmation. It immediately opens a non-interactive execution screen naming
+the selected capability or selection and its approved target and action counts.
+That screen explains that the approved removal, verification, and final
+inventory scan are running; it intentionally shows no percentage or per-action
+progress because Execution returns a final report rather than progress events.
+A managed-removal failure is reported without running a
 filesystem fallback. If Execution returns fallback plans, `f` opens one as a
 new brute-force review and a second `y` is required. That plan uses Quarantine
 for filesystem removal. The final screen reports target, action, and
@@ -194,6 +199,8 @@ and `quit`. Search accepts a regex, `up`, `down`, `take`, `all`, `clear`, `done`
 and `cancel`. Plan screens accept `yes`, `no`, `details`, `up`, `down`,
 `pageup`, `pagedown`, `force`, and `quit`; report screens accept `up`, `down`,
 `fallback`, and `quit`. End-of-input cancels safely.
+After `yes`, the line-oriented interface also renders the non-interactive
+execution screen until the final report or error is ready.
 
 Read-only scanning, searching, expanding, cancellation, and plan review create
 no files or persistent state. The terminal UI does not scan paths, infer

@@ -17,6 +17,7 @@ import type {
   TuiAction,
   TuiBrowseState,
   TuiDependencies,
+  TuiExecutingState,
   TuiPlanState,
   TuiReportState,
   TuiSearchState,
@@ -25,6 +26,7 @@ import type {
 
 export class TuiController {
   private stateValue: TuiState = { screen: "loading" };
+  private execution: Promise<void> | null = null;
 
   constructor(
     private readonly dependencies: TuiDependencies,
@@ -60,6 +62,7 @@ export class TuiController {
       this.stateValue = resizeState(state, action.viewport);
       return;
     }
+    if (state.screen === "executing") return;
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "search") this.searchAction(state, action);
@@ -68,6 +71,29 @@ export class TuiController {
     } catch (error: unknown) {
       this.fail(error);
     }
+  }
+
+  /** Waits for the one final Execution report after its feedback frame draws. */
+  async waitForExecution(): Promise<void> {
+    if (this.execution === null && this.stateValue.screen === "executing") {
+      const state = this.stateValue;
+      this.execution = Promise.resolve()
+        .then(() =>
+          this.dependencies.execute(state.plan, approvalGrants(state.plan)),
+        )
+        .then((report) => {
+          this.stateValue = {
+            screen: "report",
+            browse: state.browse,
+            report,
+            fallbackCursor: 0,
+          };
+        })
+        .catch((error: unknown) => {
+          this.fail(error);
+        });
+    }
+    await this.execution;
   }
 
   private async browseAction(
@@ -264,15 +290,12 @@ export class TuiController {
       return;
     }
     if (action.kind !== "confirm" || state.plan.blocks.length > 0) return;
-    const report = await this.dependencies.execute(
-      state.plan,
-      approvalGrants(state.plan),
-    );
+    this.execution = null;
     this.stateValue = {
-      screen: "report",
+      screen: "executing",
       browse: state.browse,
-      report,
-      fallbackCursor: 0,
+      plan: state.plan,
+      label: state.label,
     };
   }
 
@@ -318,9 +341,19 @@ export class TuiController {
 }
 
 function resizeState(
-  state: TuiBrowseState | TuiSearchState | TuiPlanState | TuiReportState,
+  state:
+    | TuiBrowseState
+    | TuiSearchState
+    | TuiPlanState
+    | TuiExecutingState
+    | TuiReportState,
   viewport: TuiBrowseState["model"]["viewport"],
-): TuiBrowseState | TuiSearchState | TuiPlanState | TuiReportState {
+):
+  | TuiBrowseState
+  | TuiSearchState
+  | TuiPlanState
+  | TuiExecutingState
+  | TuiReportState {
   if (state.screen === "browse")
     return {
       ...state,
@@ -336,6 +369,8 @@ function resizeState(
       }),
     };
   if (state.screen === "report")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   return {
     ...state,
