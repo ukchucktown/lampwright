@@ -49,6 +49,9 @@ interface PointerRow {
   readonly index: number;
 }
 
+type PointerPane = PointerRow["pane"] | "detail";
+type DragTarget = false | "panes" | "detail";
+
 export function parseMouseReport(sequence: string): MouseReport | null {
   const match = SGR_MOUSE.exec(sequence);
   if (match === null) return null;
@@ -125,10 +128,12 @@ function pendingSgrPrefix(value: string): boolean {
 export function mouseAction(
   state: TuiState,
   report: MouseReport,
-  context: { dragging: boolean; doubleClick: boolean },
+  context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
   if (state.screen !== "browse") return { kind: "noop" };
-  const { leftWidth, columns } = layout(state.model);
+  const grid = layout(state.model);
+  const { leftWidth, columns, paneRows, rows } = grid;
+  const detailDividerRow = PANE_TOP + paneRows + 1;
 
   if ((report.button & 64) !== 0) {
     const pane = pointerPane(state, report);
@@ -143,13 +148,27 @@ export function mouseAction(
   if (!report.pressed) return { kind: "noop" };
   if ((report.button & 3) !== 0) return { kind: "noop" };
 
-  if (context.dragging || report.column === leftWidth + 1)
+  if (context.dragging === "detail" || report.row === detailDividerRow)
+    return {
+      kind: "set-detail-rows",
+      rows: rows - report.row - 2,
+    };
+
+  if (
+    context.dragging === "panes" ||
+    (report.column === leftWidth + 1 &&
+      report.row > PANE_TOP &&
+      report.row < detailDividerRow)
+  )
     return {
       kind: "set-left-percent",
       percent: Math.round((report.column / columns) * 100),
     };
 
   if ((report.button & 32) !== 0) return { kind: "noop" };
+
+  if (pointerPane(state, report) === "detail")
+    return { kind: "focus", pane: "detail" };
 
   const target = pointedRow(state, report);
   if (target === null) return { kind: "noop" };
@@ -159,24 +178,31 @@ export function mouseAction(
     : { kind: "point-entry", index: target.index };
 }
 
-function pointerPane(
-  state: TuiState,
-  report: MouseReport,
-): "sections" | "entries" | null {
+function pointerPane(state: TuiState, report: MouseReport): PointerPane | null {
   if (state.screen !== "browse") return null;
-  const { paneRows, leftWidth, usable } = layout(state.model);
+  const { paneRows, detailRows, leftWidth, usable } = layout(state.model);
   const paneRow = report.row - PANE_TOP - 1;
-  if (paneRow < 0 || paneRow >= paneRows) return null;
-  if (report.column >= 1 && report.column <= leftWidth) return "sections";
-  if (report.column > leftWidth + 1 && report.column <= usable)
-    return "entries";
+  if (paneRow >= 0 && paneRow < paneRows) {
+    if (report.column >= 1 && report.column <= leftWidth) return "sections";
+    if (report.column > leftWidth + 1 && report.column <= usable)
+      return "entries";
+    return null;
+  }
+  const detailRow = report.row - (PANE_TOP + paneRows + 2);
+  if (
+    detailRow >= 0 &&
+    detailRow < detailRows &&
+    report.column >= 1 &&
+    report.column <= usable
+  )
+    return "detail";
   return null;
 }
 
 function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
   if (state.screen !== "browse") return null;
   const pane = pointerPane(state, report);
-  if (pane === null) return null;
+  if (pane === null || pane === "detail") return null;
   const paneRow = report.row - PANE_TOP - 1;
   const view = panes(state.model);
   if (pane === "sections") {
@@ -228,6 +254,11 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "focus", pane: "entries" };
     if (value === "out" || value === "h")
       return { kind: "focus", pane: "sections" };
+    if (value === "detail") return { kind: "focus", pane: "detail" };
+    if (value === "pageup") return { kind: "page", delta: -1 };
+    if (value === "pagedown") return { kind: "page", delta: 1 };
+    if (value === "grow-detail") return { kind: "resize-detail", delta: 1 };
+    if (value === "shrink-detail") return { kind: "resize-detail", delta: -1 };
     if (value === "take" || value === "space") return { kind: "toggle-select" };
     if (value === "none") return { kind: "clear-selection" };
     if (value === "select" || value === "open" || value === "review")
@@ -262,7 +293,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
 }
 
 class RawTuiTerminal implements TuiTerminal {
-  private dragging = false;
+  private dragging: DragTarget = false;
   private ignoringKeys = false;
   private lastClick = { target: "", at: 0 };
   private readonly mouse: MouseReport[] = [];
@@ -340,7 +371,13 @@ class RawTuiTerminal implements TuiTerminal {
           dragging: this.dragging,
           doubleClick,
         });
-        this.dragging = report.pressed && action.kind === "set-left-percent";
+        this.dragging = !report.pressed
+          ? false
+          : action.kind === "set-left-percent"
+            ? "panes"
+            : action.kind === "set-detail-rows"
+              ? "detail"
+              : false;
         if (action.kind !== "noop") return action;
         continue;
       }
@@ -430,8 +467,16 @@ function keyAction(state: TuiState, text: string, key: Key): TuiAction {
       return { kind: "resize-detail", delta: -1 };
     if (key.name === "down" && key.shift)
       return { kind: "resize-detail", delta: 1 };
-    if (key.name === "right" || key.name === "tab")
-      return { kind: "focus", pane: "entries" };
+    if (key.name === "tab") {
+      const panes = ["sections", "entries", "detail"] as const;
+      const index = panes.indexOf(state.model.focus);
+      const delta = key.shift ? -1 : 1;
+      return {
+        kind: "focus",
+        pane: panes[(index + delta + panes.length) % panes.length]!,
+      };
+    }
+    if (key.name === "right") return { kind: "focus", pane: "entries" };
     if (key.name === "left") return { kind: "focus", pane: "sections" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
     if (key.name === "pagedown") return { kind: "page", delta: 1 };

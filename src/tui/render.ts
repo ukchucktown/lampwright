@@ -10,8 +10,8 @@ import type {
   VerificationCheck,
 } from "../model/types.js";
 import {
-  currentEntry,
   currentSection,
+  detailPane,
   layout,
   panes,
   sharedExposure,
@@ -73,7 +73,6 @@ export function renderBrowseLines(
   if (rows < 7 || columns < 4) return renderCompactBrowse(rows, usable, style);
   const view = panes(model);
   const section = currentSection(model);
-  const entry = currentEntry(model);
   const out: string[] = [];
 
   const selected = model.selected.size;
@@ -86,22 +85,39 @@ export function renderBrowseLines(
   );
   out.push(
     fitStyledSegments(
-      [
-        { text: "↑↓/wheel", paint: style.title },
-        { text: " move · ", paint: style.muted },
-        { text: "click", paint: style.title },
-        { text: " focus · ", paint: style.muted },
-        { text: "space/dbl-click", paint: style.title },
-        { text: " select · ", paint: style.muted },
-        { text: "←→", paint: style.title },
-        { text: " pane · ", paint: style.muted },
-        { text: "enter", paint: style.title },
-        { text: " review · ", paint: style.muted },
-        { text: "esc", paint: style.title },
-        { text: " back · ", paint: style.muted },
-        { text: "q", paint: style.title },
-        { text: " quit", paint: style.muted },
-      ],
+      model.focus === "detail"
+        ? [
+            { text: "↑↓/wheel", paint: style.title },
+            { text: " scroll · ", paint: style.muted },
+            { text: "PgUp/PgDn", paint: style.title },
+            { text: " page · ", paint: style.muted },
+            { text: "click", paint: style.title },
+            { text: " focus · ", paint: style.muted },
+            { text: "tab/⇧tab", paint: style.title },
+            { text: " pane · ", paint: style.muted },
+            { text: "⇧↑↓", paint: style.title },
+            { text: " resize · ", paint: style.muted },
+            { text: "esc", paint: style.title },
+            { text: " back · ", paint: style.muted },
+            { text: "q", paint: style.title },
+            { text: " quit", paint: style.muted },
+          ]
+        : [
+            { text: "↑↓/wheel", paint: style.title },
+            { text: " move · ", paint: style.muted },
+            { text: "click", paint: style.title },
+            { text: " focus · ", paint: style.muted },
+            { text: "space/dbl-click", paint: style.title },
+            { text: " select · ", paint: style.muted },
+            { text: "tab", paint: style.title },
+            { text: " pane · ", paint: style.muted },
+            { text: "enter", paint: style.title },
+            { text: " review · ", paint: style.muted },
+            { text: "esc", paint: style.title },
+            { text: " back · ", paint: style.muted },
+            { text: "q", paint: style.title },
+            { text: " quit", paint: style.muted },
+          ],
       usable,
       style.muted,
     ),
@@ -131,37 +147,34 @@ export function renderBrowseLines(
   }
 
   out.push(
-    style.border(
+    (model.focus === "detail" ? style.title : style.border)(
       `${"─".repeat(leftWidth)}┴${"─".repeat(usable - leftWidth - 1)}`,
     ),
   );
 
-  const detail: { text: string; style: (value: string) => string }[] = [];
-  if (entry !== null) {
-    detail.push({
-      text: `${entry.name}   ${entry.owner}${entry.note === null ? "" : ` · ${entry.note}`}`,
-      style: style.active,
-    });
-    for (const line of wrap(entry.description ?? "", usable - 2))
-      detail.push({ text: `  ${line}`, style: plain });
-    if (entry.paths.length > 0) detail.push({ text: "", style: plain });
-    for (const path of entry.paths)
-      detail.push({ text: `  ${path}`, style: style.path });
-  }
+  const detail = detailPane(model);
   for (let row = 0; row < detailRows; row += 1) {
-    const line = detail[row];
+    const line = detail.items[row];
+    const paint =
+      line?.kind === "heading"
+        ? style.active
+        : line?.kind === "path"
+          ? style.path
+          : plain;
     out.push(
-      line === undefined
-        ? " ".repeat(usable)
-        : line.style(fit(line.text, usable)),
+      `${line === undefined ? " ".repeat(Math.max(0, usable - 1)) : paint(fit(line.text, Math.max(0, usable - 1)))}${scrollMark(detail, row, style)}`,
     );
   }
 
+  const detailStatus =
+    detail.total > detail.height
+      ? `detail=${String(detail.offset + 1)}-${String(Math.min(detail.total, detail.offset + detail.height))}/${String(detail.total)} `
+      : "";
   out.push(
     model.notice === null
       ? style.muted(
           fit(
-            `focus=${model.focus} section=${String(model.sectionIndex + 1)}/${String(view.sections.total)} entry=${String(view.entries.total === 0 ? 0 : model.entryIndex + 1)}/${String(view.entries.total)}`,
+            `focus=${model.focus} ${detailStatus}section=${String(model.sectionIndex + 1)}/${String(view.sections.total)} entry=${String(view.entries.total === 0 ? 0 : model.entryIndex + 1)}/${String(view.entries.total)}`,
             usable,
           ),
         )
@@ -283,23 +296,6 @@ function scrollMark(
   return row >= start && row < start + span
     ? style.active("█")
     : style.border("│");
-}
-
-/** Greedy word wrap, so a long description reads instead of being cut off. */
-function wrap(text: string, width: number): readonly string[] {
-  if (text === "" || width <= 0) return [];
-  const lines: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/u).filter(Boolean)) {
-    if (line === "") line = word;
-    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
-    else {
-      lines.push(line);
-      line = word;
-    }
-  }
-  if (line !== "") lines.push(line);
-  return lines;
 }
 
 const escape = String.fromCharCode(27);

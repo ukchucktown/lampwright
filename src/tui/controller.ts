@@ -85,10 +85,13 @@ export class TuiController {
         };
         return;
       }
-      if (model.focus === "entries") {
+      if (model.focus === "entries" || model.focus === "detail") {
         this.stateValue = {
           ...state,
-          model: reduceBrowse(model, { kind: "focus", pane: "sections" }),
+          model: reduceBrowse(model, {
+            kind: "focus",
+            pane: model.focus === "detail" ? "entries" : "sections",
+          }),
         };
         return;
       }
@@ -313,6 +316,8 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
       return { kind: "set-left-percent", percent: action.percent };
     case "resize-detail":
       return { kind: "resize-detail", delta: action.delta };
+    case "set-detail-rows":
+      return { kind: "set-detail-rows", rows: action.rows };
     case "viewport":
       return { kind: "viewport", viewport: action.viewport };
     case "toggle-select":

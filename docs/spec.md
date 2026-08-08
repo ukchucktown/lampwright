@@ -138,6 +138,9 @@ The UI must:
 - Show the focused Logical Skill's physical paths in the detail pane. Selecting
   an individual Installation in the terminal is deferred; the CLI accepts that
   target directly.
+- Keep long descriptions and physical paths reachable through an independently
+  scrollable and resizable detail pane. Detail navigation never changes the
+  selected Removal Targets.
 - Permit terminal selection of a Logical Skill, declared Installation Group, or
   Plugin boundary. The CLI permits an individual Installation target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.

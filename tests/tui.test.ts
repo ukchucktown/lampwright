@@ -261,6 +261,26 @@ describe("terminal theme", () => {
     expect(visibleWidth(narrow)).toBe(61);
   });
 
+  it("shows detail scrolling and resizing controls when detail has focus", () => {
+    const inventory = groupedInventory();
+    const model = reduceBrowse(
+      createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+      { kind: "focus", pane: "detail" },
+    );
+    const line = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    )[1]!;
+
+    expect(line).toContain("↑↓/wheel scroll");
+    expect(line).toContain("PgUp/PgDn page");
+    expect(line).toContain("⇧↑↓ resize");
+    expect(line).toContain("tab/⇧tab pane");
+  });
+
   it("keeps line-oriented terminal output monochrome", () => {
     const inventory = groupedInventory();
     const state: TuiState = {
@@ -352,6 +372,101 @@ describe("terminal section projection", () => {
 describe("terminal pane navigation", () => {
   const viewport = { rows: 24, columns: 100 };
 
+  it("scrolls a focused detail independently and resets for another entry", () => {
+    const sections = createTuiSections(groupedInventory());
+    const detailed = sections.map((section, sectionIndex) =>
+      sectionIndex === 0
+        ? {
+            ...section,
+            entries: section.entries.map((entry) => ({
+              ...entry,
+              description: "wrapped detail ".repeat(80),
+            })),
+          }
+        : section,
+    );
+    const initial = createBrowseModel(detailed, { rows: 18, columns: 50 });
+    const focused = reduceBrowse(initial, { kind: "focus", pane: "detail" });
+    const scrolled = reduceBrowse(focused, { kind: "move", delta: 2 });
+
+    expect(scrolled.focus).toBe("detail");
+    expect(scrolled.detailScroll).toBe(2);
+    expect(scrolled.sectionIndex).toBe(initial.sectionIndex);
+    expect(scrolled.entryIndex).toBe(initial.entryIndex);
+
+    const changed = reduceBrowse(scrolled, { kind: "point-entry", index: 1 });
+    expect(changed.detailScroll).toBe(0);
+
+    const keyboardChanged = reduceBrowse(
+      reduceBrowse(scrolled, { kind: "focus", pane: "entries" }),
+      { kind: "move", delta: 1 },
+    );
+    expect(keyboardChanged.detailScroll).toBe(0);
+  });
+
+  it("renders the visible detail range and leaves later content reachable", () => {
+    const inventory = groupedInventory();
+    const sections = createTuiSections(inventory);
+    const detailed = sections.map((section, sectionIndex) =>
+      sectionIndex === 0
+        ? {
+            ...section,
+            entries: section.entries.map((entry, entryIndex) =>
+              entryIndex === 0
+                ? {
+                    ...entry,
+                    description: null,
+                    paths: Array.from(
+                      { length: 10 },
+                      (_, index) => `/detail/path-${String(index + 1)}`,
+                    ),
+                  }
+                : entry,
+            ),
+          }
+        : section,
+    );
+    let model = createBrowseModel(detailed, viewport);
+    model = reduceBrowse(model, { kind: "focus", pane: "detail" });
+    model = reduceBrowse(model, { kind: "move", delta: 2 });
+
+    const rendered = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    ).join("\n");
+
+    expect(rendered).toContain("/detail/path-1");
+    expect(rendered).toContain("/detail/path-6");
+    expect(rendered).not.toContain("/detail/path-7");
+    expect(rendered).toContain("detail=3-8/12");
+    expect(rendered).toContain("█");
+  });
+
+  it("keeps the detail pane read-only and backs out to entries", async () => {
+    const inventory = groupedInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      viewport,
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "focus", pane: "detail" });
+    await controller.dispatch({ kind: "toggle-select" });
+
+    if (controller.state.screen !== "browse")
+      throw new Error("expected browse");
+    expect(controller.state.model.selected.size).toBe(0);
+    expect(controller.state.model.focus).toBe("detail");
+
+    await controller.dispatch({ kind: "cancel" });
+    if (controller.state.screen !== "browse")
+      throw new Error("expected browse");
+    expect(controller.state.model.focus).toBe("entries");
+  });
+
   it("renders a frame of constant height that never reaches the last column", () => {
     const inventory = groupedInventory();
     const base = createBrowseModel(createTuiSections(inventory), viewport);
@@ -393,6 +508,24 @@ describe("terminal pane navigation", () => {
       expect(plain[4 + grid.paneRows]?.[grid.leftWidth]).toBe("┴");
       for (const line of lines) expect(visibleWidth(line)).toBe(grid.usable);
     }
+  });
+
+  it("clamps the requested detail height to the current terminal", () => {
+    const sections = createTuiSections(groupedInventory());
+    const initial = createBrowseModel(sections, viewport);
+    const enlarged = reduceBrowse(initial, {
+      kind: "resize-detail",
+      delta: 100,
+    });
+
+    expect(enlarged.detailRows).toBe(14);
+    expect(layout(enlarged).detailRows).toBe(14);
+
+    const taller = reduceBrowse(enlarged, {
+      kind: "viewport",
+      viewport: { rows: 50, columns: 100 },
+    });
+    expect(layout(taller).detailRows).toBe(14);
   });
 
   it("never draws beyond a terminal that is temporarily too small", () => {
@@ -757,6 +890,18 @@ describe("terminal removal interactions", () => {
       kind: "focus",
       pane: "entries",
     });
+    expect(parseLineTuiAction(browse, "detail")).toEqual({
+      kind: "focus",
+      pane: "detail",
+    });
+    expect(parseLineTuiAction(browse, "pageup")).toEqual({
+      kind: "page",
+      delta: -1,
+    });
+    expect(parseLineTuiAction(browse, "grow-detail")).toEqual({
+      kind: "resize-detail",
+      delta: 1,
+    });
     expect(
       parseLineTuiAction(
         {
@@ -792,7 +937,7 @@ describe("terminal pointer input", () => {
       columns: 100,
     }),
   };
-  const idle = { dragging: false, doubleClick: false };
+  const idle = { dragging: false, doubleClick: false } as const;
   const press = (column: number, row: number, button = 0) => ({
     button,
     column,
@@ -852,7 +997,7 @@ describe("terminal pointer input", () => {
     expect(mouseAction(browse, press(leftWidth + 1, 6, 65), idle)).toEqual({
       kind: "noop",
     });
-    expect(mouseAction(browse, press(4, 20, 65), idle)).toEqual({
+    expect(mouseAction(browse, press(4, 23, 65), idle)).toEqual({
       kind: "noop",
     });
     const moved = reduceBrowse(browse.model, {
@@ -865,6 +1010,32 @@ describe("terminal pointer input", () => {
     expect(moved.sectionIndex).toBe(browse.model.sectionIndex);
   });
 
+  it("focuses and scrolls detail content and drags its horizontal divider", () => {
+    const grid = layout(browse.model);
+    const dividerRow = 5 + grid.paneRows;
+    const detailRow = dividerRow + 1;
+
+    expect(mouseAction(browse, press(4, detailRow), idle)).toEqual({
+      kind: "focus",
+      pane: "detail",
+    });
+    expect(mouseAction(browse, press(4, detailRow, 65), idle)).toEqual({
+      kind: "move-pane",
+      pane: "detail",
+      delta: 1,
+    });
+    expect(mouseAction(browse, press(4, dividerRow), idle)).toEqual({
+      kind: "set-detail-rows",
+      rows: grid.detailRows,
+    });
+    expect(
+      mouseAction(browse, press(4, dividerRow - 2, 32), {
+        dragging: "detail",
+        doubleClick: false,
+      }),
+    ).toEqual({ kind: "set-detail-rows", rows: grid.detailRows + 2 });
+  });
+
   it("resizes from the divider and ignores motion that is not a drag", () => {
     const { leftWidth } = layout(browse.model);
     expect(mouseAction(browse, press(leftWidth + 1, 8), idle).kind).toBe(
@@ -875,7 +1046,7 @@ describe("terminal pointer input", () => {
     });
     expect(
       mouseAction(browse, press(30, 8, 32), {
-        dragging: true,
+        dragging: "panes",
         doubleClick: false,
       }).kind,
     ).toBe("set-left-percent");
@@ -991,6 +1162,50 @@ describe("raw terminal pointer input", () => {
 
     input.write("q");
     await expect(terminal.readAction(state)).resolves.toEqual({ kind: "quit" });
+    terminal.close();
+  });
+
+  it("cycles keyboard focus through the detail pane", async () => {
+    const inventory = groupedInventory();
+    const initial: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    input.write("\t");
+    await expect(terminal.readAction(initial)).resolves.toEqual({
+      kind: "focus",
+      pane: "entries",
+    });
+    const entries: TuiState = {
+      ...initial,
+      model: reduceBrowse(initial.model, { kind: "focus", pane: "entries" }),
+    };
+
+    input.write("\t");
+    await expect(terminal.readAction(entries)).resolves.toEqual({
+      kind: "focus",
+      pane: "detail",
+    });
+    const detail: TuiState = {
+      ...initial,
+      model: reduceBrowse(initial.model, { kind: "focus", pane: "detail" }),
+    };
+
+    input.write(`${ESC}[Z`);
+    await expect(terminal.readAction(detail)).resolves.toEqual({
+      kind: "focus",
+      pane: "entries",
+    });
     terminal.close();
   });
 

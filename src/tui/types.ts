@@ -73,11 +73,12 @@ export interface TuiSection {
 export interface TuiBrowseModel {
   readonly sections: readonly TuiSection[];
   readonly viewport: TuiViewport;
-  readonly focus: "sections" | "entries";
+  readonly focus: "sections" | "entries" | "detail";
   readonly sectionIndex: number;
   readonly entryIndex: number;
   readonly sectionScroll: number;
   readonly entryScroll: number;
+  readonly detailScroll: number;
   readonly leftPercent: number;
   readonly detailRows: number;
   readonly query: string;
@@ -180,11 +181,14 @@ export type TuiAction =
   | { readonly kind: "move"; readonly delta: number }
   | {
       readonly kind: "move-pane";
-      readonly pane: "sections" | "entries";
+      readonly pane: "sections" | "entries" | "detail";
       readonly delta: number;
     }
   | { readonly kind: "page"; readonly delta: number }
-  | { readonly kind: "focus"; readonly pane: "sections" | "entries" }
+  | {
+      readonly kind: "focus";
+      readonly pane: "sections" | "entries" | "detail";
+    }
   | { readonly kind: "point-section"; readonly index: number }
   | { readonly kind: "point-entry"; readonly index: number }
   | {
@@ -195,6 +199,7 @@ export type TuiAction =
   | { readonly kind: "resize-panes"; readonly delta: number }
   | { readonly kind: "set-left-percent"; readonly percent: number }
   | { readonly kind: "resize-detail"; readonly delta: number }
+  | { readonly kind: "set-detail-rows"; readonly rows: number }
   | { readonly kind: "viewport"; readonly viewport: TuiViewport }
   | { readonly kind: "toggle-select" }
   | { readonly kind: "clear-selection" }

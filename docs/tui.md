@@ -8,11 +8,16 @@ requirements to Execution.
 
 ## Layout
 
-Two panes over a detail area, in a fixed grid. The left pane lists sections,
-the right lists the entries of the focused section, and the area below shows
-the focused entry in full. Panes never grow to fit their contents: each owns a
-viewport that scrolls under a stationary frame, so nothing below shifts as you
-move.
+Two navigation panes sit over a read-only detail pane in a fixed grid. The left
+pane lists sections, the right lists the entries of the focused section, and
+the pane below shows the focused entry. Each pane owns an independent viewport
+that scrolls under a stationary frame, so long detail content remains reachable
+without moving the rest of the interface.
+
+When detail content overflows, its right edge draws a scrollbar and the status
+row reports the visible range. Moving to another entry resets detail scrolling
+to the top. Resizing the window or detail pane clamps the range to the content,
+so an old offset can never leave the pane blank.
 
 Two rules keep the frame still, and both are covered by tests. Every line is
 clipped one column short of the terminal width, because writing into the last
@@ -32,10 +37,11 @@ The application never paints a base background, so terminal transparency and
 blur remain owned by the terminal.
 
 The inventory hint row presents each navigation or action key in bold cyan and
-its description in muted text. Movement (`↑↓` or wheel), pointer focus (single
-click), selection (space or double-click), pane changes, review, back, and quit
-are separate key/action pairs. Separators remain muted, so the row does not
-conflate navigation with selection. Segment styling is applied after clipping,
+its description in muted text. Its contents follow the active pane: navigation
+panes show movement and selection, while detail shows scrolling, paging, and
+resizing. Pointer focus, pane changes, review, back, and quit remain separate
+key/action pairs. Separators remain muted, so the row does not conflate
+navigation with selection. Segment styling is applied after clipping,
 preserving emphasis and reset boundaries on narrow terminals.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
@@ -45,14 +51,19 @@ when color is unavailable. Raw terminals select true color, 256-color ANSI, or
 non-TTY line output use the monochrome theme. No shell command, terminal probe,
 or platform-specific executable is required.
 
-Up and down move the highlighted row in the focused pane; left and right change
-pane. Page Up and Page Down step exactly one viewport; shift with left or right
-moves the pane split and with up or down changes the detail height. A single
-click focuses and highlights its exact row. A double-click focuses that same row
-and toggles its selection, matching space on the keyboard. The wheel focuses
-the pane under the pointer and moves its highlighted row rather than scrolling
-an unfocused viewport. Wheel input over chrome, a divider, or the detail area is
-ignored. Pointer motion alone does nothing. Dragging the divider resizes it.
+Up and down move the highlighted row in a navigation pane or scroll a focused
+detail pane. Page Up and Page Down step exactly one active viewport. Tab and
+Shift-Tab cycle through sections, entries, and detail; left and right remain
+shortcuts between the side-by-side navigation panes. Shift with left or right
+moves the vertical pane split, and Shift with up or down changes the detail
+height.
+
+A single click focuses a navigation row or the detail pane. A double-click on a
+navigation row focuses it and toggles its selection, matching space on the
+keyboard; detail remains read-only. The wheel focuses the pane under the
+pointer and moves or scrolls only that pane. Dragging the vertical divider
+resizes the navigation panes, while dragging the horizontal divider resizes
+detail. Pointer motion alone does nothing unless a divider drag is active.
 Terminal resize events update the viewport immediately, including while a plan
 or report is open. Every terminal or pane-size change redraws the complete
 frame from the new dimensions. If the window becomes too small for the grid,
@@ -140,9 +151,10 @@ verification outcomes, rescan failure, and any still-available fallbacks.
 
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, enter a query directly or use `search <query>`,
-`up`, `down`, `expand`, `select`, `clear`, and `quit`. Plan screens accept
-`yes`, `no`, `force`, and `quit`; report screens accept `up`, `down`,
-`fallback`, and `quit`. End-of-input cancels safely.
+`up`, `down`, `in`, `out`, `detail`, `pageup`, `pagedown`, `grow-detail`,
+`shrink-detail`, `take`, `clear`, and `quit`. Plan screens accept `yes`, `no`,
+`force`, and `quit`; report screens accept `up`, `down`, `fallback`, and
+`quit`. End-of-input cancels safely.
 
 Read-only scanning, searching, expanding, cancellation, and plan review create
 no files or persistent state. The terminal UI does not scan paths, infer
