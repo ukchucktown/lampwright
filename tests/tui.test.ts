@@ -886,9 +886,13 @@ describe("global name-regex search", () => {
     const rendered = renderTui(state, plainTuiTheme);
     const lines = rendered.split("\n");
     expect(lines[0]).toContain("skill-cleaner search");
-    expect(lines[1]!.trimEnd()).toBe("> alpha");
-    expect(lines[2]).toContain("↑↓ move");
-    expect(lines[3]).toContain("matching 1 Skill");
+    expect(lines[1]).toContain("↑↓ move");
+    expect(lines[1]).toContain("ctrl-a");
+    expect(lines[2]!.trimEnd()).toMatch(/^┌─+┐$/u);
+    expect(lines[3]!.trimEnd()).toMatch(/^│> alpha +│$/u);
+    expect(lines[4]!.trimEnd()).toMatch(/^├─+┬─+┤$/u);
+    expect(lines.at(-2)!.trimEnd()).toMatch(/^└─+┴─+┘$/u);
+    expect(lines.at(-1)).toContain("matching 1 Skill");
     expect(rendered).toContain("Category: acme/toolkit");
     expect(rendered).toContain("Path:");
     const click = { button: 0, row: 6, pressed: true };
@@ -924,6 +928,7 @@ describe("global name-regex search", () => {
     expect(raw("escape")).toEqual({ kind: "cancel" });
     expect(raw("a", "", true)).toEqual({ kind: "stage-all-search" });
     expect(raw("u", "", true)).toEqual({ kind: "clear-selection" });
+    expect(raw("c", "", true)).toEqual({ kind: "quit" });
     expect(parseLineTuiAction(state, "all")).toEqual({
       kind: "stage-all-search",
     });
@@ -962,8 +967,43 @@ describe("global name-regex search", () => {
     const plain = renderTui(blank, plainTuiTheme);
     expect(colored.replace(ansi, "")).toBe(plain);
     expect(colored).toContain(styleTui(theme, "muted", "type a name regex"));
-    expect(plain.split("\n")[1]!.trimEnd()).toBe("> type a name regex");
-    expect(plain.split("\n")[3]).toContain("matching 1 Skill");
+    expect(plain.split("\n")[3]!.trimEnd()).toMatch(
+      /^│> type a name regex +│$/u,
+    );
+    expect(plain.split("\n").at(-1)).toContain("matching 1 Skill");
+    const grid = searchLayout(blank.model.viewport);
+    for (const frame of [plain, colored].map((rendered) =>
+      rendered.replace(ansi, "").split("\n").slice(2, -1),
+    )) {
+      expect(frame.every((line) => [...line].length === grid.usable)).toBe(
+        true,
+      );
+      for (const row of frame.slice(3, -1)) {
+        expect(row[grid.leftWidth + 1]).toBe("│");
+        expect(row.at(-1)).toBe("│");
+      }
+    }
+    const wide = renderTui(
+      {
+        ...blank,
+        model: { ...blank.model, viewport: { rows: 12, columns: 100 } },
+      },
+      plainTuiTheme,
+    );
+    expect(wide.split("\n")[1]).toContain("ctrl-a");
+    expect(wide.split("\n")[1]).toContain("ctrl-u");
+    expect(wide.split("\n")[1]).toContain("ctrl-c");
+    const invalid = renderTui(
+      {
+        ...blank,
+        model: reduceSearch(blank.model, browse.model.sections, {
+          kind: "type",
+          value: "[",
+        }),
+      },
+      plainTuiTheme,
+    );
+    expect(invalid.split("\n").at(-1)).toContain("Invalid regular expression");
 
     const pluralInventory = groupedInventory(["alpha", "beta"]);
     const pluralBrowse = createBrowseModel(createTuiSections(pluralInventory), {
@@ -978,7 +1018,9 @@ describe("global name-regex search", () => {
           model: createSearchModel(pluralBrowse),
         },
         plainTuiTheme,
-      ).split("\n")[3],
+      )
+        .split("\n")
+        .at(-1),
     ).toContain("matching 2 Skills");
 
     const typed: TuiState = {
@@ -1001,7 +1043,7 @@ describe("global name-regex search", () => {
       },
       plainTuiTheme,
     ).split("\n");
-    expect(narrow[1]!.trimEnd()).toBe("> alpha");
+    expect(narrow[3]!.trimEnd()).toMatch(/^│> alpha +│$/u);
     expect(narrow.every((line) => line.length <= 19)).toBe(true);
   });
 
@@ -1022,14 +1064,14 @@ describe("global name-regex search", () => {
     expect(searchLayout(state.model.viewport)).toMatchObject({
       compact: false,
       resultStartRow: 6,
-      resultRows: 9,
+      resultRows: 8,
     });
-    expect(searchRows(state.model.viewport)).toBe(9);
+    expect(searchRows(state.model.viewport)).toBe(8);
     const resized: TuiState = {
       ...state,
       model: reduceSearch(state.model, browse.model.sections, {
         kind: "viewport",
-        viewport: { rows: 10, columns: 48 },
+        viewport: { rows: 11, columns: 48 },
       }),
     };
     expect(searchLayout(resized.model.viewport)).toMatchObject({

@@ -18,10 +18,11 @@ Global search temporarily replaces that grid with a flat matching-Skill list
 on the left and a read-only preview on the right. The preview carries the
 focused Skill's description, category, Owner, agent exposure, and paths. Closing
 search restores the exact inventory position and pane focus that opened it.
-Directly beneath the search title, a dedicated `> ` prompt shows the active
-regular expression in the theme's active-input color. Navigation hints and
-match status follow the prompt, so typed input cannot be mistaken for status or
-help text.
+The application title and action hints remain in the header. Directly beneath
+them, a bordered `> ` prompt row begins the search surface above the
+results/preview split and shows the active regular expression in the theme's
+active-input color. Match status follows the panes, so typed input cannot be
+mistaken for header status or help text.
 
 When detail content overflows, its right edge draws a scrollbar and the status
 row reports the visible range. Moving to another entry resets detail scrolling
