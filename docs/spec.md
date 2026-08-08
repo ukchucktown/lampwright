@@ -264,6 +264,11 @@ name-based control is blocked when it could affect another Skill Identity with
 the same harness-visible name. Plugin-owned and System Skills are never
 individually disabled by the cleaner.
 
+Inventory represents runtime status separately from native-control support and
+materializes the exact, fail-closed configuration evidence defined in
+[Native Skill availability controls](./availability-controls.md). Planning and
+Execution must not infer additional harness configuration conventions.
+
 When any exposure lacks a safe native control, Planning may choose one
 Suspended Disable for the complete Installation only when it is independently
 filesystem-owned, writable, outside Git protection, and outside Plugin or

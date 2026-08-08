@@ -37,6 +37,11 @@ The module owns:
 
 The returned Inventory is immutable and disposable. Tests exercise the module through `scan` against temporary filesystem fixtures and fake command execution.
 
+The normalized Harness Exposure and native evidence contract is defined in
+[Native Skill availability controls](./availability-controls.md). Status and
+control support are independent; malformed or ambiguous configuration is
+unresolved rather than silently treated as an enabled default.
+
 ## Planning module
 
 Interface:

@@ -43,6 +43,10 @@ import type {
 import { parseInventory } from "../model/validation.js";
 import { hashSkillDirectory } from "./content-hash.js";
 import { applyAdapterManifests } from "./adapter-runtime.js";
+import {
+  createAvailabilityDocumentReader,
+  materializeHarnessExposures,
+} from "./availability.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
   assignGroupsToLogicalSkills,
@@ -282,7 +286,42 @@ async function scanWithOptions(
     adapterRoots.probes,
     adapterRoots.rootIds,
   );
-  const installations = adapterEvidence.installations;
+  const readAvailabilityDocument = createAvailabilityDocumentReader(
+    options.commandRunner,
+  );
+  const installations = await Promise.all(
+    adapterEvidence.installations.map(async (rawInstallation) => {
+      const installation = {
+        ...rawInstallation,
+        exposedTo: [...new Set(rawInstallation.exposedTo)].sort(compareText),
+      };
+      const harnessExposures = await materializeHarnessExposures(
+        installation,
+        options.environment,
+        options.commandRunner,
+        readAvailabilityDocument,
+      );
+      const geminiExposure = harnessExposures.find(
+        (exposure) => exposure.harnessId === "gemini-cli",
+      );
+      return {
+        ...installation,
+        harnessExposures,
+        metadata:
+          geminiExposure === undefined || installation.agentId !== "gemini-cli"
+            ? installation.metadata
+            : {
+                ...installation.metadata,
+                "gemini-cli": {
+                  ...(installation.metadata["gemini-cli"] as object),
+                  // Namespaced convenience metadata mirrors, but never replaces,
+                  // the canonical Harness Exposure authority.
+                  disabled: geminiExposure.status === "disabled",
+                },
+              },
+      };
+    }),
+  );
   const groups = buildInstallationGroups(installations);
   const logicalSkills = assignGroupsToLogicalSkills(
     groupInstallations(installations),
@@ -1142,6 +1181,7 @@ function createInstallation(
       root.kind === "plugin" ? pluginBoundaryIdForRoot(root) : null,
     agentId: root.agentId,
     exposedTo: [root.agentId],
+    harnessExposures: [],
     scope: scopeForInstallationRoot(root),
     location,
     contentHash,

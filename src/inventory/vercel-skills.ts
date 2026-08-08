@@ -335,6 +335,7 @@ async function materializeLockEntry(input: {
     agentId: managerId,
     // Every agent whose native location the Manager itself placed.
     exposedTo: agents,
+    harnessExposures: [],
     scope: input.lock.scope,
     location: primaryLocation,
     contentHash,

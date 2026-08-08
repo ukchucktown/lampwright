@@ -471,6 +471,7 @@ async function materializeSkill(input: {
     pluginBoundaryId: input.entry.boundaryId,
     agentId,
     exposedTo: [agentId],
+    harnessExposures: [],
     scope: input.scope,
     location,
     contentHash,

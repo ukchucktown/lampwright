@@ -74,6 +74,70 @@ export interface SkillDescriptor {
   readonly description: string | null;
 }
 
+export type HarnessExposureStatus = "enabled" | "disabled" | "unresolved";
+export type NativeControlFormat = "toml" | "json" | "jsonc";
+export type NativeControlDocumentScope =
+  "user" | "shared-workspace" | "local-workspace" | "workspace";
+export type NativeControlLayerApplicability = true | false | "unresolved";
+export type NativeControlSelectorValue =
+  | {
+      readonly kind: "codex-skills-config";
+      readonly matchingRules: readonly {
+        readonly index: number;
+        readonly selector: {
+          readonly kind: "path" | "name";
+          readonly value: string;
+        };
+        readonly enabled: boolean;
+      }[];
+    }
+  | {
+      readonly kind: "claude-skill-overrides";
+      readonly mode: "on" | "name-only" | "user-invocable-only" | "off" | null;
+    }
+  | { readonly kind: "gemini-disabled-skills"; readonly disabled: boolean };
+export interface NativeControlDocumentEvidence {
+  readonly path: string;
+  readonly format: NativeControlFormat;
+  readonly scope: Scope;
+  /** The harness-specific configuration layer, distinct from Skill Scope. */
+  readonly documentScope: NativeControlDocumentScope;
+  /** Whether this layer contributes to the effective runtime setting. */
+  readonly applies: NativeControlLayerApplicability;
+  readonly exists: boolean;
+  readonly canonicalPath: string | null;
+  readonly preimageHash: Sha256Digest | null;
+  readonly protection: ProtectionStatus;
+  /** Closed, mechanism-specific evidence; null only when the document is unsafe. */
+  readonly selectorValue: NativeControlSelectorValue | null;
+}
+export type HarnessExposureControl =
+  | { readonly kind: "unsupported"; readonly reason: string }
+  | {
+      readonly kind: "native";
+      readonly mechanism:
+        | "codex-skills-config"
+        | "claude-skill-overrides"
+        | "gemini-disabled-skills";
+      readonly availability: Readonly<
+        Record<"disable" | "enable", NativeControlOperationAvailability>
+      >;
+      readonly selector: {
+        readonly kind: "path" | "name";
+        readonly value: string;
+      };
+      readonly layers: readonly NativeControlDocumentEvidence[];
+      readonly writableLayerPaths: readonly string[];
+    };
+export type NativeControlOperationAvailability =
+  | { readonly kind: "available" }
+  | { readonly kind: "unavailable"; readonly reason: string };
+export interface HarnessExposure {
+  readonly harnessId: string;
+  readonly status: HarnessExposureStatus;
+  readonly control: HarnessExposureControl;
+}
+
 export type Scope =
   | { readonly kind: "user" }
   | { readonly kind: "workspace"; readonly workspacePath: string }
@@ -241,6 +305,8 @@ export interface Installation {
    * least one agent.
    */
   readonly exposedTo: readonly string[];
+  /** Per-harness availability is independent from lifecycle ownership. */
+  readonly harnessExposures: readonly HarnessExposure[];
   readonly scope: Scope;
   readonly location: ArtifactLocation;
   readonly contentHash: string | null;

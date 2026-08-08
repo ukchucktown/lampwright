@@ -3,7 +3,6 @@ import {
   access,
   lstat,
   readdir,
-  readFile,
   readlink,
   realpath,
   stat,
@@ -25,7 +24,6 @@ import {
   geminiSkillUninstallArguments,
 } from "../adapter/built-ins.js";
 import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
-import { parse, type ParseError } from "jsonc-parser";
 import type {
   ArtifactLocation,
   Installation,
@@ -89,10 +87,6 @@ export async function scanGeminiCli(
     .run({ executable: GEMINI_CLI_EXECUTABLE, arguments: ["--version"] })
     .catch(() => ({ exitCode: null, stdout: "" }));
   const managerAvailable = probe.exitCode === 0;
-  const disabled = await disabledNames([
-    join(home, "settings.json"),
-    join(environment.workspaceDirectory, ".gemini", "settings.json"),
-  ]);
   const userGeminiSkills = join(home, "skills");
   const workspaceGeminiSkills = join(
     environment.workspaceDirectory,
@@ -328,6 +322,7 @@ export async function scanGeminiCli(
         pluginBoundaryId: extension?.boundaryId ?? null,
         agentId,
         exposedTo: [agentId],
+        harnessExposures: [],
         scope: entry.scope,
         location,
         contentHash,
@@ -371,7 +366,6 @@ export async function scanGeminiCli(
           ...metadata.tags,
           "gemini",
           effective ? "effective" : "overridden",
-          disabled.has(name.toLowerCase()) ? "disabled" : "enabled",
         ],
         metadata: {
           ...metadata.metadata,
@@ -379,7 +373,6 @@ export async function scanGeminiCli(
             source: entry.source,
             precedence: entry.rank,
             effective,
-            disabled: disabled.has(name.toLowerCase()),
             searchRoots: skillRoots.map((root) => root.path),
             link:
               location.artifactType.kind === "symbolic-link" ||
@@ -814,35 +807,6 @@ function canonicalWithin(root: string, candidate: string): boolean {
     value === "" ||
     (!value.startsWith(`..${sep}`) && value !== ".." && !isAbsolute(value))
   );
-}
-async function disabledNames(paths: readonly string[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  for (const path of paths) {
-    const value = await readSettingsJsonc(path);
-    const list =
-      value &&
-      typeof value === "object" &&
-      Array.isArray(
-        (value as { skills?: { disabled?: unknown } }).skills?.disabled,
-      )
-        ? (value as { skills: { disabled: unknown[] } }).skills.disabled
-        : [];
-    for (const item of list)
-      if (typeof item === "string") out.add(item.toLowerCase());
-  }
-  return out;
-}
-async function readSettingsJsonc(path: string): Promise<unknown | null> {
-  try {
-    const errors: ParseError[] = [];
-    const value = parse(await readFile(path, "utf8"), errors, {
-      allowTrailingComma: true,
-      disallowComments: false,
-    });
-    return errors.length === 0 ? value : null;
-  } catch {
-    return null;
-  }
 }
 async function readJson(path: string): Promise<unknown | null> {
   const initial = await lstat(path).catch(() => null);

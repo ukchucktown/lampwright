@@ -42,7 +42,7 @@ export type ExecutionReportFixtureOverrides = FixtureOverrides<ExecutionReport>;
 export function buildInstallation(
   overrides: InstallationFixtureOverrides = {},
 ): Installation {
-  return parseInstallation({
+  const value = {
     id: "installation-1",
     classification: "active-installation",
     status: "active",
@@ -66,6 +66,13 @@ export function buildInstallation(
     pluginBoundaryId: null,
     agentId: "fixture-agent",
     exposedTo: ["fixture-agent"],
+    harnessExposures: [
+      {
+        harnessId: "fixture-agent",
+        status: "enabled",
+        control: { kind: "unsupported", reason: "fixture harness" },
+      },
+    ],
     scope: { kind: "user" },
     location: {
       path: "/fixtures/skills/example-skill",
@@ -91,7 +98,17 @@ export function buildInstallation(
     tags: [],
     metadata: {},
     ...overrides,
-  });
+  };
+  if (overrides.harnessExposures === undefined) {
+    value.harnessExposures = [...new Set(value.exposedTo)]
+      .sort()
+      .map((harnessId) => ({
+        harnessId,
+        status: "enabled" as const,
+        control: { kind: "unsupported" as const, reason: "fixture harness" },
+      }));
+  }
+  return parseInstallation(value);
 }
 
 export function buildSystemSkillFinding(

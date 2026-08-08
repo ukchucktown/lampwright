@@ -394,33 +394,361 @@ const removalEvidenceSchema = z.strictObject({
   recordCleanups: z.array(declarativeRecordCleanupSchema),
 });
 
-export const installationSchema = z.strictObject({
-  id: modelId,
-  classification: z.enum([
-    "active-installation",
-    "managed-plugin-resource",
-    "standalone-project-skill",
-  ]),
-  status: z.enum(["active", "broken", "unresolved"]),
-  skill: skillDescriptorSchema,
-  identity: skillIdentitySchema,
-  source: sourceReferenceSchema.nullable(),
-  plugin: pluginReferenceSchema.nullable(),
-  manager: managerReferenceSchema.nullable(),
-  adapterId: nonEmptyString.nullable(),
-  pluginBoundaryId: nonEmptyString.nullable(),
-  agentId: nonEmptyString,
-  exposedTo: z.array(nonEmptyString),
-  scope: scopeSchema,
-  location: artifactLocationSchema,
-  contentHash: nonEmptyString.nullable(),
-  modifiedAt: timestamp.nullable(),
-  ownership: ownershipSchema,
-  protection: protectionStatusSchema,
-  removal: removalEvidenceSchema,
-  tags: z.array(nonEmptyString),
-  metadata: jsonObject,
-});
+const harnessExposureSchema = z
+  .strictObject({
+    harnessId: nonEmptyString,
+    status: z.enum(["enabled", "disabled", "unresolved"]),
+    control: z.discriminatedUnion("kind", [
+      z.strictObject({
+        kind: z.literal("unsupported"),
+        reason: nonEmptyString,
+      }),
+      z.strictObject({
+        kind: z.literal("native"),
+        mechanism: z.enum([
+          "codex-skills-config",
+          "claude-skill-overrides",
+          "gemini-disabled-skills",
+        ]),
+        availability: z.strictObject({
+          disable: z.discriminatedUnion("kind", [
+            z.strictObject({ kind: z.literal("available") }),
+            z.strictObject({
+              kind: z.literal("unavailable"),
+              reason: nonEmptyString,
+            }),
+          ]),
+          enable: z.discriminatedUnion("kind", [
+            z.strictObject({ kind: z.literal("available") }),
+            z.strictObject({
+              kind: z.literal("unavailable"),
+              reason: nonEmptyString,
+            }),
+          ]),
+        }),
+        selector: z.strictObject({
+          kind: z.enum(["path", "name"]),
+          value: nonEmptyString,
+        }),
+        layers: z.array(
+          z.strictObject({
+            path: nonEmptyString,
+            format: z.enum(["toml", "json", "jsonc"]),
+            scope: scopeSchema,
+            documentScope: z.enum([
+              "user",
+              "shared-workspace",
+              "local-workspace",
+              "workspace",
+            ]),
+            applies: z.union([
+              z.literal(true),
+              z.literal(false),
+              z.literal("unresolved"),
+            ]),
+            exists: z.boolean(),
+            canonicalPath: nonEmptyString.nullable(),
+            preimageHash: sha256DigestSchema.nullable(),
+            protection: protectionStatusSchema,
+            selectorValue: z
+              .discriminatedUnion("kind", [
+                z.strictObject({
+                  kind: z.literal("codex-skills-config"),
+                  matchingRules: z.array(
+                    z.strictObject({
+                      index: z.number().int().min(0),
+                      selector: z.strictObject({
+                        kind: z.enum(["path", "name"]),
+                        value: nonEmptyString,
+                      }),
+                      enabled: z.boolean(),
+                    }),
+                  ),
+                }),
+                z.strictObject({
+                  kind: z.literal("claude-skill-overrides"),
+                  mode: z
+                    .enum(["on", "name-only", "user-invocable-only", "off"])
+                    .nullable(),
+                }),
+                z.strictObject({
+                  kind: z.literal("gemini-disabled-skills"),
+                  disabled: z.boolean(),
+                }),
+              ])
+              .nullable(),
+          }),
+        ),
+        writableLayerPaths: z.array(nonEmptyString),
+      }),
+    ]),
+  })
+  .superRefine((exposure, context) => {
+    if (exposure.control.kind !== "native") return;
+    const { control } = exposure;
+    const fail = (message: string) =>
+      context.addIssue({ code: "custom", message });
+    const values = control.layers.map((layer) => layer.selectorValue);
+    const allSafe = values.every((value) => value !== null);
+    const expectedHarness =
+      control.mechanism === "codex-skills-config"
+        ? "codex"
+        : control.mechanism === "claude-skill-overrides"
+          ? "claude-code"
+          : "gemini-cli";
+    if (exposure.harnessId !== expectedHarness)
+      fail("native mechanism must match its harness identifier");
+    if (
+      new Set(control.layers.map((layer) => layer.path)).size !==
+      control.layers.length
+    )
+      fail("native configuration layer paths must be unique");
+    if (
+      new Set(control.writableLayerPaths).size !==
+      control.writableLayerPaths.length
+    )
+      fail("native writable layer paths must be unique");
+    for (const layer of control.layers) {
+      if (
+        !layer.exists &&
+        (layer.canonicalPath !== null || layer.preimageHash !== null)
+      )
+        fail(
+          "missing configuration layers cannot have canonical paths or preimage hashes",
+        );
+      if (
+        layer.exists &&
+        layer.selectorValue !== null &&
+        (layer.canonicalPath === null || layer.preimageHash === null)
+      )
+        fail(
+          "safe existing configuration layers require canonical paths and preimage hashes",
+        );
+    }
+    if (control.mechanism === "codex-skills-config") {
+      if (
+        control.selector.kind !== "path" ||
+        control.layers.length !== 1 ||
+        control.layers[0]?.format !== "toml" ||
+        control.layers[0]?.documentScope !== "user" ||
+        control.layers[0]?.applies !== true ||
+        values.some(
+          (value) => value !== null && value.kind !== "codex-skills-config",
+        )
+      )
+        fail(
+          "Codex native evidence must contain one applied user TOML path layer",
+        );
+    }
+    if (control.mechanism === "claude-skill-overrides") {
+      if (
+        control.selector.kind !== "name" ||
+        control.layers.length !== 3 ||
+        control.layers
+          .map((layer) => layer.format)
+          .some((format) => format !== "json") ||
+        control.layers.map((layer) => layer.documentScope).join(",") !==
+          "user,shared-workspace,local-workspace" ||
+        control.layers.some((layer) => layer.applies !== true) ||
+        values.some(
+          (value) => value !== null && value.kind !== "claude-skill-overrides",
+        )
+      )
+        fail(
+          "Claude native evidence must contain ordered applied user, shared, and local JSON layers",
+        );
+    }
+    if (control.mechanism === "gemini-disabled-skills") {
+      if (
+        control.selector.kind !== "name" ||
+        control.layers.length !== 2 ||
+        control.layers
+          .map((layer) => layer.format)
+          .some((format) => format !== "jsonc") ||
+        control.layers.map((layer) => layer.documentScope).join(",") !==
+          "user,workspace" ||
+        control.layers[0]?.applies !== true ||
+        values.some(
+          (value) => value !== null && value.kind !== "gemini-disabled-skills",
+        )
+      )
+        fail(
+          "Gemini native evidence must contain user and workspace JSONC layers",
+        );
+    }
+    if (
+      control.writableLayerPaths.some(
+        (path) => !control.layers.some((layer) => layer.path === path),
+      )
+    )
+      fail("writable native layer paths must name a materialized layer");
+    const expectedWritableIndexes =
+      control.mechanism === "codex-skills-config"
+        ? [0]
+        : control.mechanism === "claude-skill-overrides"
+          ? [0, 2]
+          : [0, 1];
+    const expectedWritablePaths = expectedWritableIndexes
+      .map((index) => control.layers[index]?.path)
+      .filter((path): path is string => path !== undefined);
+    if (
+      control.writableLayerPaths.length !== expectedWritablePaths.length ||
+      control.writableLayerPaths.some(
+        (path, index) => path !== expectedWritablePaths[index],
+      )
+    )
+      fail(
+        "native writable layer paths must match the documented candidate layers",
+      );
+    if (!allSafe && exposure.status !== "unresolved")
+      fail("unsafe native evidence requires unresolved status");
+    if (
+      exposure.status === "unresolved" &&
+      (control.availability.disable.kind !== "unavailable" ||
+        control.availability.enable.kind !== "unavailable")
+    )
+      fail(
+        "unresolved native evidence requires both operations to be unavailable",
+      );
+    if (allSafe && exposure.status === "unresolved") {
+      const unresolvedWorkspace = control.layers.some(
+        (layer) =>
+          layer.applies === "unresolved" &&
+          layer.selectorValue?.kind === "gemini-disabled-skills" &&
+          layer.selectorValue.disabled,
+      );
+      if (!unresolvedWorkspace)
+        fail("resolved native evidence cannot report unresolved status");
+    }
+    if (allSafe && exposure.status !== "unresolved") {
+      const disabled =
+        control.mechanism === "codex-skills-config"
+          ? control.layers[0]!.selectorValue!.kind === "codex-skills-config" &&
+            control.layers[0]!.selectorValue!.matchingRules.at(-1)?.enabled ===
+              false
+          : control.mechanism === "claude-skill-overrides"
+            ? control.layers
+                .map((layer) =>
+                  layer.selectorValue?.kind === "claude-skill-overrides"
+                    ? layer.selectorValue.mode
+                    : null,
+                )
+                .filter((mode) => mode !== null)
+                .at(-1) === "off"
+            : control.layers.some(
+                (layer) =>
+                  layer.applies === true &&
+                  layer.selectorValue?.kind === "gemini-disabled-skills" &&
+                  layer.selectorValue.disabled,
+              );
+      if ((disabled ? "disabled" : "enabled") !== exposure.status)
+        fail("native exposure status must match its effective layer evidence");
+    }
+    if (allSafe && exposure.status !== "unresolved") {
+      const writable = (layer: (typeof control.layers)[number] | undefined) =>
+        layer !== undefined &&
+        layer.protection.git.kind !== "protected" &&
+        layer.protection.filesystem.kind === "writable";
+      const disableAvailable =
+        control.availability.disable.kind === "available";
+      const enableAvailable = control.availability.enable.kind === "available";
+      if (control.mechanism === "codex-skills-config") {
+        if (
+          disableAvailable !== writable(control.layers[0]) ||
+          enableAvailable !== writable(control.layers[0])
+        )
+          fail(
+            "Codex operation availability must match its writable user document",
+          );
+      }
+      if (control.mechanism === "claude-skill-overrides") {
+        const shared = control.layers[1]!.selectorValue;
+        const local = control.layers[2]!.selectorValue;
+        const canUseUser =
+          writable(control.layers[0]) &&
+          shared?.kind === "claude-skill-overrides" &&
+          shared.mode === null &&
+          local?.kind === "claude-skill-overrides" &&
+          local.mode === null;
+        const canOverride = writable(control.layers[2]) || canUseUser;
+        if (disableAvailable !== canOverride || enableAvailable !== canOverride)
+          fail(
+            "Claude operation availability must use a writable effective override layer",
+          );
+      }
+      if (control.mechanism === "gemini-disabled-skills") {
+        const canDisable = control.layers.some(
+          (layer) => layer.applies === true && writable(layer),
+        );
+        const enableTargets = control.layers.filter(
+          (layer) =>
+            layer.applies === true &&
+            layer.selectorValue?.kind === "gemini-disabled-skills" &&
+            layer.selectorValue.disabled,
+        );
+        if (
+          disableAvailable !== canDisable ||
+          enableAvailable !== enableTargets.every(writable)
+        )
+          fail(
+            "Gemini operation availability must cover its applied disabled-name memberships",
+          );
+      }
+    }
+  });
+
+export const installationSchema = z
+  .strictObject({
+    id: modelId,
+    classification: z.enum([
+      "active-installation",
+      "managed-plugin-resource",
+      "standalone-project-skill",
+    ]),
+    status: z.enum(["active", "broken", "unresolved"]),
+    skill: skillDescriptorSchema,
+    identity: skillIdentitySchema,
+    source: sourceReferenceSchema.nullable(),
+    plugin: pluginReferenceSchema.nullable(),
+    manager: managerReferenceSchema.nullable(),
+    adapterId: nonEmptyString.nullable(),
+    pluginBoundaryId: nonEmptyString.nullable(),
+    agentId: nonEmptyString,
+    exposedTo: z.array(nonEmptyString),
+    harnessExposures: z.array(harnessExposureSchema),
+    scope: scopeSchema,
+    location: artifactLocationSchema,
+    contentHash: nonEmptyString.nullable(),
+    modifiedAt: timestamp.nullable(),
+    ownership: ownershipSchema,
+    protection: protectionStatusSchema,
+    removal: removalEvidenceSchema,
+    tags: z.array(nonEmptyString),
+    metadata: jsonObject,
+  })
+  .superRefine((installation, context) => {
+    const expected = [...new Set(installation.exposedTo)].sort();
+    if (expected.length !== installation.exposedTo.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["exposedTo"],
+        message: "must be unique",
+      });
+    }
+    const actual = installation.harnessExposures.map(
+      (exposure) => exposure.harnessId,
+    );
+    if (
+      actual.length !== expected.length ||
+      actual.some((id, index) => id !== expected[index])
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["harnessExposures"],
+        message: "must be unique, sorted, and match exposedTo",
+      });
+    }
+  });
 
 const ordinaryFindingSchema = z.strictObject({
   id: modelId,

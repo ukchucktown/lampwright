@@ -1230,11 +1230,12 @@ describe("Gemini CLI adapter", () => {
           true,
       ),
     ).toHaveLength(1);
+    // Gemini's disabled-name membership is deliberately case-sensitive.
     expect(
       gemini.every(
         (item) =>
           (item.metadata["gemini-cli"] as { disabled?: boolean }).disabled ===
-          true,
+          false,
       ),
     ).toBe(true);
     expect(
