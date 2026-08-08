@@ -3,6 +3,7 @@ import type { Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
+import { searchLayout } from "./search.js";
 import { renderTui } from "./render.js";
 import {
   createNightfallTheme,
@@ -134,6 +135,28 @@ export function mouseAction(
     return (report.button & 64) !== 0
       ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
       : { kind: "noop" };
+  if (state.screen === "search") {
+    const grid = searchLayout(state.model.viewport);
+    if (grid.rows < 7 || grid.columns < 20) return { kind: "noop" };
+    if ((report.button & 64) !== 0)
+      return report.column >= 1 && report.column <= grid.leftWidth
+        ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
+        : { kind: "noop" };
+    const row = report.row - PANE_TOP - 1;
+    if (
+      !report.pressed ||
+      report.column < 1 ||
+      report.column > grid.leftWidth ||
+      row < 0 ||
+      row >= grid.resultRows
+    )
+      return { kind: "noop" };
+    const index = state.model.scroll + row;
+    if (index >= state.model.results.length) return { kind: "noop" };
+    if (context.doubleClick)
+      return { kind: "point-toggle", pane: "entries", index };
+    return { kind: "point-search-result", index };
+  }
   if (state.screen !== "browse") return { kind: "noop" };
   const grid = layout(state.model);
   const { leftWidth, columns, paneRows, rows } = grid;
@@ -276,6 +299,16 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "append-query", value: value.slice(1) };
     return { kind: "append-query", value };
   }
+  if (state.screen === "search") {
+    if (value === "up" || value === "k") return { kind: "move", delta: -1 };
+    if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "take" || value === "space") return { kind: "toggle-select" };
+    if (value === "all") return { kind: "stage-all-search" };
+    if (value === "clear") return { kind: "clear-selection" };
+    if (value === "done") return { kind: "apply-search" };
+    if (value === "cancel") return { kind: "cancel" };
+    return { kind: "append-query", value };
+  }
   if (state.screen === "plan") {
     if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -394,7 +427,7 @@ class RawTuiTerminal implements TuiTerminal {
       const next = this.pending.shift();
       if (next !== undefined) {
         this.dragging = false;
-        return keyAction(state, next.text, next.key);
+        return parseRawTuiAction(state, next.text, next.key);
       }
 
       await new Promise<void>((resolve) => {
@@ -411,9 +444,30 @@ class RawTuiTerminal implements TuiTerminal {
       (report.button & 3) !== 0
     )
       return false;
+    if (
+      state.screen === "search" &&
+      (searchLayout(state.model.viewport).rows < 7 ||
+        searchLayout(state.model.viewport).columns < 20)
+    )
+      return false;
     const pointed = pointedRow(state, report);
-    if (pointed === null) return false;
-    const target = `${pointed.pane}:${String(pointed.index)}`;
+    const searchRow =
+      state.screen === "search" &&
+      report.column >= 1 &&
+      report.column <= searchLayout(state.model.viewport).leftWidth
+        ? report.row - PANE_TOP - 1 + state.model.scroll
+        : -1;
+    if (
+      pointed === null &&
+      (searchRow < 0 ||
+        state.screen !== "search" ||
+        searchRow >= state.model.results.length)
+    )
+      return false;
+    const target =
+      pointed === null
+        ? `search:${String(searchRow)}`
+        : `${pointed.pane}:${String(pointed.index)}`;
     const now = Date.now();
     const repeat =
       target === this.lastClick.target &&
@@ -459,9 +513,15 @@ class LineTuiTerminal implements TuiTerminal {
   }
 }
 
-function keyAction(state: TuiState, text: string, key: Key): TuiAction {
+/** Maps a decoded raw-terminal key into a semantic action. */
+export function parseRawTuiAction(
+  state: TuiState,
+  text: string,
+  key: Key,
+): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
-  if (!key.ctrl && !key.meta && text === "q") return { kind: "quit" };
+  if (state.screen !== "search" && !key.ctrl && !key.meta && text === "q")
+    return { kind: "quit" };
   if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
   if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
   if (state.screen === "browse") {
@@ -493,6 +553,21 @@ function keyAction(state: TuiState, text: string, key: Key): TuiAction {
     if (key.ctrl && key.name === "a") return { kind: "clear-selection" };
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
+    if (text === "/") return { kind: "open-search" };
+    if (!key.ctrl && !key.meta && text.length > 0)
+      return { kind: "append-query", value: text };
+    return { kind: "noop" };
+  }
+  if (state.screen === "search") {
+    if (key.name === "escape") return { kind: "cancel" };
+    if (key.name === "return" || key.name === "enter")
+      return { kind: "apply-search" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
+    if (key.name === "space" || text === " ") return { kind: "toggle-select" };
+    if (key.ctrl && key.name === "a") return { kind: "stage-all-search" };
+    if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
+    if (key.name === "backspace") return { kind: "delete-query" };
     if (!key.ctrl && !key.meta && text.length > 0)
       return { kind: "append-query", value: text };
     return { kind: "noop" };

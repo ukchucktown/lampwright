@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createBrowseModel,
+  createSearchModel,
   createNightfallTheme,
   createNodeTuiTerminal,
   createTuiSections,
@@ -18,6 +19,7 @@ import {
   plainTuiTheme,
   plan,
   reduceBrowse,
+  reduceSearch,
   renderBrowseLines,
   renderTui,
   runTui,
@@ -34,7 +36,7 @@ import {
   type TuiState,
   type TuiTerminal,
 } from "../src/index.js";
-import { MouseReportFramer } from "../src/tui/terminal.js";
+import { MouseReportFramer, parseRawTuiAction } from "../src/tui/terminal.js";
 import {
   buildExecutionReport,
   buildInstallation,
@@ -704,6 +706,233 @@ describe("terminal pane navigation", () => {
     expect(resizedReport.browse.model.viewport).toEqual({
       rows: 20,
       columns: 84,
+    });
+  });
+});
+
+describe("global name-regex search", () => {
+  it("matches names only, shows all Skills when blank, and refuses empty-matching expressions", () => {
+    const inventory = groupedInventory(["camel", "alpha"]);
+    const browse = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 100,
+    });
+    const typed = reduceSearch(createSearchModel(browse), browse.sections, {
+      kind: "type",
+      value: "^c.*",
+    });
+    expect(typed.results.map((result) => result.entry.name)).toEqual(["camel"]);
+    const blank = reduceSearch(typed, browse.sections, { kind: "clear" });
+    expect(blank.matchError).toBeNull();
+    expect(blank.results.map((result) => result.entry.name)).toEqual([
+      "alpha",
+      "camel",
+    ]);
+    const refused = reduceSearch(blank, browse.sections, {
+      kind: "type",
+      value: "^c*",
+    });
+    expect(refused.matchError).toContain("matches empty text");
+    expect(refused.results).toEqual([]);
+    const malformed = reduceSearch(blank, browse.sections, {
+      kind: "type",
+      value: "[",
+    });
+    expect(malformed.matchError).toContain("Invalid regular expression");
+  });
+
+  it("adds staged matches only on done and leaves System Skills visible but protected", async () => {
+    const regular = groupedInventory(["alpha"]);
+    const system = buildSystemSkillFinding({
+      skill: { name: "system-alpha", description: "runtime" },
+    });
+    const inventory = buildInventory({
+      installations: regular.installations,
+      logicalSkills: regular.logicalSkills,
+      groups: regular.groups,
+      otherFindings: [system],
+    });
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 24, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "open-search", value: "alpha" });
+    const opened = controller.state;
+    if (opened.screen !== "search") throw new Error("expected search");
+    expect(opened.model.results).toHaveLength(2);
+    await controller.dispatch({ kind: "stage-all-search" });
+    const staged = controller.state;
+    if (staged.screen !== "search") throw new Error("expected search");
+    expect(staged.model.staged.size).toBe(1);
+    await controller.dispatch({ kind: "cancel" });
+    const cancelled = controller.state;
+    if (cancelled.screen !== "browse") throw new Error("expected browse");
+    expect(cancelled.model.selected.size).toBe(0);
+    await controller.dispatch({ kind: "open-search", value: "alpha" });
+    await controller.dispatch({ kind: "stage-all-search" });
+    await controller.dispatch({ kind: "apply-search" });
+    const applied = controller.state;
+    if (applied.screen !== "browse") throw new Error("expected browse");
+    expect(applied.model.selected.size).toBe(1);
+  });
+
+  it("keeps existing selection out of staging and toggles the visible new matches", () => {
+    const inventory = groupedInventory(["alpha", "beta"]);
+    const browse = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 100,
+    });
+    const selected = { ...browse, selected: new Set(["skill:logical-0"]) };
+    const search = reduceSearch(
+      createSearchModel(selected),
+      selected.sections,
+      {
+        kind: "stage-all",
+      },
+    );
+    expect(
+      search.results.find((result) => result.entry.name === "alpha")?.existing,
+    ).toBe(true);
+    expect(search.staged).toEqual(new Set(["skill:logical-1"]));
+    expect(
+      reduceSearch(search, selected.sections, { kind: "stage-all" }).staged,
+    ).toEqual(new Set());
+  });
+
+  it("returns from blank search without moving the prior browse position", async () => {
+    const regular = groupedInventory(["alpha"]);
+    const inventory = buildInventory({
+      installations: regular.installations,
+      logicalSkills: regular.logicalSkills,
+      groups: regular.groups,
+      otherFindings: [buildSystemSkillFinding()],
+    });
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 24, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "move", delta: 1 });
+    const before = controller.state;
+    if (before.screen !== "browse") throw new Error("expected browse");
+    await controller.dispatch({ kind: "open-search" });
+    await controller.dispatch({ kind: "apply-search" });
+    const returned = controller.state;
+    if (returned.screen !== "browse") throw new Error("expected browse");
+    expect(returned.model).toEqual(before.model);
+  });
+
+  it("resizes both saved browse and search viewports, then restores the resized browse", async () => {
+    const inventory = groupedInventory(["alpha", "beta"]);
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      { rows: 24, columns: 100 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "open-search", value: "alpha" });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 12, columns: 40 },
+    });
+    const resized = controller.state;
+    if (resized.screen !== "search") throw new Error("expected search");
+    expect(resized.model.viewport).toEqual({ rows: 12, columns: 40 });
+    expect(resized.browse.model.viewport).toEqual({ rows: 12, columns: 40 });
+    const frame = renderTui(resized, plainTuiTheme).split("\n");
+    expect(frame.length).toBeLessThanOrEqual(11);
+    expect(frame.every((line) => line.length <= 39)).toBe(true);
+    await controller.dispatch({ kind: "apply-search" });
+    const returned = controller.state;
+    if (returned.screen !== "browse") throw new Error("expected browse");
+    expect(returned.model.viewport).toEqual({ rows: 12, columns: 40 });
+  });
+
+  it("renders a wrapped preview and ignores preview-pane clicks", () => {
+    const inventory = groupedInventory(["alpha"]);
+    const browse = {
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 16,
+        columns: 48,
+      }),
+    };
+    const state: TuiState = {
+      screen: "search",
+      browse,
+      model: reduceSearch(
+        createSearchModel(browse.model),
+        browse.model.sections,
+        {
+          kind: "type",
+          value: "alpha",
+        },
+      ),
+    };
+    const rendered = renderTui(state, plainTuiTheme);
+    expect(rendered).toContain("Category: acme/toolkit");
+    expect(rendered).toContain("Path:");
+    const click = { button: 0, row: 5, pressed: true };
+    const pointer = { dragging: false as const, doubleClick: false };
+    expect(mouseAction(state, { ...click, column: 40 }, pointer)).toEqual({
+      kind: "noop",
+    });
+    expect(mouseAction(state, { ...click, column: 4 }, pointer)).toEqual({
+      kind: "point-search-result",
+      index: 0,
+    });
+    const raw = (name: string, text = "", ctrl = false) =>
+      parseRawTuiAction(state, text, {
+        name,
+        ctrl,
+        meta: false,
+        shift: false,
+        sequence: text,
+      } as Parameters<typeof parseRawTuiAction>[2]);
+    const browseState: TuiState = { screen: "browse", ...browse };
+    const browseRaw = (name: string, text = "") =>
+      parseRawTuiAction(browseState, text, {
+        name,
+        ctrl: false,
+        meta: false,
+        shift: false,
+        sequence: text,
+      } as Parameters<typeof parseRawTuiAction>[2]);
+    expect(browseRaw("/", "/")).toEqual({ kind: "open-search" });
+    expect(browseRaw("x", "x")).toEqual({ kind: "append-query", value: "x" });
+    expect(raw("q", "q")).toEqual({ kind: "append-query", value: "q" });
+    expect(raw("return")).toEqual({ kind: "apply-search" });
+    expect(raw("escape")).toEqual({ kind: "cancel" });
+    expect(raw("a", "", true)).toEqual({ kind: "stage-all-search" });
+    expect(raw("u", "", true)).toEqual({ kind: "clear-selection" });
+    expect(parseLineTuiAction(state, "all")).toEqual({
+      kind: "stage-all-search",
+    });
+    expect(parseLineTuiAction(state, "done")).toEqual({ kind: "apply-search" });
+    expect(parseLineTuiAction(state, "cancel")).toEqual({ kind: "cancel" });
+    const compact: TuiState = {
+      ...state,
+      model: { ...state.model, viewport: { rows: 5, columns: 10 } },
+    };
+    expect(
+      renderTui(compact, plainTuiTheme)
+        .split("\n")
+        .every((line) => line.length <= 9),
+    ).toBe(true);
+    expect(mouseAction(compact, { ...click, column: 2 }, pointer)).toEqual({
+      kind: "noop",
     });
   });
 });
