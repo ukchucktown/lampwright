@@ -237,8 +237,8 @@ describe("terminal theme", () => {
     const colored = renderBrowseLines(state, theme)[1]!;
     const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
 
-    expect(colored).toContain(styleTui(theme, "active", "↑↓/click/wheel"));
-    expect(colored).toContain(styleTui(theme, "active", "space"));
+    expect(colored).toContain(styleTui(theme, "title", "↑↓/click/wheel"));
+    expect(colored).toContain(styleTui(theme, "title", "space"));
     expect(colored).toContain(styleTui(theme, "muted", " move · "));
     expect(colored.replace(ansi, "")).toBe(plain);
     expect(plain).toContain("space select (section takes all)");
@@ -255,7 +255,7 @@ describe("terminal theme", () => {
       },
       theme,
     )[1]!;
-    expect(narrow).toContain(styleTui(theme, "active", "↑↓/click/wheel"));
+    expect(narrow).toContain(styleTui(theme, "title", "↑↓/click/wheel"));
     expect(visibleWidth(narrow)).toBe(61);
   });
 
