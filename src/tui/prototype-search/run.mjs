@@ -248,11 +248,13 @@ let state = {
 };
 
 function rankedMatches() {
+  const pattern = compileQuery();
+  if (pattern.error !== null) return [];
   const ranked = skills
     .map((candidate, index) => ({
       candidate,
       index,
-      score: matchScore(candidate, state.query),
+      score: matchScore(candidate, pattern.regex),
     }))
     .filter((item) => Number.isFinite(item.score))
     .sort((left, right) => left.score - right.score || left.index - right.index)
@@ -263,58 +265,46 @@ function rankedMatches() {
 }
 
 function allRankedMatches() {
+  const pattern = compileQuery();
+  if (pattern.error !== null) return [];
   return skills
     .map((candidate, index) => ({
       candidate,
       index,
-      score: matchScore(candidate, state.query),
+      score: matchScore(candidate, pattern.regex),
     }))
     .filter((item) => Number.isFinite(item.score))
     .sort((left, right) => left.score - right.score || left.index - right.index)
     .map((item) => item.candidate);
 }
 
-function matchScore(candidate, query) {
-  const terms = query
-    .trim()
-    .toLocaleLowerCase("en-US")
-    .split(/\s+/u)
-    .filter(Boolean);
-  if (terms.length === 0) return 0;
-  const name = candidate.name.toLocaleLowerCase("en-US");
-  const category = candidate.category.toLocaleLowerCase("en-US");
-  let total = 0;
-  for (const term of terms) {
-    const direct = name.indexOf(term);
-    if (direct >= 0) {
-      total += direct * 2 + name.length - term.length;
-      continue;
-    }
-    const fuzzy = subsequenceScore(term, name);
-    if (Number.isFinite(fuzzy)) {
-      total += 25 + fuzzy;
-      continue;
-    }
-    const categoryIndex = category.indexOf(term);
-    if (categoryIndex >= 0) {
-      total += 100 + categoryIndex;
-      continue;
-    }
-    return Number.POSITIVE_INFINITY;
+function compileQuery() {
+  const query = state.query.trim();
+  if (query === "") return { regex: null, error: null };
+  try {
+    return { regex: new RegExp(query, "iu"), error: null };
+  } catch (error) {
+    return {
+      regex: null,
+      error: error instanceof Error ? error.message : "Invalid pattern",
+    };
   }
-  return total;
 }
 
-function subsequenceScore(needle, haystack) {
-  let position = -1;
-  let gaps = 0;
-  for (const character of needle) {
-    const next = haystack.indexOf(character, position + 1);
-    if (next < 0) return Number.POSITIVE_INFINITY;
-    if (position >= 0) gaps += next - position - 1;
-    position = next;
+function matchScore(candidate, regex) {
+  if (regex === null) return 0;
+  const fields = [
+    candidate.name,
+    candidate.category,
+    candidate.owner,
+    candidate.agents.join(" "),
+    candidate.path,
+  ];
+  for (const [fieldIndex, field] of fields.entries()) {
+    const match = regex.exec(field);
+    if (match !== null) return fieldIndex * 100 + (match.index ?? 0);
   }
-  return gaps + position;
+  return Number.POSITIVE_INFINITY;
 }
 
 function categories() {
@@ -417,6 +407,11 @@ function enter() {
     openSearch();
     return;
   }
+  const pattern = compileQuery();
+  if (pattern.error !== null) {
+    state.notice = `Invalid regex: ${pattern.error}`;
+    return;
+  }
   if (state.variant === 0) {
     if (state.categoryFocus === "categories") {
       state.categoryFocus = "results";
@@ -468,11 +463,7 @@ function enter() {
 
 function onKey(chunk) {
   if (chunk === "\u0003") quit();
-  if (chunk === "[") {
-    cycleVariant(-1);
-    return;
-  }
-  if (chunk === "]") {
+  if (chunk === "\t") {
     cycleVariant(1);
     return;
   }
@@ -584,11 +575,11 @@ function header(width) {
       fit(
         state.screen === "search"
           ? state.variant === 0
-            ? "type search · ←→ pane · ↑↓ move · enter add matches + return · esc clear/close · ctrl-c quit"
+            ? "type regex · ←→ pane · ↑↓ move · enter add matches + return · esc clear/close · ctrl-c quit"
             : state.variant === 1
-              ? "type search · ↑↓ move · space stage · ctrl-a all · enter add + return · esc close"
-              : "type search · ↑↓ move · enter add current + return · esc clear/close · ctrl-c quit"
-          : "/ search · [ ] compare variants · q/ctrl-c quit",
+              ? "type regex · ↑↓ move · space stage · ctrl-a all · enter add + return · esc close"
+              : "type regex · ↑↓ move · enter add current + return · esc clear/close · ctrl-c quit"
+          : "/ search · tab compare variants · q/ctrl-c quit",
         width,
       ),
     ),
@@ -808,15 +799,16 @@ function previewLines(candidate, width, height) {
 function variantSwitcher(width) {
   const variant = variants[state.variant];
   return paint.muted(
-    fit(`[ / ] switch prototype  ·  ${variant.key} — ${variant.name}`, width),
+    fit(`tab switches prototype  ·  ${variant.key} — ${variant.name}`, width),
   );
 }
 
 function stateLine(width) {
   const matchCount = rankedMatches().length;
+  const regexError = compileQuery().error;
   return paint.info(
     fit(
-      `state screen=${state.screen} variant=${variants[state.variant].key} query=${JSON.stringify(state.query)} cursor=${matchCount === 0 ? 0 : state.cursor + 1}/${matchCount} staged=${state.staged.size} selected=${state.selected.size}${state.notice === "" ? "" : ` · ${state.notice}`}`,
+      `state screen=${state.screen} variant=${variants[state.variant].key} regex=${JSON.stringify(state.query)} cursor=${matchCount === 0 ? 0 : state.cursor + 1}/${matchCount} staged=${state.staged.size} selected=${state.selected.size}${regexError === null ? "" : ` · invalid regex: ${regexError}`}${state.notice === "" ? "" : ` · ${state.notice}`}`,
       width,
     ),
   );

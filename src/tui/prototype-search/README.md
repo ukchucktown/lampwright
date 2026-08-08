@@ -29,15 +29,19 @@ Three structurally different variants are switchable live:
 npm run prototype:search
 ```
 
-The prototype opens directly in search. Type to filter; use Up/Down to move,
-Backspace to edit, Escape to clear/close, `/` to reopen search from the main
-view, and Ctrl-C to quit. In variant A, Left/Right switches category/result
-focus. In variant B, Space stages one match and Ctrl-A stages every visible
-match. Use `[` and `]` to cycle variants at any time.
+The prototype opens directly in search. Type a case-insensitive regular
+expression to filter; use Up/Down to move, Backspace to edit, Escape to
+clear/close, `/` to reopen search from the main view, and Ctrl-C to quit. For
+example, `^react`, `typescript|camunda`, and `(test|spec)$` are valid searches.
+Incomplete or invalid expressions show an error and cannot be applied. In
+variant A, Left/Right switches category/result focus. In variant B, Space stages
+one match and Ctrl-A stages every visible match. Use Tab to cycle variants at
+any time.
 
 The bottom two lines always show the variant switcher and complete relevant
-state. Search is name-first; category/source can also match, while descriptions
-are deliberately preview-only so ordinary prose does not flood the results.
+state. Regex matching is name-first, then category, Owner, agent exposure, and
+path. Descriptions are deliberately preview-only so ordinary prose does not
+flood the results.
 
 ## Validated direction
 
