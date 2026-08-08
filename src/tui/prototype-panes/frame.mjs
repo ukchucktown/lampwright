@@ -12,6 +12,7 @@ import {
   panes,
   selectionSummary,
   sharedExposure,
+  sharedPathCount,
 } from "./model.mjs";
 
 const ESC = String.fromCharCode(27);
@@ -77,12 +78,18 @@ function sectionLine(state, view, row, leftWidth) {
 function skillLine(state, view, section, row, rightWidth) {
   if (row === 0) {
     const shared = section === null ? null : sharedExposure(section);
+    const paths = section === null ? null : sharedPathCount(section);
     const detail =
       section === null
         ? ""
-        : shared === null
-          ? section.detail
-          : `${section.detail} · all exposed to ${shared}`;
+        : [
+            `${section.skills.length} skills`,
+            section.detail,
+            paths === null || paths === 1 ? null : `${paths} paths each`,
+            shared === null ? null : shared,
+          ]
+            .filter(Boolean)
+            .join(" · ");
     const label = section === null ? "" : section.label;
     return [
       { text: fit(label, Math.min(24, rightWidth)), style: B },
@@ -109,8 +116,12 @@ function skillLine(state, view, section, row, rightWidth) {
       : state.selected.includes(entry.key)
         ? "[x]"
         : "[ ]";
+  // Only worth a column when this Skill departs from the section's norm.
+  const uniform = section === null ? null : sharedPathCount(section);
   const paths =
-    entry.paths.length > 1 ? `${entry.paths.length} paths` : "       ";
+    uniform === null && entry.paths.length > 1
+      ? `${entry.paths.length} paths`
+      : "       ";
   const shared = section === null ? null : sharedExposure(section);
   const differs = shared === null || entry.exposedTo.join(" ") !== shared;
   // Descriptions live in the detail pane, where there is room to read them.
@@ -185,7 +196,7 @@ export function renderLines(state, diagnostics = {}) {
   out.push(
     D(
       fit(
-        "arrows/click move · wheel scroll · drag divider · space select (whole section from the left pane) · ^a clear · enter review · ^c quit",
+        "arrows/click/wheel move · double-click or space to select · space on a section takes all · drag divider · ^a clear · enter review · ^c quit",
         usable,
       ),
     ),

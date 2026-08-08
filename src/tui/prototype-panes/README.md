@@ -57,9 +57,13 @@ assumptions about focus, indices, and selection are visible while you drive.
 
 ## Mouse
 
-Click a section or a skill to focus it, click the `[ ]` box to toggle it, use
-the wheel over either pane to scroll it, and drag the divider to resize the
-split.
+Click a section or a skill to focus it, **double-click** to select or deselect
+it — double-clicking a section takes the whole section — use the wheel over
+either pane to move through it, and drag the divider to resize the split.
+
+The wheel moves the cursor rather than only the viewport, so the focused row
+never scrolls out from under you and the next keystroke continues from where
+you are looking.
 
 The status line ends with `mouse=…`, showing the last report received. If it
 stays `none` while you click, the terminal is not sending mouse events at all

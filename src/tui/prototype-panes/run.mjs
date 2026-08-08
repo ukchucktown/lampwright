@@ -65,20 +65,31 @@ function mouseEvents(chunk) {
 }
 
 let dragging = false;
+let lastClick = { row: -1, column: -1, at: 0 };
+const DOUBLE_CLICK_MS = 400;
 /** Shown in the status line so "mouse does nothing" can be told apart from
  *  "the terminal never sent an event". */
 let lastMouse = "none";
+
+/** A second press on the same row shortly after the first. */
+function doubleClick(row, column) {
+  const now = Date.now();
+  const repeat = row === lastClick.row && now - lastClick.at < DOUBLE_CLICK_MS;
+  lastClick = { row, column, at: repeat ? 0 : now };
+  return repeat;
+}
 
 function onMouse(button, column, row, pressed) {
   const { paneRows, leftWidth, columns } = layout(state);
   const view = panes(state);
 
+  // The wheel moves the cursor, not just the viewport: scrolling past the
+  // focused row and leaving it behind makes the next keystroke jump.
   if (button === 64 || button === 65) {
     state = reduce(state, {
-      type: "scroll",
-      pane: column <= leftWidth ? "sections" : "skills",
-      delta: button === 64 ? -3 : 3,
+      type: column <= leftWidth ? "focus-sections" : "focus-skills",
     });
+    state = reduce(state, { type: "move", delta: button === 64 ? -3 : 3 });
     return;
   }
 
@@ -108,8 +119,10 @@ function onMouse(button, column, row, pressed) {
 
   if (column <= leftWidth) {
     const index = view.sections.offset + paneRow;
-    if (index < view.sections.total)
-      state = reduce(state, { type: "point-section", index });
+    if (index >= view.sections.total) return;
+    state = reduce(state, { type: "point-section", index });
+    if (doubleClick(row, column))
+      state = reduce(state, { type: "toggle-select" });
     return;
   }
 
@@ -117,7 +130,7 @@ function onMouse(button, column, row, pressed) {
   const index = view.skills.offset + paneRow - 1;
   if (index >= view.skills.total) return;
   state = reduce(state, { type: "point-skill", index });
-  if (column >= leftWidth + 2 && column <= leftWidth + 4)
+  if (doubleClick(row, column))
     state = reduce(state, { type: "toggle-select" });
 }
 

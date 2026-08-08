@@ -60,7 +60,7 @@ function project(inventory) {
       id: `bundle:${group.id}`,
       kind: SECTION_KINDS.bundle,
       label: group.label,
-      detail: `${group.evidence.managerId} · ${group.tier} evidence · ${group.scope.kind} scope`,
+      detail: `${group.evidence.managerId} · ${group.scope.kind}`,
       selectable: true,
       skills: members.sort((a, b) => a.name.localeCompare(b.name)),
     });
@@ -75,7 +75,7 @@ function project(inventory) {
     id: "loose",
     kind: SECTION_KINDS.loose,
     label: "No shared source",
-    detail: "installed individually; no Owner records them together",
+    detail: "no Owner records these together",
     selectable: true,
     skills: loose.sort((a, b) => a.name.localeCompare(b.name)),
   });
@@ -86,7 +86,7 @@ function project(inventory) {
     id: "runtime",
     kind: SECTION_KINDS.runtime,
     label: "Runtime plugins",
-    detail: "shipped by the agent; removable, but never by a bulk sweep",
+    detail: "agent-shipped; removable, never by a bulk sweep",
     selectable: true,
     skills: runtime.sort((a, b) => a.name.localeCompare(b.name)),
   });
@@ -110,7 +110,7 @@ function project(inventory) {
     id: "system",
     kind: SECTION_KINDS.system,
     label: "System skills",
-    detail: "inseparable runtime content; outside the removal boundary",
+    detail: "inseparable runtime content; not removable",
     selectable: false,
     skills: system.sort((a, b) => a.name.localeCompare(b.name)),
   });

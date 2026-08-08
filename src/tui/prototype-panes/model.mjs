@@ -166,6 +166,21 @@ export function sharedExposure(section) {
     : null;
 }
 
+/**
+ * The path count every Skill in a section shares, or null when they differ.
+ *
+ * A bundle a Manager installed puts every member in the same set of agent
+ * locations, so the count is identical on every row and says nothing there.
+ */
+export function sharedPathCount(section) {
+  const first = section.skills[0];
+  if (first === undefined) return null;
+  const count = first.paths.length;
+  return section.skills.every((skill) => skill.paths.length === count)
+    ? count
+    : null;
+}
+
 /** The right pane spends its first row on the section header. */
 export function skillRows(state) {
   return Math.max(1, layout(state).paneRows - 1);
