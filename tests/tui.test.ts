@@ -226,6 +226,39 @@ describe("terminal theme", () => {
     expect(plain).toContain("│");
   });
 
+  it("distinguishes header keys from their action descriptions", () => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 140,
+    });
+    const state: TuiState = { screen: "browse", inventory, model };
+    const theme = createNightfallTheme("truecolor");
+    const colored = renderBrowseLines(state, theme)[1]!;
+    const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
+
+    expect(colored).toContain(styleTui(theme, "active", "↑↓/click/wheel"));
+    expect(colored).toContain(styleTui(theme, "active", "space"));
+    expect(colored).toContain(styleTui(theme, "muted", " move · "));
+    expect(colored.replace(ansi, "")).toBe(plain);
+    expect(plain).toContain("space select (section takes all)");
+    expect(plain).toContain("q quit");
+    expect(visibleWidth(colored)).toBe(139);
+
+    const narrow = renderBrowseLines(
+      {
+        ...state,
+        model: reduceBrowse(model, {
+          kind: "viewport",
+          viewport: { rows: 14, columns: 62 },
+        }),
+      },
+      theme,
+    )[1]!;
+    expect(narrow).toContain(styleTui(theme, "active", "↑↓/click/wheel"));
+    expect(visibleWidth(narrow)).toBe(61);
+  });
+
   it("keeps line-oriented terminal output monochrome", () => {
     const inventory = groupedInventory();
     const state: TuiState = {

@@ -31,6 +31,12 @@ errors. Focused rows use a light foreground over a slate selection background.
 The application never paints a base background, so terminal transparency and
 blur remain owned by the terminal.
 
+The inventory hint row presents each navigation or action key in bold yellow
+and its description in muted text. Separators remain muted, so the row reads as
+distinct key/action pairs instead of one undifferentiated instruction. Segment
+styling is applied after clipping, preserving emphasis and reset boundaries on
+narrow terminals.
+
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
 when color is unavailable. Raw terminals select true color, 256-color ANSI, or

@@ -85,11 +85,23 @@ export function renderBrowseLines(
     }`,
   );
   out.push(
-    style.muted(
-      fit(
-        "arrows/click/wheel move · space select (a section takes all) · enter review · esc back · q quit",
-        usable,
-      ),
+    fitStyledSegments(
+      [
+        { text: "↑↓/click/wheel", paint: style.active },
+        { text: " move · ", paint: style.muted },
+        { text: "←→", paint: style.active },
+        { text: " pane · ", paint: style.muted },
+        { text: "space", paint: style.active },
+        { text: " select (section takes all) · ", paint: style.muted },
+        { text: "enter", paint: style.active },
+        { text: " review · ", paint: style.muted },
+        { text: "esc", paint: style.active },
+        { text: " back · ", paint: style.muted },
+        { text: "q", paint: style.active },
+        { text: " quit", paint: style.muted },
+      ],
+      usable,
+      style.muted,
     ),
   );
   out.push(
@@ -314,6 +326,33 @@ function createPaint(theme: TuiTheme): TuiPaint {
     error: paint("error"),
     path: paint("path"),
   };
+}
+
+function fitStyledSegments(
+  segments: readonly {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  }[],
+  width: number,
+  paintEllipsis: (value: string) => string,
+): string {
+  if (width <= 0) return "";
+  const length = segments.reduce(
+    (total, segment) => total + [...segment.text].length,
+    0,
+  );
+  const truncated = length > width;
+  let remaining = truncated ? width - 1 : width;
+  let result = "";
+  for (const segment of segments) {
+    if (remaining <= 0) break;
+    const characters = [...segment.text];
+    const visible = characters.slice(0, remaining).join("");
+    result += segment.paint(visible);
+    remaining -= Math.min(characters.length, remaining);
+  }
+  if (truncated) return result + paintEllipsis("…");
+  return result + " ".repeat(remaining);
 }
 
 /** Fits to an exact visible width. Styling is applied after, never before. */
