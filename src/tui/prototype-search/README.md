@@ -30,15 +30,17 @@ npm run prototype:search
 ```
 
 The prototype opens directly in search. Type a case-insensitive regular
-expression to filter; use Up/Down to move, Backspace to edit, Escape to
-clear/close, `/` to reopen search from the main view, and Ctrl-C to quit. For
-example, `^react`, `typescript|camunda`, and `(test|spec)$` are valid searches.
+expression to filter; use Up/Down to move, Backspace to edit, Ctrl-U to clear the
+expression, Escape to cancel search and return to the main pane, `/` to reopen
+search from the main view, and Ctrl-C to quit. For example, `^react`,
+`typescript|camunda`, and `(test|spec)$` are valid searches.
 Incomplete or invalid expressions show an error and cannot be applied. Patterns
 that match empty text are also rejected because they would match every Skill;
 for example, use `^c` or `^c.*` rather than `^c*` for names starting with c. In
 variant A, Left/Right switches category/result focus. In variant B, Space stages
-one match and Ctrl-A stages every visible match. Use Tab to cycle variants at
-any time.
+one match and Ctrl-A stages every visible match. Enter adds staged Skills and
+returns to the main pane; Ctrl-U from the main pane clears its selection. Use
+Tab to cycle variants at any time.
 
 The bottom two lines always show the variant switcher and complete relevant
 state. Regex matches only the Skill name, so anchors have predictable meaning.

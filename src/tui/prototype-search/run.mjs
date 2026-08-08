@@ -487,14 +487,8 @@ function onKey(chunk) {
   }
   if (chunk === ESC) {
     if (state.screen === "main") return;
-    if (state.query !== "") {
-      state.query = "";
-      state.cursor = 0;
-      state.category = "All matches";
-      state.categoryCursor = 0;
-      state.notice = "Search cleared.";
-    } else closeSearch("Search closed without changing the main selection.");
-    settle();
+    state.staged = new Set();
+    closeSearch("Search cancelled; main selection unchanged.");
     return;
   }
   if (chunk === "\u007f" || chunk === "\b") {
@@ -509,6 +503,22 @@ function onKey(chunk) {
   }
   if (chunk === "/" && state.screen === "main") {
     openSearch();
+    return;
+  }
+  if (chunk === "\u0015") {
+    if (state.screen === "search") {
+      state.query = "";
+      state.cursor = 0;
+      state.category = "All matches";
+      state.categoryCursor = 0;
+      state.notice = "Regex cleared; staged Skills preserved.";
+      settle();
+    } else {
+      const cleared = state.selected.size;
+      state.selected = new Set();
+      state.staged = new Set();
+      state.notice = `Cleared ${cleared} selected ${cleared === 1 ? "Skill" : "Skills"}.`;
+    }
     return;
   }
   if (chunk === "q" && state.screen === "main") quit();
@@ -573,11 +583,11 @@ function header(width) {
       fit(
         state.screen === "search"
           ? state.variant === 0
-            ? "type regex · ←→ pane · ↑↓ move · enter add matches + return · esc clear/close · ctrl-c quit"
+            ? "type regex · ←→ pane · ↑↓ move · enter add + main · esc cancel · ctrl-u clear regex"
             : state.variant === 1
-              ? "type regex · ↑↓ move · space stage · ctrl-a all · enter add + return · esc close"
-              : "type regex · ↑↓ move · enter add current + return · esc clear/close · ctrl-c quit"
-          : "/ search · tab compare variants · q/ctrl-c quit",
+              ? "type regex · ↑↓ move · space stage · ctrl-a all · enter done + main · esc cancel"
+              : "type regex · ↑↓ move · enter add + main · esc cancel · ctrl-u clear regex"
+          : "/ search · ctrl-u clear selection · tab compare · q quit",
         width,
       ),
     ),
