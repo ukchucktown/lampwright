@@ -32,17 +32,22 @@ import {
 } from "./schema.js";
 import type {
   PurgeEntryResult,
+  PurgeOperationPreview,
+  PurgeOperationResult,
   QuarantineEntry,
   QuarantineEntryId,
   QuarantineFileSystem,
   QuarantineGitProtectionInspector,
   QuarantineModule,
   QuarantineModuleOptions,
+  QuarantineOperation,
   QuarantineRequest,
   QuarantineResult,
   PurgePreview,
   QuarantineSelection,
   RestorePreview,
+  RestoreOperationPreview,
+  RestoreOperationResult,
   RestoreResult,
 } from "./types.js";
 import { QuarantineError } from "./types.js";
@@ -225,6 +230,97 @@ export function createQuarantineModule(
         entries.push(loaded.entry);
       }
       return entries;
+    },
+
+    async listOperations(): Promise<readonly QuarantineOperation[]> {
+      return groupOperations(await module.list());
+    },
+
+    async previewRestoreOperation(operation): Promise<RestoreOperationPreview> {
+      const entries = await Promise.all(
+        operation.entries.map((entry) =>
+          module.previewRestore(entry, restoreResolutionFor(entry)),
+        ),
+      );
+      return {
+        schemaVersion: 1,
+        operationId: operation.id,
+        entries,
+        status: entries.every((entry) => entry.status === "would-restore")
+          ? "would-restore"
+          : "blocked",
+      };
+    },
+
+    async restoreOperation(operation): Promise<RestoreOperationResult> {
+      // A known collision or integrity failure blocks the whole operation;
+      // individual restores are deliberately not attempted in that case.
+      const preview = await module.previewRestoreOperation(operation);
+      if (preview.status === "blocked") {
+        return {
+          operationId: operation.id,
+          entries: preview.entries.map((entry) =>
+            entry.status === "blocked"
+              ? {
+                  status: "blocked" as const,
+                  entryId: entry.entryId,
+                  reason: entry.reason,
+                  path: entry.path,
+                }
+              : {
+                  status: "not-attempted" as const,
+                  entryId: entry.entryId,
+                  reason: "known-conflict" as const,
+                },
+          ),
+          status: "blocked",
+        };
+      }
+      const entries: RestoreOperationResult["entries"][number][] = [];
+      for (let index = 0; index < operation.entries.length; index += 1) {
+        const entry = operation.entries[index]!;
+        const result = await module.restore(entry, restoreResolutionFor(entry));
+        entries.push(result);
+        if (result.status === "blocked") {
+          for (const unattempted of operation.entries.slice(index + 1)) {
+            entries.push({
+              status: "not-attempted",
+              entryId: unattempted.id,
+              reason: "prior-entry-failed",
+            });
+          }
+          break;
+        }
+      }
+      return {
+        operationId: operation.id,
+        entries,
+        status: entries.every((entry) => entry.status === "restored")
+          ? "restored"
+          : entries.some((entry) => entry.status === "restored")
+            ? "partial"
+            : "blocked",
+      };
+    },
+
+    async previewPurgeOperation(operation): Promise<PurgeOperationPreview> {
+      return {
+        operationId: operation.id,
+        ...(await module.previewPurge({
+          kind: "entries",
+          entryIds: operation.entries.map((entry) => entry.id),
+        })),
+      };
+    },
+
+    async purgeOperation(operation): Promise<PurgeOperationResult> {
+      return {
+        operationId: operation.id,
+        ...(await module.purge({
+          kind: "entries",
+          entryIds: operation.entries.map((entry) => entry.id),
+        })),
+      };
     },
 
     async quarantine(requestInput): Promise<QuarantineResult> {
@@ -659,6 +755,12 @@ export function createQuarantineModule(
     },
   };
   return module;
+}
+
+function restoreResolutionFor(entry: QuarantineEntry) {
+  return entry.kind === "record-cleanup-preimage"
+    ? ({ kind: "replace-record-postimage" } as const)
+    : undefined;
 }
 
 function createLayout(stateRoot: string): StateLayout {
@@ -2227,4 +2329,46 @@ function isCode(error: unknown, code: string): boolean {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Group only by persisted approved-plan provenance. Older manifests deliberately
+ * remain one-entry operations: matching paths, names, or timestamps is unsafe.
+ */
+function groupOperations(
+  entries: readonly QuarantineEntry[],
+): readonly QuarantineOperation[] {
+  const groups = new Map<string, QuarantineEntry[]>();
+  for (const entry of entries) {
+    const operationId = entry.provenance.operation?.id ?? `legacy:${entry.id}`;
+    const group = groups.get(operationId);
+    if (group === undefined) groups.set(operationId, [entry]);
+    else group.push(entry);
+  }
+  return [...groups.entries()]
+    .map(([id, operationEntries]) => {
+      const entriesInOrder = [...operationEntries].sort((left, right) =>
+        compareText(left.id, right.id),
+      ) as [QuarantineEntry, ...QuarantineEntry[]];
+      const names = entriesInOrder[0].provenance.operation?.displayNames ?? [
+        entriesInOrder[0].originalLocation.path,
+      ];
+      return {
+        id,
+        entries: entriesInOrder,
+        displayNames: [...new Set(names)] as [string, ...string[]],
+        removedAt: entriesInOrder
+          .map((entry) =>
+            entry.kind === "displaced-artifact"
+              ? entry.removedAt
+              : entry.capturedAt,
+          )
+          .sort(compareText)[0]!,
+        // The earliest expiry makes a mixed/legacy group conservative.
+        expiresAt: entriesInOrder
+          .map((entry) => entry.expiresAt)
+          .sort(compareText)[0]!,
+      };
+    })
+    .sort((left, right) => compareText(right.removedAt, left.removedAt));
 }

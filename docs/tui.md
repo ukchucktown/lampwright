@@ -8,6 +8,22 @@ requirements to Execution.
 
 ## Layout
 
+The header provides `Inventory | Trash (N)`. `ctrl-t` and either header label
+switch views. Trash browsing and previews are read-only presentations backed by
+Quarantine; a `y`-confirmed restore or purge mutates only through Quarantine's
+safety checks. Trash groups only entries with persisted approved-plan
+provenance, while legacy entries remain individually accessible. Its sections
+are Recoverable, Past retention date, and Needs attention. Details preserve
+names, Brute-force Removal method, locations, timestamps, retention, item count,
+and restore readiness.
+
+Enter opens a non-mutating restore review and `p` opens permanent-purge review.
+Both preview every item; a known conflict blocks the whole restore and `y` is
+the mutation boundary. A race can report an honest partial result but never
+overwrites an occupied path, bypasses Git protection, or ignores integrity.
+Purge is explicitly irreversible. Managed removals do not enter Trash because
+their content is not recoverable by skill-cleaner.
+
 Two navigation panes sit over a read-only detail pane in a fixed grid. The left
 pane lists sections, the right lists the entries of the focused section, and
 the pane below shows the focused entry. Each pane owns an independent viewport

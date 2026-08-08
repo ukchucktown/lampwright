@@ -284,6 +284,24 @@ function exdevOnceFor(sourcePath: string): QuarantineFileSystem {
 }
 
 describe("Quarantine module", () => {
+  it("accepts source-group provenance from an approved group plan", async () => {
+    const environment = await createTestEnvironment();
+    const source = join(environment.workspace, "source-group-skill");
+    await writeFile(source, "skill", "utf8");
+    const { quarantine } = createHarness(
+      join(environment.state, "skill-cleaner"),
+    );
+
+    await expect(
+      quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(source, "file"),
+        provenance: provenance({
+          targets: [{ kind: "source-group", groupId: "group-1" as never }],
+        }),
+      }),
+    ).resolves.toMatchObject({ status: "quarantined" });
+  });
   it("lists and reports missing sources without creating state", async () => {
     const environment = await createTestEnvironment();
     const stateRoot = join(environment.state, "skill-cleaner");
@@ -291,6 +309,7 @@ describe("Quarantine module", () => {
     const { quarantine } = createHarness(stateRoot);
 
     await expect(quarantine.list()).resolves.toEqual([]);
+    await expect(quarantine.listOperations()).resolves.toEqual([]);
     await expect(
       quarantine.quarantine({
         kind: "displaced-artifact",
@@ -358,6 +377,299 @@ describe("Quarantine module", () => {
     await expect(quarantine.list()).resolves.toEqual([]);
   });
 
+  it("groups only persisted removal-operation provenance and previews it without mutation", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const first = join(environment.home, "first.txt");
+    const second = join(environment.home, "second.txt");
+    await writeFile(first, "first", "utf8");
+    await writeFile(second, "second", "utf8");
+    const { quarantine } = createHarness(stateRoot);
+    const grouped = provenance({
+      operation: { id: "plan-1", displayNames: ["Alpha skill"] },
+    });
+    const firstEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(first, "file"),
+        provenance: grouped,
+      }),
+    );
+    const secondEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(second, "file"),
+        provenance: { ...grouped, actionId: "action-2" as RemovalActionId },
+      }),
+    );
+    const operations = await quarantine.listOperations();
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({
+      id: "plan-1",
+      displayNames: ["Alpha skill"],
+      entries: [{ id: firstEntry.id }, { id: secondEntry.id }],
+    });
+    await expect(
+      quarantine.previewRestoreOperation(operations[0]!),
+    ).resolves.toMatchObject({
+      status: "would-restore",
+      entries: [{ entryId: firstEntry.id }, { entryId: secondEntry.id }],
+    });
+    await missing(first);
+    await missing(second);
+  });
+
+  it("restores a grouped directory, link, and guarded record preimage", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const directory = join(environment.home, "skill-directory");
+    const target = join(environment.workspace, "link-target");
+    const link = join(environment.home, "skill-link");
+    const record = join(environment.home, "manager.json");
+    const before = '{"skills":["one","two"]}\n';
+    const after = '{"skills":["two"]}\n';
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "SKILL.md"), "# grouped", "utf8");
+    await mkdir(target, { recursive: true });
+    await symlink(
+      target,
+      link,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const originalLinkTarget = await readlink(link);
+    await writeFile(record, before, "utf8");
+    const { quarantine } = createHarness(stateRoot);
+    const grouped = provenance({
+      operation: { id: "plan-restore", displayNames: ["Grouped skill"] },
+    });
+    expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(directory, "directory"),
+        provenance: grouped,
+      }),
+    );
+    expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: await linkedLocation(link),
+        provenance: { ...grouped, actionId: "link-action" as RemovalActionId },
+      }),
+    );
+    expectEntry(
+      await quarantine.quarantine({
+        kind: "record-cleanup-preimage",
+        location: ordinaryLocation(record, "file") as ArtifactLocation & {
+          artifactType: { kind: "file" };
+        },
+        provenance: {
+          ...grouped,
+          actionId: "record-action" as RemovalActionId,
+        },
+        expectedPreimageHash: digest(before),
+        expectedPostimageHash: digest(after),
+      }),
+    );
+    await writeFile(record, after, "utf8");
+    const operation = (await quarantine.listOperations())[0]!;
+    await expect(
+      quarantine.previewRestoreOperation(operation),
+    ).resolves.toMatchObject({ status: "would-restore" });
+    await expect(quarantine.restoreOperation(operation)).resolves.toMatchObject(
+      { status: "restored" },
+    );
+    await expect(readFile(join(directory, "SKILL.md"), "utf8")).resolves.toBe(
+      "# grouped",
+    );
+    await expect(readlink(link)).resolves.toBe(originalLinkTarget);
+    await expect(readFile(record, "utf8")).resolves.toBe(before);
+  });
+
+  it("reports known conflicts and unattempted entries without inventing a race", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const first = join(environment.home, "first.txt");
+    const second = join(environment.home, "second.txt");
+    await writeFile(first, "first", "utf8");
+    await writeFile(second, "second", "utf8");
+    const { quarantine } = createHarness(stateRoot);
+    const grouped = provenance({
+      operation: { id: "plan-conflict", displayNames: ["Conflict"] },
+    });
+    const firstEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(first, "file"),
+        provenance: grouped,
+      }),
+    );
+    const secondEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(second, "file"),
+        provenance: {
+          ...grouped,
+          actionId: "second-action" as RemovalActionId,
+        },
+      }),
+    );
+    await writeFile(first, "occupied", "utf8");
+    const result = await quarantine.restoreOperation(
+      (await quarantine.listOperations())[0]!,
+    );
+    expect(result).toMatchObject({
+      status: "blocked",
+      entries: [
+        {
+          entryId: firstEntry.id,
+          status: "blocked",
+          reason: "destination-occupied",
+        },
+        {
+          entryId: secondEntry.id,
+          status: "not-attempted",
+          reason: "known-conflict",
+        },
+      ],
+    });
+    await missing(second);
+  });
+
+  it("reports a partial restore when a destination appears after the group preview", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const first = join(environment.home, "first-race.txt");
+    const second = join(environment.home, "second-race.txt");
+    await writeFile(first, "first", "utf8");
+    await writeFile(second, "second", "utf8");
+    let firstEntryDirectory: string | null = null;
+    let raced = false;
+    const fileSystem: QuarantineFileSystem = {
+      ...nodeQuarantineFileSystem,
+      async rmdir(path) {
+        await nodeQuarantineFileSystem.rmdir(path);
+        if (!raced && path === firstEntryDirectory) {
+          raced = true;
+          await writeFile(second, "racer", "utf8");
+        }
+      },
+    };
+    const { quarantine } = createHarness(stateRoot, { fileSystem });
+    const grouped = provenance({
+      operation: { id: "plan-race", displayNames: ["Race"] },
+    });
+    const firstEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(first, "file"),
+        provenance: grouped,
+      }),
+    );
+    const secondEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(second, "file"),
+        provenance: {
+          ...grouped,
+          actionId: "second-race-action" as RemovalActionId,
+        },
+      }),
+    );
+    firstEntryDirectory = join(
+      stateRoot,
+      "quarantine",
+      "v1",
+      "entries",
+      firstEntry.id,
+    );
+    const result = await quarantine.restoreOperation(
+      (await quarantine.listOperations())[0]!,
+    );
+    expect(result).toMatchObject({
+      status: "partial",
+      entries: [
+        { entryId: firstEntry.id, status: "restored" },
+        {
+          entryId: secondEntry.id,
+          status: "blocked",
+          reason: "destination-occupied",
+        },
+      ],
+    });
+    await expect(readFile(second, "utf8")).resolves.toBe("racer");
+  });
+
+  it("keeps legacy entries as separate operations", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const first = join(environment.home, "legacy-one.txt");
+    const second = join(environment.home, "legacy-two.txt");
+    await writeFile(first, "one", "utf8");
+    await writeFile(second, "two", "utf8");
+    const { quarantine } = createHarness(stateRoot);
+    const firstEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(first, "file"),
+        provenance: provenance(),
+      }),
+    );
+    const secondEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(second, "file"),
+        provenance: provenance({ actionId: "legacy-two" as RemovalActionId }),
+      }),
+    );
+    await expect(quarantine.listOperations()).resolves.toMatchObject([
+      { id: `legacy:${firstEntry.id}`, entries: [{ id: firstEntry.id }] },
+      { id: `legacy:${secondEntry.id}`, entries: [{ id: secondEntry.id }] },
+    ]);
+  });
+
+  it("previews and permanently purges every entry in a grouped operation", async () => {
+    const environment = await createTestEnvironment();
+    const stateRoot = join(environment.state, "skill-cleaner");
+    const first = join(environment.home, "purge-one.txt");
+    const second = join(environment.home, "purge-two.txt");
+    await writeFile(first, "one", "utf8");
+    await writeFile(second, "two", "utf8");
+    const { quarantine } = createHarness(stateRoot);
+    const grouped = provenance({
+      operation: { id: "plan-purge", displayNames: ["Purge"] },
+    });
+    const firstEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(first, "file"),
+        provenance: grouped,
+      }),
+    );
+    const secondEntry = expectEntry(
+      await quarantine.quarantine({
+        kind: "displaced-artifact",
+        location: ordinaryLocation(second, "file"),
+        provenance: { ...grouped, actionId: "purge-two" as RemovalActionId },
+      }),
+    );
+    const operation = (await quarantine.listOperations())[0]!;
+    await expect(
+      quarantine.previewPurgeOperation(operation),
+    ).resolves.toMatchObject({
+      entries: [
+        { entryId: firstEntry.id, status: "would-purge" },
+        { entryId: secondEntry.id, status: "would-purge" },
+      ],
+    });
+    await expect(quarantine.purgeOperation(operation)).resolves.toMatchObject({
+      entries: [
+        { entryId: firstEntry.id, status: "purged" },
+        { entryId: secondEntry.id, status: "purged" },
+      ],
+    });
+    await expect(quarantine.listOperations()).resolves.toEqual([]);
+  });
+
   it("previews restore and purge without changing source or Quarantine state", async () => {
     const environment = await createTestEnvironment();
     const stateRoot = join(environment.state, "skill-cleaner");
@@ -395,6 +707,19 @@ describe("Quarantine module", () => {
       quarantine.previewPurge({ kind: "entries", entryIds: [entry.id] }),
     ).resolves.toEqual({
       schemaVersion: 1,
+      entries: [{ entryId: entry.id, status: "would-purge" }],
+    });
+    const operation = (await quarantine.listOperations())[0]!;
+    await expect(
+      quarantine.previewRestoreOperation(operation),
+    ).resolves.toMatchObject({
+      operationId: operation.id,
+      status: "would-restore",
+    });
+    await expect(
+      quarantine.previewPurgeOperation(operation),
+    ).resolves.toMatchObject({
+      operationId: operation.id,
       entries: [{ entryId: entry.id, status: "would-purge" }],
     });
 

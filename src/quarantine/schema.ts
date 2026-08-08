@@ -60,6 +60,10 @@ const removalTarget = z.discriminatedUnion("kind", [
     logicalSkillId: nonBlankString,
   }),
   z.strictObject({
+    kind: z.literal("source-group"),
+    groupId: nonBlankString,
+  }),
+  z.strictObject({
     kind: z.literal("plugin"),
     pluginBoundaryId: nonBlankString,
   }),
@@ -149,6 +153,12 @@ const provenance = z
     targets: z.array(removalTarget).min(1),
     affectedInstallationIds: z.array(nonBlankString),
     subjects: z.array(provenanceSubject).min(1),
+    operation: z
+      .strictObject({
+        id: nonBlankString,
+        displayNames: z.array(nonBlankString).min(1),
+      })
+      .optional(),
   })
   .superRefine((value, context) => {
     if (

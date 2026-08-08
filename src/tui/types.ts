@@ -10,6 +10,14 @@ import type {
   RemovalPlanIntent,
   RemovalTarget,
 } from "../model/types.js";
+import type {
+  QuarantineModule,
+  QuarantineOperation,
+  PurgeOperationPreview,
+  PurgeOperationResult,
+  RestoreOperationPreview,
+  RestoreOperationResult,
+} from "../quarantine/types.js";
 
 export interface TuiDependencies {
   readonly scan: () => Promise<Inventory>;
@@ -21,6 +29,10 @@ export interface TuiDependencies {
     plan: RemovalPlan,
     approvals: readonly ApprovalRequirement[],
   ) => Promise<ExecutionReport>;
+  /** Optional to preserve embedding hosts that only provide Inventory. */
+  readonly quarantine?: QuarantineModule;
+  /** Injected for deterministic retention display and expiry classification. */
+  readonly now?: () => Date;
 }
 
 export interface TuiViewport {
@@ -131,6 +143,8 @@ export interface TuiVisibleRow extends TuiRow {
 export interface TuiBrowseSnapshot {
   readonly inventory: Inventory;
   readonly model: TuiBrowseModel;
+  readonly view?: "inventory" | "trash";
+  readonly operations?: ReadonlyMap<string, QuarantineOperation>;
 }
 
 export interface TuiLoadingState {
@@ -139,6 +153,40 @@ export interface TuiLoadingState {
 
 export interface TuiBrowseState extends TuiBrowseSnapshot {
   readonly screen: "browse";
+  /** Inventory snapshot restored exactly when leaving the Trash projection. */
+  readonly returnBrowse?: TuiBrowseSnapshot;
+}
+
+/** Trash screens retain the Inventory return state without depending on `screen`. */
+export interface TuiTrashBrowseSnapshot extends TuiBrowseSnapshot {
+  readonly returnBrowse?: TuiBrowseSnapshot;
+}
+
+export interface TuiTrashReviewState {
+  readonly screen: "trash-review";
+  /** Full Trash state retains the exact Inventory return snapshot. */
+  readonly browse: TuiTrashBrowseSnapshot;
+  readonly operation: QuarantineOperation;
+  readonly kind: "restore" | "purge";
+  readonly preview: RestoreOperationPreview | PurgeOperationPreview;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+  readonly message: string | null;
+}
+export interface TuiTrashExecutingState {
+  readonly screen: "trash-executing";
+  readonly browse: TuiTrashBrowseSnapshot;
+  readonly operation: QuarantineOperation;
+  readonly kind: "restore" | "purge";
+}
+export interface TuiTrashReportState {
+  readonly screen: "trash-report";
+  readonly browse: TuiTrashBrowseSnapshot;
+  readonly operation: QuarantineOperation;
+  readonly kind: "restore" | "purge";
+  readonly result: RestoreOperationResult | PurgeOperationResult;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
 }
 
 /** A temporary, flat projection used only by the global search overlay. */
@@ -216,6 +264,9 @@ export type TuiState =
   | TuiPlanState
   | TuiExecutingState
   | TuiReportState
+  | TuiTrashReviewState
+  | TuiTrashExecutingState
+  | TuiTrashReportState
   | TuiErrorState
   | TuiDoneState;
 
@@ -259,6 +310,9 @@ export type TuiAction =
   | { readonly kind: "force" }
   | { readonly kind: "fallback" }
   | { readonly kind: "select-fallback"; readonly delta: number }
+  | { readonly kind: "switch-view"; readonly view: "inventory" | "trash" }
+  | { readonly kind: "restore-review" }
+  | { readonly kind: "purge-review" }
   | { readonly kind: "quit" };
 
 export type TuiOutcome =

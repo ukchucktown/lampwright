@@ -51,7 +51,251 @@ export function renderTui(
   if (state.screen === "search") return renderSearch(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
   if (state.screen === "executing") return renderExecuting(state, style);
+  if (state.screen === "trash-review") return renderTrashReview(state, style);
+  if (state.screen === "trash-executing")
+    return `${style.title("skill-cleaner — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
+  if (state.screen === "trash-report") return renderTrashReport(state, style);
   return renderReport(state, style);
+}
+
+function renderTrashReport(
+  state: Extract<TuiState, { screen: "trash-report" }>,
+  style: TuiPaint,
+): string {
+  return renderTrashScrollable(
+    trashReportBodyLines(state, style),
+    trashReportFooterLines(state, style),
+    state.scrollOffset,
+    state.browse.model.viewport,
+    "result",
+  );
+}
+
+function renderTrashReview(
+  state: Extract<TuiState, { screen: "trash-review" }>,
+  style: TuiPaint,
+): string {
+  return renderTrashScrollable(
+    trashReviewBodyLines(state, style),
+    trashReviewFooterLines(state, style),
+    state.scrollOffset,
+    state.browse.model.viewport,
+  );
+}
+
+function renderTrashScrollable(
+  body: readonly string[],
+  footer: readonly string[],
+  offset: number,
+  viewport: TuiBrowseState["model"]["viewport"],
+  rangeLabel = "review",
+): string {
+  const width = Math.max(1, viewport.columns - 1);
+  const metrics = trashScrollMetricsFor(viewport, body.length, footer.length);
+  const clamped = Math.min(Math.max(0, offset), metrics.maximumOffset);
+  const visible = body.slice(clamped, clamped + metrics.pageRows);
+  const range =
+    metrics.maximumOffset === 0
+      ? []
+      : [
+          `${rangeLabel} ${String(clamped + 1)}-${String(Math.min(body.length, clamped + metrics.pageRows))}/${String(body.length)}  ↑↓/PgUp/PgDn scroll`,
+        ];
+  return `${[...visible, ...range, ...footer]
+    .slice(0, Math.max(0, viewport.rows - 1))
+    .map((line) => fit(line, width))
+    .join("\n")}\n`;
+}
+
+function trashReviewBodyLines(
+  state: Extract<TuiState, { screen: "trash-review" }>,
+  style: TuiPaint,
+): readonly string[] {
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const entries = new Map(
+    state.operation.entries.map((entry) => [entry.id, entry]),
+  );
+  const restore =
+    state.kind === "restore"
+      ? (state.preview as import("../quarantine/types.js").RestoreOperationPreview)
+      : null;
+  const lines = [
+    style.title(
+      `skill-cleaner — ${state.kind === "restore" ? "Restore review" : "Permanent purge review"}`,
+    ),
+    "",
+    ...wrapPlanLine(state.operation.displayNames.join(", "), width).map(
+      style.active,
+    ),
+    ...wrapPlanLine(
+      `${String(state.operation.entries.length)} item(s) · expires ${state.operation.expiresAt}`,
+      width,
+    ),
+    state.kind === "purge"
+      ? style.warning("Permanent purge cannot be undone.")
+      : restore?.status === "blocked"
+        ? style.error("Known conflicts block this whole restore.")
+        : style.success(
+            "Every item will be restored without overwriting destinations.",
+          ),
+    "",
+    ...state.preview.entries.flatMap((preview) => {
+      const entry = entries.get(preview.entryId);
+      const location =
+        entry?.originalLocation.path ?? "an unavailable original location";
+      if (preview.status === "would-restore")
+        return wrapPlanLine(`✓ Restore ${location}`, width).map(style.success);
+      if (preview.status === "would-purge")
+        return wrapPlanLine(
+          `! Permanently delete recoverable content from ${location}`,
+          width,
+        ).map(style.warning);
+      return wrapPlanLine(
+        `! ${location}: ${preview.reason.replaceAll("-", " ")}`,
+        width,
+      ).map(style.error);
+    }),
+  ];
+  if (state.technicalDetails)
+    lines.push(
+      "",
+      ...wrapPlanLine(`Operation ID: ${state.operation.id}`, width).map(
+        style.muted,
+      ),
+      ...state.preview.entries.flatMap((preview) =>
+        wrapPlanLine(`Entry ID: ${preview.entryId}`, width).map(style.muted),
+      ),
+    );
+  return lines;
+}
+
+function trashReviewFooterLines(
+  state: Extract<TuiState, { screen: "trash-review" }>,
+  style: TuiPaint,
+): readonly string[] {
+  const blocked =
+    state.kind === "restore" &&
+    (state.preview as import("../quarantine/types.js").RestoreOperationPreview)
+      .status === "blocked";
+  return [
+    state.message === null
+      ? blocked
+        ? style.error("Blocked — Esc returns to Trash.")
+        : style.muted(
+            "y confirm · d technical details · Esc returns to Trash · q quits",
+          )
+      : style.error(state.message),
+  ];
+}
+
+function trashReportBodyLines(
+  state: Extract<TuiState, { screen: "trash-report" }>,
+  style: TuiPaint,
+): readonly string[] {
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const entries = new Map(
+    state.operation.entries.map((entry) => [entry.id, entry]),
+  );
+  const status =
+    state.kind === "restore"
+      ? (
+          state.result as import("../quarantine/types.js").RestoreOperationResult
+        ).status
+      : state.result.entries.every((entry) => entry.status === "purged")
+        ? "purged"
+        : state.result.entries.some((entry) => entry.status === "purged")
+          ? "partial"
+          : "blocked";
+  const heading =
+    state.kind === "restore"
+      ? status === "restored"
+        ? "Restored"
+        : status === "partial"
+          ? "Restored with concerns"
+          : "Could not restore"
+      : status === "purged"
+        ? "Permanently purged"
+        : status === "partial"
+          ? "Permanently purged with concerns"
+          : "Could not permanently purge";
+  const lines = [
+    style.title("skill-cleaner — Trash result"),
+    "",
+    status === "restored" || status === "purged"
+      ? style.success(heading)
+      : style.warning(heading),
+    ...state.result.entries.flatMap((result) => {
+      const location =
+        entries.get(result.entryId)?.originalLocation.path ??
+        "an unavailable original location";
+      if (result.status === "restored")
+        return wrapPlanLine(`✓ Restored ${location}`, width).map(style.success);
+      if (result.status === "purged")
+        return wrapPlanLine(`✓ Permanently purged ${location}`, width).map(
+          style.success,
+        );
+      if (result.status === "not-attempted")
+        return wrapPlanLine(
+          `– Did not restore ${location}: ${result.reason.replaceAll("-", " ")}`,
+          width,
+        ).map(style.warning);
+      return wrapPlanLine(
+        `! ${location}: ${result.reason.replaceAll("-", " ")}`,
+        width,
+      ).map(style.error);
+    }),
+  ];
+  if (state.technicalDetails)
+    lines.push(
+      "",
+      ...wrapPlanLine(`Operation ID: ${state.operation.id}`, width).map(
+        style.muted,
+      ),
+      ...state.result.entries.flatMap((entry) =>
+        wrapPlanLine(`Entry ID: ${entry.entryId}`, width).map(style.muted),
+      ),
+    );
+  return lines;
+}
+
+function trashReportFooterLines(
+  state: Extract<TuiState, { screen: "trash-report" }>,
+  style: TuiPaint,
+): readonly string[] {
+  return [style.muted("d technical details · Esc returns to Trash · q quits")];
+}
+
+export function trashReviewScrollMetrics(
+  state: Extract<TuiState, { screen: "trash-review" }>,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    trashReviewBodyLines(state, createPaint(plainTuiTheme)).length,
+    trashReviewFooterLines(state, createPaint(plainTuiTheme)).length,
+  );
+}
+
+export function trashReportScrollMetrics(
+  state: Extract<TuiState, { screen: "trash-report" }>,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    trashReportBodyLines(state, createPaint(plainTuiTheme)).length,
+    trashReportFooterLines(state, createPaint(plainTuiTheme)).length,
+  );
+}
+
+function trashScrollMetricsFor(
+  viewport: TuiBrowseState["model"]["viewport"],
+  bodyRows: number,
+  footerRows: number,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  const usableRows = Math.max(0, viewport.rows - 1);
+  const overflows = bodyRows + footerRows > usableRows;
+  const pageRows = Math.max(
+    0,
+    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
+  );
+  return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
 }
 
 function renderExecuting(state: TuiExecutingState, style: TuiPaint): string {
@@ -224,6 +468,22 @@ function renderBrowse(state: TuiBrowseState, theme: TuiTheme): string {
   return renderBrowseLines(state, theme).join("\n");
 }
 
+/** 1-based columns for pointer handling, derived from the rendered header. */
+export function browseTabHitboxes(state: TuiBrowseState): {
+  readonly inventory: readonly [number, number];
+  readonly trash: readonly [number, number];
+} {
+  const inventoryStart = "skill-cleaner ".length + 1;
+  const inventoryEnd = inventoryStart + "Inventory".length - 1;
+  const trashStart = inventoryEnd + 4; // " | " separates the labels.
+  const trashEnd =
+    trashStart + `Trash (${String(state.operations?.size ?? 0)})`.length - 1;
+  return {
+    inventory: [inventoryStart, inventoryEnd],
+    trash: [trashStart, trashEnd],
+  };
+}
+
 export function renderBrowseLines(
   state: TuiBrowseState,
   theme: TuiTheme = nightfallTheme,
@@ -237,67 +497,92 @@ export function renderBrowseLines(
   const view = panes(model);
   const section = currentSection(model);
   const out: string[] = [];
+  const isTrash = state.view === "trash";
 
   const selected = model.selected.size;
+  const trashCount = state.operations?.size ?? 0;
   out.push(
-    `${style.title("skill-cleaner")} ${style.muted("inventory")}  ${
-      selected > 0
-        ? style.selected(`${String(selected)} selected`)
-        : style.muted("nothing selected")
+    `${style.title("skill-cleaner")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+      isTrash
+        ? style.muted("read-only recovery")
+        : selected > 0
+          ? style.selected(`${String(selected)} selected`)
+          : style.muted("nothing selected")
     }`,
   );
   out.push(
     fitStyledSegments(
-      model.focus === "detail"
+      isTrash
         ? [
             { text: "↑↓/wheel", paint: style.title },
-            { text: " scroll · ", paint: style.muted },
-            { text: "PgUp/PgDn", paint: style.title },
-            { text: " page · ", paint: style.muted },
-            { text: "click", paint: style.title },
-            { text: " focus · ", paint: style.muted },
-            { text: "tab/⇧tab", paint: style.title },
-            { text: " pane · ", paint: style.muted },
-            { text: "⇧↑↓", paint: style.title },
-            { text: " resize · ", paint: style.muted },
+            { text: " move · ", paint: style.muted },
+            { text: "enter/dbl-click", paint: style.title },
+            { text: " restore · ", paint: style.muted },
+            { text: "p", paint: style.title },
+            { text: " purge · ", paint: style.muted },
             { text: "esc", paint: style.title },
-            { text: " back · ", paint: style.muted },
+            { text: " Inventory · ", paint: style.muted },
+            { text: "ctrl-t", paint: style.title },
+            { text: " view · ", paint: style.muted },
             { text: "q", paint: style.title },
             { text: " quit", paint: style.muted },
           ]
-        : [
-            { text: "↑↓/wheel", paint: style.title },
-            { text: " move · ", paint: style.muted },
-            { text: "click", paint: style.title },
-            { text: " focus · ", paint: style.muted },
-            { text: "space/dbl-click", paint: style.title },
-            { text: " select · ", paint: style.muted },
-            { text: "tab", paint: style.title },
-            { text: " pane · ", paint: style.muted },
-            { text: "enter", paint: style.title },
-            { text: " review · ", paint: style.muted },
-            { text: "esc", paint: style.title },
-            { text: " back · ", paint: style.muted },
-            { text: "q", paint: style.title },
-            { text: " quit", paint: style.muted },
-          ],
+        : model.focus === "detail"
+          ? [
+              { text: "↑↓/wheel", paint: style.title },
+              { text: " scroll · ", paint: style.muted },
+              { text: "PgUp/PgDn", paint: style.title },
+              { text: " page · ", paint: style.muted },
+              { text: "click", paint: style.title },
+              { text: " focus · ", paint: style.muted },
+              { text: "tab/⇧tab", paint: style.title },
+              { text: " pane · ", paint: style.muted },
+              { text: "ctrl-t", paint: style.title },
+              { text: " view · ", paint: style.muted },
+              { text: "⇧↑↓", paint: style.title },
+              { text: " resize · ", paint: style.muted },
+              { text: "esc", paint: style.title },
+              { text: " back · ", paint: style.muted },
+              { text: "q", paint: style.title },
+              { text: " quit", paint: style.muted },
+            ]
+          : [
+              { text: "↑↓/wheel", paint: style.title },
+              { text: " move · ", paint: style.muted },
+              { text: "click", paint: style.title },
+              { text: " focus · ", paint: style.muted },
+              { text: "space/dbl-click", paint: style.title },
+              { text: " select · ", paint: style.muted },
+              { text: "tab", paint: style.title },
+              { text: " pane · ", paint: style.muted },
+              { text: "ctrl-t", paint: style.title },
+              { text: " view · ", paint: style.muted },
+              { text: "esc", paint: style.title },
+              { text: " back · ", paint: style.muted },
+              { text: "q", paint: style.title },
+              { text: " quit", paint: style.muted },
+            ],
       usable,
       style.muted,
     ),
   );
   out.push(
-    model.query === ""
-      ? fitStyledSegments(
-          [
-            { text: "/ or type", paint: style.title },
-            { text: " search names by regex · ", paint: style.muted },
-            { text: "ctrl-u", paint: style.title },
-            { text: " clear selection", paint: style.muted },
-          ],
-          usable,
-          style.muted,
+    isTrash
+      ? style.muted(
+          "Recoverable content is stored in Quarantine. Reviews do not change files.",
         )
-      : `filter ${style.active(model.query)} ${style.muted(`· ${String(view.entries.total)} here`)}`,
+      : model.query === ""
+        ? fitStyledSegments(
+            [
+              { text: "/ or type", paint: style.title },
+              { text: " search names by regex · ", paint: style.muted },
+              { text: "ctrl-u", paint: style.title },
+              { text: " clear selection", paint: style.muted },
+            ],
+            usable,
+            style.muted,
+          )
+        : `filter ${style.active(model.query)} ${style.muted(`· ${String(view.entries.total)} here`)}`,
   );
   out.push(
     style.border(
@@ -307,13 +592,14 @@ export function renderBrowseLines(
 
   for (let row = 0; row < paneRows; row += 1) {
     out.push(
-      `${sectionCell(model, view.sections, row, leftWidth, style)}${style.border("│")}${entryCell(
+      `${sectionCell(model, view.sections, row, leftWidth, style, isTrash)}${style.border("│")}${entryCell(
         model,
         view.entries,
         section,
         row,
         rightWidth,
         style,
+        isTrash,
       )}${scrollMark(view.entries, row, style)}`,
     );
   }
@@ -362,6 +648,7 @@ function sectionCell(
   row: number,
   width: number,
   style: TuiPaint,
+  isTrash = false,
 ): string {
   const item = view.items[row];
   if (item === undefined) return " ".repeat(width);
@@ -370,13 +657,15 @@ function sectionCell(
   const taken = item.entries.filter((entry) =>
     model.selected.has(entry.key),
   ).length;
-  const marker = !item.selectable
-    ? " - "
-    : taken === 0
-      ? "[ ]"
-      : taken === item.entries.length
-        ? "[x]"
-        : "[~]";
+  const marker = isTrash
+    ? " • "
+    : !item.selectable
+      ? " - "
+      : taken === 0
+        ? "[ ]"
+        : taken === item.entries.length
+          ? "[x]"
+          : "[~]";
   const count =
     taken > 0
       ? `${String(taken)}/${String(item.entries.length)}`
@@ -395,6 +684,7 @@ function entryCell(
   row: number,
   width: number,
   style: TuiPaint,
+  isTrash = false,
 ): string {
   if (width <= 0) return "";
   if (row === 0) {
@@ -417,8 +707,9 @@ function entryCell(
   if (entry === undefined) return " ".repeat(width);
   const index = view.offset + row - 1;
   const focused = index === model.entryIndex && model.focus === "entries";
-  const marker =
-    section !== null && !section.selectable
+  const marker = isTrash
+    ? " • "
+    : section !== null && !section.selectable
       ? " - "
       : model.selected.has(entry.key)
         ? "[x]"
@@ -663,9 +954,9 @@ function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
       removalPlan.intent.mode === "brute-force"
         ? "This is a separate recoverable removal after the managed attempt failed."
         : hasManagedRemoval
-          ? "A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately."
+          ? "Managed removal is not recoverable by skill-cleaner and will not enter Trash. A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately."
           : hasRecoverableRemoval
-            ? "Files are not permanently deleted. They can be restored from the recovery area."
+            ? "Files are not permanently deleted. They can be restored from Trash."
             : "No filesystem content will be permanently deleted.";
     const recoveryStyle =
       removalPlan.intent.mode === "brute-force" ? style.warning : style.muted;
@@ -869,7 +1160,7 @@ function describePlainActions(
   const capabilities = `${String(count)} selected ${count === 1 ? "capability" : "capabilities"}`;
   if (action.kind === "quarantine")
     return [
-      `${prefix}Move ${capabilities} to the recovery area`,
+      `${prefix}Move ${capabilities} to Trash`,
       stylelessDetail(
         `From ${String(actions.length)} original ${actions.length === 1 ? "location" : "locations"}.`,
       ),
@@ -883,6 +1174,9 @@ function describePlainActions(
     return [
       `${prefix}Ask ${owner} to remove ${capabilities}`,
       stylelessDetail(`Uses ${owner}'s supported removal commands.`),
+      stylelessDetail(
+        "This managed removal will not enter Trash and cannot be restored by skill-cleaner.",
+      ),
     ];
   }
   const records = actions.reduce(
@@ -914,7 +1208,7 @@ function describePlainAction(
   const prefix = `  ${String(index + 1)}. `;
   if (action.kind === "quarantine")
     return [
-      `${prefix}Move ${targetLabel(state, action.target)} to the recovery area`,
+      `${prefix}Move ${targetLabel(state, action.target)} to Trash`,
       stylelessDetail(`From: ${action.location.path}`),
       stylelessDetail("You can restore it later."),
     ];
@@ -926,6 +1220,9 @@ function describePlainAction(
     return [
       `${prefix}Ask ${owner} to remove ${targetLabel(state, action.target)}`,
       stylelessDetail(`Uses ${owner}'s supported removal command.`),
+      stylelessDetail(
+        "This managed removal will not enter Trash and cannot be restored by skill-cleaner.",
+      ),
     ];
   }
   return [
@@ -1171,6 +1468,11 @@ function reportBodyLines(state: TuiReportState, style: TuiPaint): string[] {
   const actionSuccess = report.actionResults.filter(
     (item) => item.status === "succeeded" || item.status === "unchanged",
   ).length;
+  const trashRetention = report.actionResults
+    .map((item) => ("details" in item ? item.details : undefined))
+    .filter((details) => details?.enteredTrash === true)
+    .map((details) => details?.retentionExpiresAt)
+    .filter((value): value is string => typeof value === "string");
   const checkPass = report.verificationResults.filter(
     (item) => item.status === "passed",
   ).length;
@@ -1234,6 +1536,13 @@ function reportBodyLines(state: TuiReportState, style: TuiPaint): string[] {
       : [
           style.muted(
             `${countLabel(actionSuccess, "approved removal")} finished.`,
+          ),
+        ]),
+    ...(trashRetention.length === 0
+      ? []
+      : [
+          style.info(
+            `Content entered Trash and is recoverable until ${trashRetention.sort()[0]}.`,
           ),
         ]),
     ...(concerns.length === 0

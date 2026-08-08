@@ -34,6 +34,7 @@ import { verifyRecordAbsent } from "../src/execution/records.js";
 function quarantineFixture(): QuarantineModule {
   return {
     list: vi.fn(async () => []),
+    listOperations: vi.fn(async () => []),
     quarantine: vi.fn(async (request) => ({
       status: "already-absent" as const,
       path: request.location.path,
@@ -58,6 +59,10 @@ function quarantineFixture(): QuarantineModule {
       schemaVersion: 1 as const,
       entries: [],
     })),
+    previewRestoreOperation: vi.fn(),
+    restoreOperation: vi.fn(),
+    previewPurgeOperation: vi.fn(),
+    purgeOperation: vi.fn(),
   };
 }
 
@@ -679,6 +684,10 @@ describe("Execution", () => {
         actionId: action.id,
         targets: [target],
         affectedInstallationIds: [target.installationId],
+        operation: {
+          id: removalPlan.id,
+          displayNames: ["example-skill"],
+        },
         subjects: [
           expect.objectContaining({
             installationIds: [target.installationId],

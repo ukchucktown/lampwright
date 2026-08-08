@@ -119,11 +119,16 @@ Interface:
 
 ```ts
 list(): Promise<readonly QuarantineEntry[]>
+listOperations(): Promise<readonly QuarantineOperation[]>
 quarantine(request: QuarantineRequest): Promise<QuarantineResult>
 previewRestore(entry: QuarantineEntry, resolution?: RestoreResolution): Promise<RestorePreview>
 restore(entry: QuarantineEntry, resolution?: RestoreResolution): Promise<RestoreResult>
 previewPurge(selection: QuarantineSelection): Promise<PurgePreview>
 purge(selection: QuarantineSelection): Promise<PurgeResult>
+previewRestoreOperation(operation: QuarantineOperation): Promise<RestoreOperationPreview>
+restoreOperation(operation: QuarantineOperation): Promise<RestoreOperationResult>
+previewPurgeOperation(operation: QuarantineOperation): Promise<PurgeOperationPreview>
+purgeOperation(operation: QuarantineOperation): Promise<PurgeOperationResult>
 ```
 
 `QuarantineResult` distinguishes a committed entry from an already-absent
@@ -132,6 +137,14 @@ preimage of a declarative manager-record cleanup. Its versioned manifest records
 the original `ArtifactLocation`, content integrity, restoration metadata,
 timestamps, and a nonempty collection of provenance subjects so one global
 record mutation can retain evidence for every affected Owner and Installation.
+When an approved Brute-force Removal produces several entries, persisted
+operation provenance (the approved plan identity and display names) groups them
+for presentation and restore/purge review. `listOperations()` retains legacy
+entries as one-entry operations; it never infers grouping from matching names or
+content. Operation previews examine every entry without writes. Restore is
+blocked as a group for known conflicts, while execution reports an honest
+partial outcome for later races.
+
 Restore accepts a free original or explicit alternate destination; replacing a
 record postimage is a distinct resolution guarded by the exact expected hash.
 The preview operations perform the same integrity, collision, and Git checks

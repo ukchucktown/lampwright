@@ -672,12 +672,14 @@ function failure(code: string, message: string, exitCode: number): CliResult {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.length === 0) {
+    const quarantine = createQuarantineModule();
     const outcome = await runTui(
       {
         scan: async () => (await scanWithContext([], [], {})).inventory,
         plan,
         execute: (removalPlan, approvals) =>
           productionExecute(removalPlan, [], [], [], approvals),
+        quarantine,
       },
       createNodeTuiTerminal(),
     );

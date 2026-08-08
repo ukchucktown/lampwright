@@ -35,6 +35,15 @@ export interface QuarantineProvenance {
     QuarantineProvenanceSubject,
     ...QuarantineProvenanceSubject[],
   ];
+  /** Optional display provenance; absent on legacy manifests. */
+  readonly operation?: QuarantineOperationProvenance;
+}
+
+export interface QuarantineOperationProvenance {
+  /** The approved plan identity, never inferred from names or hashes. */
+  readonly id: string;
+  /** Names preserved for display after live Inventory changes. */
+  readonly displayNames: readonly [string, ...string[]];
 }
 
 export interface RestorationMetadata {
@@ -181,8 +190,48 @@ export interface PurgePreview {
   )[];
 }
 
+/** A safe presentation grouping from one approved removal operation. */
+export interface QuarantineOperation {
+  readonly id: string;
+  readonly entries: readonly [QuarantineEntry, ...QuarantineEntry[]];
+  readonly displayNames: readonly [string, ...string[]];
+  readonly removedAt: string;
+  readonly expiresAt: string;
+}
+
+export interface RestoreOperationPreview {
+  readonly schemaVersion: 1;
+  readonly operationId: string;
+  readonly entries: readonly RestorePreview[];
+  readonly status: "would-restore" | "blocked";
+}
+
+export interface RestoreOperationResult {
+  readonly operationId: string;
+  readonly entries: readonly RestoreOperationEntryResult[];
+  readonly status: "restored" | "blocked" | "partial";
+}
+
+/** An entry skipped because the operation was stopped before touching it. */
+export interface RestoreNotAttempted {
+  readonly status: "not-attempted";
+  readonly entryId: QuarantineEntryId;
+  readonly reason: "known-conflict" | "prior-entry-failed";
+}
+
+export type RestoreOperationEntryResult = RestoreResult | RestoreNotAttempted;
+
+export interface PurgeOperationPreview extends PurgePreview {
+  readonly operationId: string;
+}
+
+export interface PurgeOperationResult extends PurgeResult {
+  readonly operationId: string;
+}
+
 export interface QuarantineModule {
   list(): Promise<readonly QuarantineEntry[]>;
+  listOperations(): Promise<readonly QuarantineOperation[]>;
   quarantine(request: QuarantineRequest): Promise<QuarantineResult>;
   restore(
     entry: QuarantineEntry,
@@ -194,6 +243,16 @@ export interface QuarantineModule {
   ): Promise<RestorePreview>;
   purge(selection: QuarantineSelection): Promise<PurgeResult>;
   previewPurge(selection: QuarantineSelection): Promise<PurgePreview>;
+  previewRestoreOperation(
+    operation: QuarantineOperation,
+  ): Promise<RestoreOperationPreview>;
+  restoreOperation(
+    operation: QuarantineOperation,
+  ): Promise<RestoreOperationResult>;
+  previewPurgeOperation(
+    operation: QuarantineOperation,
+  ): Promise<PurgeOperationPreview>;
+  purgeOperation(operation: QuarantineOperation): Promise<PurgeOperationResult>;
 }
 
 export interface QuarantineModuleOptions {

@@ -210,7 +210,7 @@ async function executeActions(
     }
     const completed = await Promise.all(
       ready.map((action) =>
-        runAction(action, approvals, results, inventory, options),
+        runAction(action, plan, approvals, results, inventory, options),
       ),
     );
     completed.forEach((result) => {
@@ -257,6 +257,7 @@ function managedMutationPaths(action: RemovalAction): readonly string[] {
 
 async function runAction(
   action: RemovalAction,
+  plan: RemovalPlan,
   approvals: Approvals,
   priorResults: ReadonlyMap<string, ActionResult>,
   inventory: Inventory,
@@ -306,7 +307,7 @@ async function runAction(
   }
 
   try {
-    const outcome = await executeAction(action, inventory, options);
+    const outcome = await executeAction(action, plan, inventory, options);
     return {
       actionId: action.id,
       startedAt,
@@ -333,6 +334,7 @@ async function runAction(
 
 async function executeAction(
   action: RemovalAction,
+  plan: RemovalPlan,
   inventory: Inventory,
   options: ExecutionModuleOptions,
 ): Promise<
@@ -360,7 +362,7 @@ async function executeAction(
       const result = await options.quarantine.quarantine({
         kind: "displaced-artifact",
         location: action.location,
-        provenance: provenanceFor(action, inventory),
+        provenance: provenanceFor(action, inventory, plan),
       });
       return result.status === "already-absent"
         ? {
@@ -369,11 +371,18 @@ async function executeAction(
           }
         : {
             status: "succeeded",
-            details: { path: action.location.path, entryId: result.entry.id },
+            details: {
+              path: action.location.path,
+              entryId: result.entry.id,
+              enteredTrash: true,
+              ...(typeof result.entry.expiresAt === "string"
+                ? { retentionExpiresAt: result.entry.expiresAt }
+                : {}),
+            },
           };
     }
     case "record-cleanup":
-      return executeRecordCleanup(action, inventory, options);
+      return executeRecordCleanup(action, inventory, plan, options);
   }
 }
 
@@ -501,6 +510,7 @@ function ownerSuccess(
 async function executeRecordCleanup(
   action: RecordCleanupAction,
   inventory: Inventory,
+  plan: RemovalPlan,
   options: ExecutionModuleOptions,
 ): Promise<
   | {
@@ -532,7 +542,7 @@ async function executeRecordCleanup(
     location: action.location as RecordCleanupAction["location"] & {
       readonly artifactType: { readonly kind: "file" };
     },
-    provenance: provenanceFor(action, inventory),
+    provenance: provenanceFor(action, inventory, plan),
     expectedPreimageHash: prepared.preimageHash,
     expectedPostimageHash: prepared.postimageHash,
   });
@@ -556,6 +566,10 @@ async function executeRecordCleanup(
     details: {
       path: action.location.path,
       entryId: capture.entry.id,
+      enteredTrash: true,
+      ...(typeof capture.entry.expiresAt === "string"
+        ? { retentionExpiresAt: capture.entry.expiresAt }
+        : {}),
       recordsRemoved: action.records.length,
     },
   };
@@ -871,6 +885,7 @@ function createFallbackPlans(
 function provenanceFor(
   action: Extract<RemovalAction, { kind: "quarantine" | "record-cleanup" }>,
   inventory: Inventory,
+  plan: RemovalPlan,
 ): QuarantineProvenance {
   const subjects: QuarantineProvenanceSubject[] =
     action.affectedInstallationIds.map((installationId) => {
@@ -930,7 +945,45 @@ function provenanceFor(
       QuarantineProvenanceSubject,
       ...QuarantineProvenanceSubject[],
     ],
+    operation: {
+      id: plan.id,
+      displayNames: displayNamesForTargets(plan.targets, inventory),
+    },
   };
+}
+
+function displayNamesForTargets(
+  targets: readonly RemovalTarget[],
+  inventory: Inventory,
+): [string, ...string[]] {
+  const names = targets.map((target) => {
+    switch (target.kind) {
+      case "logical-skill":
+        return (
+          inventory.logicalSkills.find(
+            (skill) => skill.id === target.logicalSkillId,
+          )?.skill.name ?? target.logicalSkillId
+        );
+      case "installation":
+        return (
+          inventory.installations.find(
+            (item) => item.id === target.installationId,
+          )?.skill.name ?? target.installationId
+        );
+      case "plugin":
+        return (
+          inventory.plugins.find(
+            (plugin) => plugin.id === target.pluginBoundaryId,
+          )?.pluginId ?? target.pluginBoundaryId
+        );
+      case "source-group":
+        return (
+          inventory.groups.find((group) => group.id === target.groupId)
+            ?.label ?? target.groupId
+        );
+    }
+  });
+  return [...new Set(names)] as [string, ...string[]];
 }
 
 function actionTargets(action: RemovalAction): readonly RemovalTarget[] {

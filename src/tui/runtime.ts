@@ -33,6 +33,10 @@ export async function runTui(
         await controller.waitForExecution();
         terminal.render(controller.state);
       }
+      if (nextState.screen === "trash-executing") {
+        await controller.waitForTrashExecution();
+        terminal.render(controller.state);
+      }
     }
     if (controller.state.screen === "error")
       return { status: "failed", message: controller.state.message };
