@@ -14,6 +14,11 @@ the pane below shows the focused entry. Each pane owns an independent viewport
 that scrolls under a stationary frame, so long detail content remains reachable
 without moving the rest of the interface.
 
+Global search temporarily replaces that grid with a flat matching-Skill list
+on the left and a read-only preview on the right. The preview carries the
+focused Skill's description, category, Owner, agent exposure, and paths. Closing
+search restores the exact inventory position and pane focus that opened it.
+
 When detail content overflows, its right edge draws a scrollbar and the status
 row reports the visible range. Moving to another entry resets detail scrolling
 to the top. Resizing the window or detail pane clamps the range to the content,
@@ -108,12 +113,26 @@ physical paths.
 
 ## Search and selection
 
-Typing filters every section at once; sections keep their identity while their
-contents shrink. A term matches a name as a subsequence, or a section label,
-agent, or path as a substring. Descriptions are deliberately excluded: they are
-ordinary English, so a two-letter query matched almost everything through words
-like "can" and "because". Richer metadata matching and field-filter syntax are
-deferred for separate TUI prototyping.
+Pressing `/` or typing from the inventory opens global search. Its raw input is
+a case-insensitive regular expression matched against Skill names only; regex
+delimiters are not required. For example, `^react`, `typescript|camunda`, and
+`(test|spec)$` are valid. Invalid expressions show an explanation and cannot be
+applied. Expressions that match empty text are also refused because they would
+match every Skill: `^c` or `^c.*`, not `^c*`, means a name beginning with `c`.
+
+Search is intentionally name-only so anchors retain their ordinary meaning.
+Category, Owner, agent exposure, path, and description remain visible in the
+preview but cannot make an unrelated Skill appear. Explicit field syntax such
+as `category:` and `agent:` is deferred for later prototyping.
+
+Up and down move through matches. Space stages the focused removable Skill and
+Ctrl-A stages every visible removable match. System Skills stay visible without
+a selectable marker. Enter adds the staged Skills to the existing inventory
+selection and returns to the exact inventory position that opened search;
+another `/` starts another additive search. Escape cancels search and discards
+its staging without changing the inventory selection. Ctrl-U clears the regex
+while preserving staging. From the inventory, Ctrl-U clears the complete
+selection.
 
 `space` on an entry selects it. `space` on a section takes or clears the whole
 section, so a bundle of twenty-two is one keystroke; the left pane shows `[ ]`,
@@ -126,10 +145,10 @@ than a list of its members; a partial selection stays a list of Logical Skill
 targets; a Plugin row is its own boundary. With nothing selected, `enter`
 reviews the row under the cursor.
 
-`q` exits the TUI immediately from every screen; Ctrl-C remains an alternate
-exit. `esc` unwinds the narrowest thing first — the filter, then the pane, then the
-selection — and only leaves once there is nothing left to undo, so a stray
-keypress cannot discard a selection.
+`q` exits the TUI immediately from every screen except search, where it is valid
+regex input; Ctrl-C remains an alternate exit everywhere. In the inventory,
+`esc` unwinds pane focus and then selection before leaving, so a stray keypress
+cannot discard a selection.
 
 ## Plans, fallback, and reports
 
@@ -164,12 +183,12 @@ verification outcomes, rescan failure, and any still-available fallbacks.
 ## Limited terminals
 
 When raw terminal controls are unavailable, the same UI uses line-oriented
-commands. In the inventory, enter a query directly or use `search <query>`,
-`up`, `down`, `in`, `out`, `detail`, `pageup`, `pagedown`, `grow-detail`,
-`shrink-detail`, `take`, `clear`, and `quit`. Plan screens accept `yes`, `no`,
-`details`, `up`, `down`, `pageup`, `pagedown`, `force`, and `quit`; report
-screens accept `up`, `down`, `fallback`, and `quit`. End-of-input cancels
-safely.
+commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
+`detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
+and `quit`. Search accepts a regex, `up`, `down`, `take`, `all`, `clear`, `done`,
+and `cancel`. Plan screens accept `yes`, `no`, `details`, `up`, `down`,
+`pageup`, `pagedown`, `force`, and `quit`; report screens accept `up`, `down`,
+`fallback`, and `quit`. End-of-input cancels safely.
 
 Read-only scanning, searching, expanding, cancellation, and plan review create
 no files or persistent state. The terminal UI does not scan paths, infer
