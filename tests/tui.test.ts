@@ -1,13 +1,24 @@
+import { PassThrough } from "node:stream";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  createTuiCatalog,
+  createBrowseModel,
+  createTuiSections,
+  layout,
+  matches,
+  createNodeTuiTerminal,
+  mouseAction,
   parseLineTuiAction,
+  parseMouseReport,
+  parseMouseReports,
+  reduceBrowse,
+  renderBrowseLines,
+  selectionTargets,
   plan,
   renderTui,
   runTui,
   TuiController,
-  visibleTuiRows,
   type ApprovalRequirement,
   type ExecutionReport,
   type Installation,
@@ -23,9 +34,13 @@ import {
   buildInstallation,
   buildInventory,
   buildLogicalSkill,
-  buildNonInstallationFinding,
   buildPluginBoundary,
+  buildSystemSkillFinding,
 } from "../src/testing/index.js";
+
+const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
+const visibleWidth = (value: string): number =>
+  [...value.replace(ansi, "")].length;
 
 class ScriptedTerminal implements TuiTerminal {
   readonly frames: string[] = [];
@@ -46,91 +61,9 @@ class ScriptedTerminal implements TuiTerminal {
   }
 }
 
-function distinctInstallation(
-  id: string,
-  sourceId: string,
+function managedInstallation(
   overrides: Parameters<typeof buildInstallation>[0] = {},
 ): Installation {
-  return buildInstallation({
-    id,
-    skill: { name: "shared-name", description: `${sourceId} description` },
-    source: { id: sourceId, url: `https://example.test/${sourceId}` },
-    location: {
-      path: `/fixtures/${sourceId}/${id}`,
-      canonicalPath: `/fixtures/${sourceId}/${id}`,
-      artifactType: { kind: "directory" },
-    },
-    identity: {
-      strongEvidence: [
-        {
-          strength: "strong",
-          kind: "source",
-          sourceId,
-          skillPath: `skills/${id}`,
-        },
-      ],
-      weakEvidence: [
-        { strength: "weak", kind: "name", normalizedName: "shared-name" },
-      ],
-    },
-    ...overrides,
-  });
-}
-
-function logicalInventory(): Inventory {
-  const sharedIdentity = {
-    strongEvidence: [
-      {
-        strength: "strong" as const,
-        kind: "source" as const,
-        sourceId: "shared-source",
-        skillPath: "skills/shared",
-      },
-    ] as const,
-    weakEvidence: [
-      {
-        strength: "weak" as const,
-        kind: "name" as const,
-        normalizedName: "shared-skill",
-      },
-    ],
-  };
-  const first = buildInstallation({
-    id: "installation-a",
-    skill: { name: "shared-skill", description: "First physical copy" },
-    source: { id: "shared-source", url: null },
-    identity: sharedIdentity,
-    location: {
-      path: "/fixtures/a/shared-skill",
-      canonicalPath: "/fixtures/a/shared-skill",
-      artifactType: { kind: "directory" },
-    },
-  });
-  const second = buildInstallation({
-    id: "installation-b",
-    skill: { name: "shared-skill", description: "Second physical copy" },
-    source: { id: "shared-source", url: null },
-    identity: sharedIdentity,
-    location: {
-      path: "/fixtures/b/shared-skill",
-      canonicalPath: "/fixtures/b/shared-skill",
-      artifactType: { kind: "directory" },
-    },
-  });
-  return buildInventory({
-    installations: [first, second],
-    logicalSkills: [
-      buildLogicalSkill({
-        id: "logical-shared",
-        skill: { name: "shared-skill", description: "Strong identity group" },
-        identity: sharedIdentity,
-        installationIds: [first.id, second.id],
-      }),
-    ],
-  });
-}
-
-function managedInstallation(): Installation {
   const removal: RemovalEvidence = {
     managed: {
       adapterId: "fixture-adapter",
@@ -159,129 +92,220 @@ function managedInstallation(): Installation {
       confidence: "declared",
     },
     removal,
+    ...overrides,
   });
 }
 
-describe("terminal inventory catalog", () => {
-  it("keeps same-name Installations from different sources visibly separate", () => {
-    const inventory = buildInventory({
-      installations: [
-        distinctInstallation("one", "source-a"),
-        distinctInstallation("two", "source-b"),
-      ],
-    });
-
-    const rows = visibleTuiRows(createTuiCatalog(inventory), new Set(), "");
-
-    expect(
-      rows.map((row) => [row.kind, row.name, row.search.source[0]]),
-    ).toEqual([
-      ["installation", "shared-name", "source-a"],
-      ["installation", "shared-name", "source-b"],
-    ]);
-  });
-
-  it("fuzzy-searches normalized metadata and applies every field filter", () => {
-    const installation = distinctInstallation("observability", "catalog", {
-      manager: { id: "skill-manager" },
-      ownership: {
-        kind: "manager",
-        managerId: "skill-manager",
-        confidence: "declared",
+function groupedInventory(): Inventory {
+  const members = ["alpha", "beta"].map((name) =>
+    managedInstallation({
+      id: `installation-${name}`,
+      skill: { name, description: `${name} description` },
+      source: { id: "acme/toolkit", url: null },
+      exposedTo: ["claude-code", "codex"],
+      location: {
+        path: `/fixtures/skills/${name}`,
+        canonicalPath: `/fixtures/skills/${name}`,
+        artifactType: { kind: "directory" },
       },
-      agentId: "codex",
-      scope: { kind: "workspace", workspacePath: "/fixtures/project" },
-      metadata: { vendor: { category: "Observabilité" } },
-    });
-    const pluginInstallation = distinctInstallation(
-      "toolkit-skill",
-      "registry",
-      {
-        classification: "managed-plugin-resource",
-        plugin: { id: "toolkit", version: "2.0.0" },
-        pluginBoundaryId: "toolkit-boundary",
-        ownership: {
-          kind: "plugin",
-          pluginId: "toolkit",
-          independentlySelectable: true,
-          confidence: "declared",
-        },
-        agentId: "claude",
-      },
-    );
-    const catalog = createTuiCatalog(
-      buildInventory({
-        installations: [installation, pluginInstallation],
-        plugins: [
+      identity: {
+        strongEvidence: [
           {
-            ...buildPluginBoundary(),
-            id: "toolkit-boundary",
-            pluginId: "toolkit",
-            version: "2.0.0",
-            installationIds: [pluginInstallation.id],
-            ownership: {
-              kind: "plugin",
-              pluginId: "toolkit",
-              independentlySelectable: true,
-              confidence: "declared",
-            },
+            strength: "strong",
+            kind: "canonical-target",
+            canonicalPath: `/fixtures/skills/${name}`,
           },
         ],
+        weakEvidence: [],
+      },
+    }),
+  );
+  return buildInventory({
+    installations: members,
+    logicalSkills: members.map((installation, index) =>
+      buildLogicalSkill({
+        id: `logical-${String(index)}`,
+        skill: installation.skill,
+        identity: {
+          strongEvidence: [installation.identity.strongEvidence[0]!],
+          weakEvidence: [],
+        },
+        installationIds: [installation.id],
+        groupId: "installation-group-1",
+        spansGroups: false,
+      }),
+    ),
+    groups: [
+      {
+        id: "installation-group-1",
+        label: "acme/toolkit",
+        tier: "declared",
+        evidence: {
+          tier: "declared",
+          kind: "manager-source",
+          managerId: "fixture-manager",
+          sourceId: "acme/toolkit",
+        },
+        scope: { kind: "user" },
+        installationIds: members.map((installation) => installation.id),
+      },
+    ],
+  });
+}
+
+describe("terminal section projection", () => {
+  it("builds sections from declared evidence and keeps System Skills unselectable", () => {
+    const sections = createTuiSections(
+      buildInventory({
+        installations: [buildInstallation()],
+        otherFindings: [buildSystemSkillFinding()],
+        logicalSkills: [buildLogicalSkill()],
+        plugins: [buildPluginBoundary()],
       }),
     );
 
-    for (const [query, count] of [
-      ["obsrvblt", 1],
-      ["plugin:toolkit", 2],
-      ["agent:codex", 1],
-      ["scope:workspace", 1],
-      ["source:catalog", 1],
-      ["manager:skill-manager", 1],
-      ["status:active manager:skill-manager", 1],
-    ] as const)
-      expect(visibleTuiRows(catalog, new Set(), query)).toHaveLength(count);
-    expect(visibleTuiRows(catalog, new Set(), "agent:unknown")).toHaveLength(0);
-  });
-
-  it("keeps non-installation findings out of ordinary views and exposes them for status inspection", () => {
-    const inventory = buildInventory({
-      installations: [],
-      otherFindings: [buildNonInstallationFinding()],
-    });
-    const catalog = createTuiCatalog(inventory);
-
-    expect(visibleTuiRows(catalog, new Set(), "source-skill")).toEqual([]);
     expect(
-      visibleTuiRows(catalog, new Set(), "status:source-only").map(
-        (row) => row.kind,
-      ),
-    ).toEqual(["finding"]);
+      sections.map((section) => [section.label, section.selectable]),
+    ).toEqual([
+      ["No shared source", true],
+      ["Plugins", true],
+      ["System skills", false],
+    ]);
+    expect(
+      sections.at(-1)?.entries.every((entry) => entry.target === null),
+    ).toBe(true);
   });
 
-  it("selects a Logical Skill as a group or an expanded physical Installation", async () => {
-    const inventory = logicalInventory();
-    const plannedTargets: RemovalPlan["targets"][] = [];
-    const controller = new TuiController({
-      scan: async () => inventory,
-      plan: (current, intent) => {
-        const removalPlan = plan(current, intent);
-        plannedTargets.push(removalPlan.targets);
-        return removalPlan;
-      },
-      execute: async () => buildExecutionReport(),
+  it("collapses a fully selected Group into one Source Group target", () => {
+    const sections = createTuiSections(groupedInventory());
+    const bundle = sections[0]!;
+    const every = new Set(bundle.entries.map((entry) => entry.key));
+
+    expect(selectionTargets(sections, every)).toEqual([
+      { kind: "source-group", groupId: "installation-group-1" },
+    ]);
+    expect(
+      selectionTargets(sections, new Set([bundle.entries[0]!.key])),
+    ).toEqual([{ kind: "logical-skill", logicalSkillId: "logical-0" }]);
+  });
+
+  it("represents an Installation that belongs to no Logical Skill", () => {
+    const sections = createTuiSections(
+      buildInventory({ installations: [buildInstallation()] }),
+    );
+
+    expect(sections[0]?.entries[0]?.target).toEqual({
+      kind: "installation",
+      installationId: "installation-1",
     });
+  });
+
+  it("offers a Plugin as its own boundary rather than its owned Skills", () => {
+    const sections = createTuiSections(
+      buildInventory({ installations: [], plugins: [buildPluginBoundary()] }),
+    );
+
+    expect(sections[0]?.entries[0]?.target).toEqual({
+      kind: "plugin",
+      pluginBoundaryId: "fixture-plugin",
+    });
+  });
+});
+
+describe("terminal pane navigation", () => {
+  const viewport = { rows: 24, columns: 100 };
+
+  it("renders a frame of constant height that never reaches the last column", () => {
+    const inventory = groupedInventory();
+    const base = createBrowseModel(createTuiSections(inventory), viewport);
+    for (const size of [
+      { rows: 24, columns: 100 },
+      { rows: 14, columns: 62 },
+      { rows: 50, columns: 200 },
+    ]) {
+      const model = reduceBrowse(base, { kind: "viewport", viewport: size });
+      const lines = renderBrowseLines({ screen: "browse", inventory, model });
+      expect(lines).toHaveLength(size.rows - 1);
+      for (const line of lines)
+        expect(visibleWidth(line)).toBeLessThanOrEqual(size.columns - 1);
+    }
+  });
+
+  it("advances one row at a time and scrolls only at the viewport margin", () => {
+    const sections = createTuiSections(groupedInventory());
+    let model = reduceBrowse(
+      createBrowseModel(sections, { rows: 14, columns: 90 }),
+      { kind: "focus", pane: "entries" },
+    );
+
+    let previousScroll = model.entryScroll;
+    for (let index = 0; index < 4; index += 1) {
+      const next = reduceBrowse(model, { kind: "move", delta: 1 });
+      expect(next.entryIndex - model.entryIndex).toBeLessThanOrEqual(1);
+      expect(next.entryScroll).toBeGreaterThanOrEqual(previousScroll);
+      previousScroll = next.entryScroll;
+      model = next;
+    }
+  });
+
+  it("takes a whole section from the section pane and refuses a protected one", () => {
+    const sections = createTuiSections(groupedInventory());
+    const model = createBrowseModel(sections, viewport);
+
+    const taken = reduceBrowse(model, { kind: "toggle-select" });
+    expect(taken.selected.size).toBe(sections[0]!.entries.length);
+    expect(reduceBrowse(taken, { kind: "toggle-select" }).selected.size).toBe(
+      0,
+    );
+
+    const refused = reduceBrowse(
+      createBrowseModel(
+        createTuiSections(
+          buildInventory({
+            installations: [],
+            otherFindings: [buildSystemSkillFinding()],
+          }),
+        ),
+        viewport,
+      ),
+      { kind: "toggle-select" },
+    );
+    expect(refused.selected.size).toBe(0);
+    expect(refused.notice).toContain("cannot be removed");
+  });
+
+  it("matches names as a subsequence and ignores descriptions", () => {
+    const sections = createTuiSections(groupedInventory());
+    const section = sections[0]!;
+
+    expect(matches(section.entries[0]!, section, "apa")).toBe(true);
+    expect(matches(section.entries[0]!, section, "zzz")).toBe(false);
+    expect(matches(section.entries[0]!, section, "description")).toBe(false);
+    expect(matches(section.entries[0]!, section, "acme")).toBe(true);
+  });
+
+  it("plans the selection, collapsing a whole bundle into its Group", async () => {
+    const inventory = groupedInventory();
+    const planned: RemovalPlan["targets"][] = [];
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan: (current, intent) => {
+          const removalPlan = plan(current, intent);
+          planned.push(removalPlan.targets);
+          return removalPlan;
+        },
+        execute: async () => buildExecutionReport(),
+      },
+      viewport,
+    );
 
     await controller.start();
+    await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "select" });
-    expect(plannedTargets[0]).toEqual([
-      { kind: "logical-skill", logicalSkillId: "logical-shared" },
-    ]);
-    await controller.dispatch({ kind: "cancel" });
-    await controller.dispatch({ kind: "toggle-expand" });
-    await controller.dispatch({ kind: "move", delta: 1 });
-    await controller.dispatch({ kind: "select" });
-    expect(plannedTargets[1]).toEqual([
-      { kind: "installation", installationId: "installation-a" },
+
+    expect(planned[0]).toEqual([
+      { kind: "source-group", groupId: "installation-group-1" },
     ]);
   });
 });
@@ -453,18 +477,22 @@ describe("terminal removal interactions", () => {
     const browse: TuiState = {
       screen: "browse",
       inventory,
-      query: "",
-      expandedKeys: new Set(),
-      rows: [],
-      cursor: 0,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
     };
 
-    expect(parseLineTuiAction(browse, "search manager:skills")).toEqual({
-      kind: "set-query",
-      value: "manager:skills",
+    expect(parseLineTuiAction(browse, "search alpha")).toEqual({
+      kind: "append-query",
+      value: "alpha",
     });
-    expect(parseLineTuiAction(browse, "expand")).toEqual({
-      kind: "toggle-expand",
+    expect(parseLineTuiAction(browse, "take")).toEqual({
+      kind: "toggle-select",
+    });
+    expect(parseLineTuiAction(browse, "in")).toEqual({
+      kind: "focus",
+      pane: "entries",
     });
     expect(
       parseLineTuiAction(
@@ -488,5 +516,160 @@ describe("terminal removal interactions", () => {
         "yes",
       ),
     ).toEqual({ kind: "confirm" });
+  });
+});
+
+describe("terminal pointer input", () => {
+  const inventory = groupedInventory();
+  const browse: TuiState = {
+    screen: "browse",
+    inventory,
+    model: createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 100,
+    }),
+  };
+  const idle = { dragging: false, doubleClick: false };
+  const press = (column: number, row: number, button = 0) => ({
+    button,
+    column,
+    row,
+    pressed: true,
+  });
+
+  it("parses an SGR report and ignores anything else", () => {
+    expect(parseMouseReport(`${String.fromCharCode(27)}[<0;12;7M`)).toEqual({
+      button: 0,
+      column: 12,
+      row: 7,
+      pressed: true,
+    });
+    expect(
+      parseMouseReport(`${String.fromCharCode(27)}[<0;12;7m`)?.pressed,
+    ).toBe(false);
+    expect(parseMouseReport(`${String.fromCharCode(27)}[A`)).toBeNull();
+  });
+
+  it("maps a click to the row beneath it in either pane", () => {
+    const { leftWidth } = layout(browse.model);
+    expect(mouseAction(browse, press(4, 5), idle)).toEqual({
+      kind: "point-section",
+      index: 0,
+    });
+    expect(mouseAction(browse, press(leftWidth + 8, 7), idle)).toEqual({
+      kind: "point-entry",
+      index: 1,
+    });
+  });
+
+  it("selects on a double click rather than a single one", () => {
+    expect(
+      mouseAction(browse, press(4, 5), { dragging: false, doubleClick: true }),
+    ).toEqual({ kind: "toggle-select" });
+  });
+
+  it("moves one row per wheel report, whichever way and with modifiers", () => {
+    expect(mouseAction(browse, press(4, 6, 64), idle)).toEqual({
+      kind: "move",
+      delta: -1,
+    });
+    expect(mouseAction(browse, press(4, 6, 65), idle)).toEqual({
+      kind: "move",
+      delta: 1,
+    });
+    // Bit 2 is a modifier; the wheel still reports through bits 6 and 0.
+    expect(mouseAction(browse, press(4, 6, 69), idle)).toEqual({
+      kind: "move",
+      delta: 1,
+    });
+  });
+
+  it("resizes from the divider and ignores motion that is not a drag", () => {
+    const { leftWidth } = layout(browse.model);
+    expect(mouseAction(browse, press(leftWidth + 1, 8), idle).kind).toBe(
+      "set-left-percent",
+    );
+    expect(mouseAction(browse, press(30, 8, 32), idle)).toEqual({
+      kind: "noop",
+    });
+    expect(
+      mouseAction(browse, press(30, 8, 32), {
+        dragging: true,
+        doubleClick: false,
+      }).kind,
+    ).toBe("set-left-percent");
+  });
+
+  it("ignores clicks on chrome, the section header, and empty rows", () => {
+    const { leftWidth } = layout(browse.model);
+    expect(mouseAction(browse, press(4, 2), idle)).toEqual({ kind: "noop" });
+    expect(mouseAction(browse, press(leftWidth + 8, 5), idle)).toEqual({
+      kind: "noop",
+    });
+    expect(mouseAction(browse, press(4, 90), idle)).toEqual({ kind: "noop" });
+  });
+});
+
+describe("raw terminal pointer input", () => {
+  const ESC = String.fromCharCode(27);
+
+  function fakeTty() {
+    const input = new PassThrough() as PassThrough & {
+      isTTY: boolean;
+      setRawMode: (value: boolean) => void;
+    };
+    input.isTTY = true;
+    input.setRawMode = () => undefined;
+    const written: string[] = [];
+    const output = {
+      isTTY: true,
+      write: (value: string) => written.push(value),
+    };
+    return { input, output, written };
+  }
+
+  it("takes every report in one read, including a wheel burst", () => {
+    expect(
+      parseMouseReports(`${ESC}[<65;3;9M${ESC}[<65;3;10M`).map(
+        (report) => report.row,
+      ),
+    ).toEqual([9, 10]);
+    expect(parseMouseReports("no mouse here")).toEqual([]);
+  });
+
+  it("reads a report readline would shred, without typing its digits", async () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 100,
+      }),
+    };
+    const { input, output, written } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    // Readline splits this into eight keypresses; none is a whole report.
+    input.write(`${ESC}[<0;4;5M`);
+    const action = await terminal.readAction(state);
+    expect(action).toEqual({ kind: "point-section", index: 0 });
+
+    // The digits must not have reached the filter as typed characters.
+    const raced = await Promise.race([
+      terminal.readAction(state),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 30)),
+    ]);
+    expect(raced).toBeNull();
+    terminal.close();
+
+    const codes = written.join("");
+    expect(codes).toContain("[?1049h");
+    expect(codes).toContain("[?1006h");
+    expect(codes).toContain("[?1049l");
+    expect(codes).toContain("[?1006l");
   });
 });

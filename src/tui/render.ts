@@ -1,131 +1,252 @@
 import type {
   ApprovalRequirement,
-  Dependency,
   ExecutableCommand,
-  Inventory,
   ManagedRemovalInvocation,
-  Ownership,
   PlanBlock,
   PlanWarning,
-  ProtectionStatus,
   RemovalAction,
   RemovalPlan,
   RemovalTarget,
-  Scope,
   VerificationCheck,
 } from "../model/types.js";
+import {
+  currentEntry,
+  currentSection,
+  layout,
+  panes,
+  sharedExposure,
+  sharedPathCount,
+} from "./browse.js";
 import type {
   TuiBrowseState,
+  TuiEntry,
+  TuiPaneView,
   TuiPlanState,
   TuiReportState,
-  TuiRow,
+  TuiSection,
   TuiState,
 } from "./types.js";
 
-export interface TuiRenderOptions {
-  readonly maxRows?: number;
-}
-
-export function renderTui(
-  state: TuiState,
-  options: TuiRenderOptions = {},
-): string {
+export function renderTui(state: TuiState): string {
   if (state.screen === "loading")
     return "skill-cleaner\n\nScanning known skill roots…\n";
   if (state.screen === "error")
     return `skill-cleaner\n\nUnable to continue: ${state.message}\n\nPress Esc or Ctrl-C to exit.\n`;
   if (state.screen === "done") return "";
-  if (state.screen === "browse")
-    return renderBrowse(state, options.maxRows ?? 12);
+  if (state.screen === "browse") return renderBrowse(state);
   if (state.screen === "plan") return renderPlan(state);
   return renderReport(state);
 }
 
-function renderBrowse(state: TuiBrowseState, maxRows: number): string {
-  const lines = [
-    "skill-cleaner — Inventory",
-    "",
-    `Search: ${state.query || "(type to fuzzy-search; filters: plugin: agent: scope: source: manager: status:)"}`,
-    "",
-  ];
-  const { start, end } = visibleWindow(
-    state.cursor,
-    state.rows.length,
-    maxRows,
-  );
-  if (start > 0) lines.push(`  … ${start} earlier result(s)`);
-  for (let index = start; index < end; index += 1) {
-    const row = state.rows[index]!;
-    const selected = index === state.cursor ? ">" : " ";
-    const indent = row.depth === 1 ? "  " : "";
-    const expansion = row.childCount > 0 ? (row.expanded ? "▾" : "▸") : " ";
-    const count = row.childCount > 0 ? ` (${row.childCount})` : "";
-    lines.push(
-      `${selected} ${indent}${expansion} [${rowLabel(row)}] ${row.name}${count} — ${row.summaryStatus}`,
-    );
-  }
-  if (end < state.rows.length)
-    lines.push(`  … ${state.rows.length - end} later result(s)`);
-  if (state.rows.length === 0) lines.push("  No matching inventory records.");
-  lines.push("", ...selectedDetails(state));
-  lines.push(
-    "",
-    "↑/↓ move   Enter review plan   →/Tab expand   Esc quit",
-    "Typing edits the search query; Backspace removes a character.",
-    "Source-only findings appear only with a status: inspection filter.",
-  );
-  return `${lines.join("\n")}\n`;
+/**
+ * The browse frame is a fixed grid.
+ *
+ * Two rules keep it still. Every line is clipped one column short of the
+ * width, because writing into the last cell makes an auto-margin terminal wrap
+ * and silently add a row. And text is fitted before it is styled, because
+ * fitting strips escape codes when it truncates, which would leave the same
+ * column dim on one row and plain on the next.
+ */
+function renderBrowse(state: TuiBrowseState): string {
+  return renderBrowseLines(state).join("\n");
 }
 
-function selectedDetails(state: TuiBrowseState): readonly string[] {
-  const row = state.rows[state.cursor];
-  if (row === undefined) return ["Details: no selection"];
-  const lines = [
-    `Details — ${rowLabel(row)}: ${row.name}`,
-    ...(row.description === null ? [] : [`  ${row.description}`]),
-  ];
-  if (row.installation !== null) {
-    const installation = row.installation;
-    lines.push(
-      `  Installation ID: ${installation.id}`,
-      `  Agent / scope: ${installation.agentId} / ${describeScope(installation.scope)}`,
-      `  Source: ${installation.source?.id ?? "none"}`,
-      `  Manager / Plugin: ${installation.manager?.id ?? "none"} / ${installation.plugin?.id ?? "none"}`,
-      `  Ownership: ${describeOwnership(installation.ownership)}`,
-      `  Path: ${installation.location.path} (${installation.location.artifactType.kind})`,
-      `  Protection: ${describeProtection(installation.protection)}`,
-      `  Removal: ${describeRemoval(installation.removal)}`,
-      ...dependencyLines(state.inventory, row),
-    );
-  } else if (row.logicalSkill !== null) {
-    lines.push(
-      `  Logical Skill ID: ${row.logicalSkill.id}`,
-      `  Installations: ${row.logicalSkill.installationIds.join(", ")}`,
-      "  Select this row for every Installation in this strong identity group; expand to select one physical Installation.",
-      ...dependencyLines(state.inventory, row),
-    );
-  } else if (row.plugin !== null) {
-    const plugin = row.plugin;
-    lines.push(
-      `  Plugin boundary ID: ${plugin.id}`,
-      `  Version / adapter: ${plugin.version ?? "unknown"} / ${plugin.adapterId ?? "none"}`,
-      `  Ownership: ${describeOwnership(plugin.ownership)}`,
-      `  Installations: ${plugin.installationIds.join(", ") || "none"}`,
-      `  Collateral resources: ${plugin.resources.map((resource) => `${resource.kind}:${resource.id}`).join(", ") || "none"}`,
-      `  Removal: ${describeRemoval(plugin.removal)}`,
-      ...dependencyLines(state.inventory, row),
-    );
-  } else if (row.finding !== null) {
-    const finding = row.finding;
-    lines.push(
-      `  Classification: ${finding.classification}`,
-      `  Path: ${finding.location.path}`,
-      `  Ownership: ${describeOwnership(finding.ownership)}`,
-      `  Protection: ${describeProtection(finding.protection)}`,
-      "  Inspection only: this record is not an independently removable Installation.",
+export function renderBrowseLines(state: TuiBrowseState): readonly string[] {
+  const model = state.model;
+  const { usable, paneRows, detailRows, leftWidth, rightWidth } = layout(model);
+  const view = panes(model);
+  const section = currentSection(model);
+  const entry = currentEntry(model);
+  const out: string[] = [];
+
+  const selected = model.selected.size;
+  out.push(
+    `${bold("skill-cleaner")} ${dim("inventory")}  ${
+      selected > 0
+        ? accent(`${String(selected)} selected`)
+        : dim("nothing selected")
+    }`,
+  );
+  out.push(
+    dim(
+      fit(
+        "arrows/click/wheel move · space select (a section takes all) · enter review · esc back · ^c quit",
+        usable,
+      ),
+    ),
+  );
+  out.push(
+    model.query === ""
+      ? dim(fit("filter: names, sections, agents, paths", usable))
+      : `filter ${bold(model.query)} ${dim(`· ${String(view.entries.total)} here`)}`,
+  );
+  out.push(`${"─".repeat(leftWidth)}┬${"─".repeat(usable - leftWidth - 1)}`);
+
+  for (let row = 0; row < paneRows; row += 1) {
+    out.push(
+      `${sectionCell(model, view.sections, row, leftWidth)}│${entryCell(
+        model,
+        view.entries,
+        section,
+        row,
+        rightWidth,
+      )}${dim(scrollMark(view.entries, row))}`,
     );
   }
+
+  out.push(`${"─".repeat(leftWidth)}┴${"─".repeat(usable - leftWidth - 1)}`);
+
+  const detail: { text: string; style: (value: string) => string }[] = [];
+  if (entry !== null) {
+    detail.push({
+      text: `${entry.name}   ${entry.owner}${entry.note === null ? "" : ` · ${entry.note}`}`,
+      style: bold,
+    });
+    for (const line of wrap(entry.description ?? "", usable - 2))
+      detail.push({ text: `  ${line}`, style: plain });
+    if (entry.paths.length > 0) detail.push({ text: "", style: plain });
+    for (const path of entry.paths)
+      detail.push({ text: `  ${path}`, style: dim });
+  }
+  for (let row = 0; row < detailRows; row += 1) {
+    const line = detail[row];
+    out.push(
+      line === undefined
+        ? " ".repeat(usable)
+        : line.style(fit(line.text, usable)),
+    );
+  }
+
+  out.push(
+    model.notice === null
+      ? dim(
+          fit(
+            `focus=${model.focus} section=${String(model.sectionIndex + 1)}/${String(view.sections.total)} entry=${String(view.entries.total === 0 ? 0 : model.entryIndex + 1)}/${String(view.entries.total)}`,
+            usable,
+          ),
+        )
+      : accent(fit(`! ${model.notice}`, usable)),
+  );
+
+  return out.map((line) => fit(line, usable));
+}
+
+function sectionCell(
+  model: TuiBrowseState["model"],
+  view: TuiPaneView<TuiSection>,
+  row: number,
+  width: number,
+): string {
+  const item = view.items[row];
+  if (item === undefined) return " ".repeat(width);
+  const index = view.offset + row;
+  const focused = index === model.sectionIndex;
+  const taken = item.entries.filter((entry) =>
+    model.selected.has(entry.key),
+  ).length;
+  const marker = !item.selectable
+    ? " - "
+    : taken === 0
+      ? "[ ]"
+      : taken === item.entries.length
+        ? "[x]"
+        : "[~]";
+  const count =
+    taken > 0
+      ? `${String(taken)}/${String(item.entries.length)}`
+      : String(item.entries.length);
+  const text = `${marker} ${fit(item.label, width - 12)} ${fit(count, 6)} `;
+  if (focused && model.focus === "sections") return inverse(fit(text, width));
+  return focused ? bold(fit(text, width)) : fit(text, width);
+}
+
+function entryCell(
+  model: TuiBrowseState["model"],
+  view: TuiPaneView<TuiEntry>,
+  section: TuiSection | null,
+  row: number,
+  width: number,
+): string {
+  if (row === 0) {
+    if (section === null) return " ".repeat(width);
+    const exposure = sharedExposure(section);
+    const paths = sharedPathCount(section);
+    const detail = [
+      `${String(section.entries.length)} entries`,
+      section.detail,
+      paths === null || paths <= 1 ? null : `${String(paths)} paths each`,
+      exposure === null || exposure === "" ? null : exposure,
+    ]
+      .filter((value): value is string => value !== null)
+      .join(" · ");
+    const label = Math.min(24, width);
+    return `${bold(fit(section.label, label))}${dim(fit(` ${detail}`, width - label))}`;
+  }
+
+  const entry = view.items[row - 1];
+  if (entry === undefined) return " ".repeat(width);
+  const index = view.offset + row - 1;
+  const focused = index === model.entryIndex && model.focus === "entries";
+  const marker =
+    section !== null && !section.selectable
+      ? " - "
+      : model.selected.has(entry.key)
+        ? "[x]"
+        : "[ ]";
+  const exposure = section === null ? null : sharedExposure(section);
+  const differs = exposure === null || entry.exposedTo.join(" ") !== exposure;
+  const note = entry.note ?? (differs ? entry.exposedTo.join(" ") : "");
+  const nameWidth = Math.max(6, Math.min(44, width - 22));
+  const head = `${marker} ${fit(entry.name, nameWidth)} `;
+  const tail = fit(note, Math.max(0, width - nameWidth - 5));
+  if (focused) return inverse(fit(head + tail, width));
+  return `${fit(head, nameWidth + 5)}${dim(tail)}`;
+}
+
+function scrollMark(pane: TuiPaneView<unknown>, row: number): string {
+  if (pane.total <= pane.height) return " ";
+  const span = Math.max(
+    1,
+    Math.round((pane.height / pane.total) * pane.height),
+  );
+  const start = Math.round((pane.offset / pane.total) * pane.height);
+  return row >= start && row < start + span ? "█" : "│";
+}
+
+/** Greedy word wrap, so a long description reads instead of being cut off. */
+function wrap(text: string, width: number): readonly string[] {
+  if (text === "" || width <= 0) return [];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/u).filter(Boolean)) {
+    if (line === "") line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== "") lines.push(line);
   return lines;
+}
+
+const escape = String.fromCharCode(27);
+const ansi = new RegExp(`${escape}\\[[0-9;]*m`, "gu");
+const stripAnsi = (value: string): string => value.replace(ansi, "");
+const visibleLength = (value: string): number => [...stripAnsi(value)].length;
+const plain = (value: string): string => value;
+const bold = (value: string): string => `${escape}[1m${value}${escape}[0m`;
+const dim = (value: string): string => `${escape}[2m${value}${escape}[0m`;
+const inverse = (value: string): string => `${escape}[7m${value}${escape}[0m`;
+const accent = (value: string): string => `${escape}[36m${value}${escape}[0m`;
+
+/** Fits to an exact visible width. Styling is applied after, never before. */
+function fit(value: string, width: number): string {
+  if (width <= 0) return "";
+  const length = visibleLength(value);
+  if (length === width) return value;
+  if (length < width) return value + " ".repeat(width - length);
+  return `${[...stripAnsi(value)].slice(0, Math.max(0, width - 1)).join("")}…`;
 }
 
 function renderPlan(state: TuiPlanState): string {
@@ -231,47 +352,6 @@ function renderReport(state: TuiReportState): string {
   return `${lines.join("\n")}\n`;
 }
 
-function dependencyLines(inventory: Inventory, row: TuiRow): readonly string[] {
-  const dependencies = inventory.dependencies.filter((dependency) =>
-    dependencyTouchesRow(dependency, row),
-  );
-  return dependencies.length === 0
-    ? ["  Dependencies / references: none"]
-    : [
-        "  Dependencies / references:",
-        ...dependencies.map(
-          (dependency) =>
-            `    - ${dependency.kind}: ${dependency.kind === "hard" ? dependency.reason : dependency.evidence}`,
-        ),
-      ];
-}
-
-function dependencyTouchesRow(dependency: Dependency, row: TuiRow): boolean {
-  if (row.target !== null && sameTarget(dependency.target, row.target))
-    return true;
-  const ids =
-    row.logicalSkill?.installationIds ??
-    row.plugin?.installationIds ??
-    (row.installation === null ? [] : [row.installation.id]);
-  return (
-    dependency.kind === "hard" &&
-    ids.includes(dependency.dependentInstallationId)
-  );
-}
-
-function sameTarget(left: RemovalTarget, right: RemovalTarget): boolean {
-  if (left.kind !== right.kind) return false;
-  if (left.kind === "installation" && right.kind === "installation")
-    return left.installationId === right.installationId;
-  if (left.kind === "logical-skill" && right.kind === "logical-skill")
-    return left.logicalSkillId === right.logicalSkillId;
-  return (
-    left.kind === "plugin" &&
-    right.kind === "plugin" &&
-    left.pluginBoundaryId === right.pluginBoundaryId
-  );
-}
-
 function describeAction(action: RemovalAction): string {
   if (action.kind === "quarantine")
     return `${action.id}: quarantine ${action.location.path}`;
@@ -372,76 +452,6 @@ function describeTarget(target: RemovalTarget): string {
     return `Logical Skill ${target.logicalSkillId}`;
   if (target.kind === "source-group") return `Source Group ${target.groupId}`;
   return `Plugin ${target.pluginBoundaryId}`;
-}
-
-function describeOwnership(ownership: Ownership): string {
-  if (ownership.kind === "filesystem")
-    return `filesystem (${ownership.confidence})`;
-  if (ownership.kind === "manager")
-    return `Manager ${ownership.managerId} (${ownership.confidence})`;
-  if (ownership.kind === "plugin")
-    return `Plugin ${ownership.pluginId} (${ownership.confidence}; ${ownership.independentlySelectable ? "independently selectable" : "boundary-only"})`;
-  if (ownership.kind === "agent-runtime")
-    return `agent runtime ${ownership.agentId} (${ownership.confidence})`;
-  return "unknown";
-}
-
-function describeProtection(protection: ProtectionStatus): string {
-  return [
-    `Git ${protection.git.kind}`,
-    protection.system.kind === "system-skill"
-      ? `System Skill (${protection.system.agentId})`
-      : "not a System Skill",
-    protection.filesystem.kind === "read-only"
-      ? `read-only (${protection.filesystem.reason})`
-      : "writable",
-  ].join("; ");
-}
-
-function describeRemoval(removal: {
-  readonly managed: {
-    readonly adapterId: string;
-    readonly operationId: string;
-    readonly availability: { readonly kind: string; readonly reason?: string };
-    readonly trust: { readonly kind: string };
-  } | null;
-  readonly fallback: { readonly kind: string; readonly reason?: string };
-}): string {
-  const managed =
-    removal.managed === null
-      ? "no managed removal"
-      : `managed by ${removal.managed.adapterId}/${removal.managed.operationId} (${removal.managed.availability.kind}, ${removal.managed.trust.kind})`;
-  const fallback =
-    removal.fallback.kind === "available"
-      ? "separately confirmed quarantine fallback available"
-      : `fallback unavailable${removal.fallback.reason === undefined ? "" : `: ${removal.fallback.reason}`}`;
-  return `${managed}; ${fallback}`;
-}
-
-function describeScope(scope: Scope): string {
-  if (scope.kind === "user") return "user";
-  if (scope.kind === "workspace") return `workspace:${scope.workspacePath}`;
-  return `agent:${scope.agentId}`;
-}
-
-function rowLabel(row: TuiRow): string {
-  if (row.kind === "logical-skill") return "Logical Skill";
-  if (row.kind === "installation") return "Installation";
-  if (row.kind === "plugin") return "Plugin";
-  return row.finding?.classification === "system-skill"
-    ? "System Skill"
-    : "source-only";
-}
-
-function visibleWindow(
-  cursor: number,
-  length: number,
-  maximum: number,
-): { readonly start: number; readonly end: number } {
-  if (length <= maximum) return { start: 0, end: length };
-  const half = Math.floor(maximum / 2);
-  const start = Math.max(0, Math.min(cursor - half, length - maximum));
-  return { start, end: start + maximum };
 }
 
 function indented(lines: readonly string[]): readonly string[] {

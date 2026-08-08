@@ -4,10 +4,15 @@ import type {
   RemovalPlan,
   RemovalPlanIntent,
 } from "../model/types.js";
-import { createTuiCatalog, visibleTuiRows } from "./catalog.js";
+import {
+  createBrowseModel,
+  currentEntry,
+  reduceBrowse,
+  type TuiBrowseCommand,
+} from "./browse.js";
+import { createTuiSections, selectionTargets } from "./sections.js";
 import type {
   TuiAction,
-  TuiBrowseSnapshot,
   TuiBrowseState,
   TuiDependencies,
   TuiPlanState,
@@ -17,9 +22,11 @@ import type {
 
 export class TuiController {
   private stateValue: TuiState = { screen: "loading" };
-  private catalog: ReturnType<typeof createTuiCatalog> = [];
 
-  constructor(private readonly dependencies: TuiDependencies) {}
+  constructor(
+    private readonly dependencies: TuiDependencies,
+    private readonly viewport = { rows: 30, columns: 100 },
+  ) {}
 
   get state(): TuiState {
     return this.stateValue;
@@ -28,10 +35,10 @@ export class TuiController {
   async start(): Promise<void> {
     try {
       const inventory = await this.dependencies.scan();
-      this.catalog = createTuiCatalog(inventory);
       this.stateValue = {
         screen: "browse",
-        ...this.createBrowse(inventory, "", new Set(), 0),
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), this.viewport),
       };
     } catch (error: unknown) {
       this.fail(error);
@@ -59,69 +66,77 @@ export class TuiController {
     state: TuiBrowseState,
     action: TuiAction,
   ): Promise<void> {
-    if (action.kind === "quit" || action.kind === "cancel") {
+    if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: null };
       return;
     }
-    if (action.kind === "move") {
+    if (action.kind === "cancel") {
+      // Escape unwinds the narrowest thing first, and only leaves as a last
+      // resort, so a stray keypress cannot discard a selection.
+      const { model } = state;
+      if (model.query !== "") {
+        this.stateValue = {
+          ...state,
+          model: reduceBrowse(model, { kind: "clear-query" }),
+        };
+        return;
+      }
+      if (model.focus === "entries") {
+        this.stateValue = {
+          ...state,
+          model: reduceBrowse(model, { kind: "focus", pane: "sections" }),
+        };
+        return;
+      }
+      if (model.selected.size > 0) {
+        this.stateValue = {
+          ...state,
+          model: reduceBrowse(model, { kind: "clear-selection" }),
+        };
+        return;
+      }
+      this.stateValue = { screen: "done", report: null };
+      return;
+    }
+
+    const command = browseCommand(action);
+    if (command !== null) {
+      this.stateValue = { ...state, model: reduceBrowse(state.model, command) };
+      return;
+    }
+
+    if (action.kind !== "select" && action.kind !== "confirm") return;
+    const targets = this.targetsFor(state);
+    if (targets.length === 0) {
       this.stateValue = {
         ...state,
-        cursor: movedCursor(state.cursor, state.rows.length, action.delta),
+        model: { ...state.model, notice: "Nothing selected." },
       };
       return;
     }
-    if (
-      action.kind === "set-query" ||
-      action.kind === "append-query" ||
-      action.kind === "delete-query"
-    ) {
-      const query = updatedQuery(state.query, action);
-      const selectedKey = state.rows[state.cursor]?.key;
-      const next = this.createBrowse(
-        state.inventory,
-        query,
-        state.expandedKeys,
-        0,
-      );
-      const preserved = next.rows.findIndex((row) => row.key === selectedKey);
-      this.stateValue = {
-        screen: "browse",
-        ...next,
-        cursor: preserved >= 0 ? preserved : 0,
-      };
-      return;
-    }
-    const selected = state.rows[state.cursor];
-    if (selected === undefined) return;
-    if (action.kind === "toggle-expand") {
-      if (selected.childCount === 0 || selected.depth !== 0) return;
-      const expanded = new Set(state.expandedKeys);
-      if (expanded.has(selected.key)) expanded.delete(selected.key);
-      else expanded.add(selected.key);
-      const next = this.createBrowse(
-        state.inventory,
-        state.query,
-        expanded,
-        state.cursor,
-      );
-      this.stateValue = { screen: "browse", ...next };
-      return;
-    }
-    if (action.kind === "select" && selected.target !== null) {
-      const removalPlan = this.dependencies.plan(state.inventory, {
+    this.stateValue = {
+      screen: "plan",
+      browse: { inventory: state.inventory, model: state.model },
+      plan: this.dependencies.plan(state.inventory, {
         kind: "targets",
-        targets: [selected.target],
+        targets,
         force: false,
         mode: "managed-first",
-      });
-      this.stateValue = {
-        screen: "plan",
-        browse: snapshot(state),
-        plan: removalPlan,
-        label: selected.name,
-        returnReport: null,
-      };
-    }
+      }),
+      label: planLabel(state, targets.length),
+      returnReport: null,
+    };
+  }
+
+  /** An explicit selection, or the row under the cursor when there is none. */
+  private targetsFor(state: TuiBrowseState) {
+    const selected = selectionTargets(
+      state.model.sections,
+      state.model.selected,
+    );
+    if (selected.length > 0) return selected;
+    const entry = currentEntry(state.model);
+    return entry?.target === null || entry === null ? [] : [entry.target];
   }
 
   private async planAction(
@@ -202,22 +217,6 @@ export class TuiController {
     };
   }
 
-  private createBrowse(
-    inventory: TuiBrowseSnapshot["inventory"],
-    query: string,
-    expandedKeys: ReadonlySet<string>,
-    cursor: number,
-  ): TuiBrowseSnapshot {
-    const rows = visibleTuiRows(this.catalog, expandedKeys, query);
-    return {
-      inventory,
-      query,
-      expandedKeys,
-      rows,
-      cursor: clampCursor(cursor, rows.length),
-    };
-  }
-
   private fail(error: unknown): void {
     this.stateValue = {
       screen: "error",
@@ -241,33 +240,47 @@ export function approvalGrants(
     );
 }
 
-function snapshot(state: TuiBrowseState): TuiBrowseSnapshot {
-  return {
-    inventory: state.inventory,
-    query: state.query,
-    expandedKeys: state.expandedKeys,
-    rows: state.rows,
-    cursor: state.cursor,
-  };
+/** Actions the pure browse model owns; everything else is a screen change. */
+function browseCommand(action: TuiAction): TuiBrowseCommand | null {
+  switch (action.kind) {
+    case "append-query":
+      return { kind: "type", value: action.value };
+    case "delete-query":
+      return { kind: "backspace" };
+    case "move":
+      return { kind: "move", delta: action.delta };
+    case "page":
+      return { kind: "page", delta: action.delta };
+    case "focus":
+      return { kind: "focus", pane: action.pane };
+    case "point-section":
+      return { kind: "point-section", index: action.index };
+    case "point-entry":
+      return { kind: "point-entry", index: action.index };
+    case "resize-panes":
+      return { kind: "resize-panes", delta: action.delta };
+    case "set-left-percent":
+      return { kind: "set-left-percent", percent: action.percent };
+    case "resize-detail":
+      return { kind: "resize-detail", delta: action.delta };
+    case "viewport":
+      return { kind: "viewport", viewport: action.viewport };
+    case "toggle-select":
+      return { kind: "toggle-select" };
+    case "clear-selection":
+      return { kind: "clear-selection" };
+    default:
+      return null;
+  }
 }
 
-function updatedQuery(
-  query: string,
-  action: Extract<
-    TuiAction,
-    { kind: "set-query" | "append-query" | "delete-query" }
-  >,
-): string {
-  if (action.kind === "set-query") return action.value;
-  if (action.kind === "append-query") return `${query}${action.value}`;
-  return Array.from(query).slice(0, -1).join("");
+function planLabel(state: TuiBrowseState, targets: number): string {
+  if (state.model.selected.size === 0)
+    return currentEntry(state.model)?.name ?? "selection";
+  return `${String(targets)} target${targets === 1 ? "" : "s"}`;
 }
 
-function movedCursor(current: number, length: number, delta: -1 | 1): number {
+function movedCursor(current: number, length: number, delta: number): number {
   if (length === 0) return 0;
   return (current + delta + length) % length;
-}
-
-function clampCursor(cursor: number, length: number): number {
-  return length === 0 ? 0 : Math.min(Math.max(cursor, 0), length - 1);
 }
