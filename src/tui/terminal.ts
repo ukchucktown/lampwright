@@ -35,8 +35,8 @@ const SGR_MOUSE_INCOMPLETE = new RegExp(
 );
 const DOUBLE_CLICK_MS = 400;
 
-/** Rows above the panes: title, hints, filter, top rule. */
-const PANE_TOP = 4;
+/** Rows above browse panes: title, hints, filter, and top rule. */
+const BROWSE_PANE_TOP = 4;
 
 interface MouseReport {
   readonly button: number;
@@ -137,12 +137,12 @@ export function mouseAction(
       : { kind: "noop" };
   if (state.screen === "search") {
     const grid = searchLayout(state.model.viewport);
-    if (grid.rows < 7 || grid.columns < 20) return { kind: "noop" };
+    if (grid.compact) return { kind: "noop" };
     if ((report.button & 64) !== 0)
       return report.column >= 1 && report.column <= grid.leftWidth
         ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
         : { kind: "noop" };
-    const row = report.row - PANE_TOP - 1;
+    const row = report.row - grid.resultStartRow;
     if (
       !report.pressed ||
       report.column < 1 ||
@@ -160,7 +160,7 @@ export function mouseAction(
   if (state.screen !== "browse") return { kind: "noop" };
   const grid = layout(state.model);
   const { leftWidth, columns, paneRows, rows } = grid;
-  const detailDividerRow = PANE_TOP + paneRows + 1;
+  const detailDividerRow = BROWSE_PANE_TOP + paneRows + 1;
 
   if ((report.button & 64) !== 0) {
     const pane = pointerPane(state, report);
@@ -184,7 +184,7 @@ export function mouseAction(
   if (
     context.dragging === "panes" ||
     (report.column === leftWidth + 1 &&
-      report.row > PANE_TOP &&
+      report.row > BROWSE_PANE_TOP &&
       report.row < detailDividerRow)
   )
     return {
@@ -208,14 +208,14 @@ export function mouseAction(
 function pointerPane(state: TuiState, report: MouseReport): PointerPane | null {
   if (state.screen !== "browse") return null;
   const { paneRows, detailRows, leftWidth, usable } = layout(state.model);
-  const paneRow = report.row - PANE_TOP - 1;
+  const paneRow = report.row - BROWSE_PANE_TOP - 1;
   if (paneRow >= 0 && paneRow < paneRows) {
     if (report.column >= 1 && report.column <= leftWidth) return "sections";
     if (report.column > leftWidth + 1 && report.column <= usable)
       return "entries";
     return null;
   }
-  const detailRow = report.row - (PANE_TOP + paneRows + 2);
+  const detailRow = report.row - (BROWSE_PANE_TOP + paneRows + 2);
   if (
     detailRow >= 0 &&
     detailRow < detailRows &&
@@ -230,7 +230,7 @@ function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
   if (state.screen !== "browse") return null;
   const pane = pointerPane(state, report);
   if (pane === null || pane === "detail") return null;
-  const paneRow = report.row - PANE_TOP - 1;
+  const paneRow = report.row - BROWSE_PANE_TOP - 1;
   const view = panes(state.model);
   if (pane === "sections") {
     const index = view.sections.offset + paneRow;
@@ -444,18 +444,16 @@ class RawTuiTerminal implements TuiTerminal {
       (report.button & 3) !== 0
     )
       return false;
-    if (
-      state.screen === "search" &&
-      (searchLayout(state.model.viewport).rows < 7 ||
-        searchLayout(state.model.viewport).columns < 20)
-    )
+    if (state.screen === "search" && searchLayout(state.model.viewport).compact)
       return false;
     const pointed = pointedRow(state, report);
     const searchRow =
       state.screen === "search" &&
       report.column >= 1 &&
       report.column <= searchLayout(state.model.viewport).leftWidth
-        ? report.row - PANE_TOP - 1 + state.model.scroll
+        ? report.row -
+          searchLayout(state.model.viewport).resultStartRow +
+          state.model.scroll
         : -1;
     if (
       pointed === null &&

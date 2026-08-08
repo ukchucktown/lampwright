@@ -57,7 +57,7 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
   const { model } = state;
   const grid = searchLayout(model.viewport);
   const { usable, resultRows: rows, leftWidth: left, rightWidth: right } = grid;
-  if (grid.rows < 7 || grid.columns < 20)
+  if (grid.compact)
     return [
       style.title(fit("skill-cleaner", usable)),
       style.warning(fit("Resize the terminal", usable)),
@@ -100,6 +100,16 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
     ),
     fitStyledSegments(
       [
+        { text: "> ", paint: style.title },
+        ...(model.query === ""
+          ? [{ text: "type a name regex", paint: style.muted }]
+          : [{ text: model.query, paint: style.active }]),
+      ],
+      usable,
+      style.muted,
+    ),
+    fitStyledSegments(
+      [
         { text: "↑↓", paint: style.title },
         { text: " move · ", paint: style.muted },
         { text: "space", paint: style.title },
@@ -119,13 +129,15 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
     model.matchError === null
       ? fitStyledSegments(
           [
-            { text: "regex ", paint: style.muted },
+            { text: "matching ", paint: style.muted },
             {
-              text: model.query === "" ? "(all Skills)" : model.query,
-              paint: style.active,
+              text: `${String(model.results.length)} ${
+                model.results.length === 1 ? "Skill" : "Skills"
+              }`,
+              paint: style.info,
             },
             {
-              text: ` · ${String(model.results.length)} matches`,
+              text: model.query === "" ? " · all Skills" : "",
               paint: style.muted,
             },
           ],
