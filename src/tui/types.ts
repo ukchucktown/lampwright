@@ -193,7 +193,10 @@ export interface TuiReportState {
   readonly screen: "report";
   readonly browse: TuiBrowseSnapshot;
   readonly report: ExecutionReport;
+  readonly label: string;
   readonly fallbackCursor: number;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
 }
 
 export interface TuiErrorState {
@@ -255,6 +258,7 @@ export type TuiAction =
   | { readonly kind: "cancel" }
   | { readonly kind: "force" }
   | { readonly kind: "fallback" }
+  | { readonly kind: "select-fallback"; readonly delta: number }
   | { readonly kind: "quit" };
 
 export type TuiOutcome =

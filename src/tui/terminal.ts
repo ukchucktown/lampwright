@@ -131,7 +131,7 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
-  if (state.screen === "plan")
+  if (state.screen === "plan" || state.screen === "report")
     return (report.button & 64) !== 0
       ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
       : { kind: "noop" };
@@ -323,8 +323,15 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     return { kind: "noop" };
   }
   if (state.screen === "report") {
+    if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
     if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "pageup") return { kind: "page", delta: -1 };
+    if (value === "pagedown") return { kind: "page", delta: 1 };
+    if (value === "previous" || value === "left")
+      return { kind: "select-fallback", delta: -1 };
+    if (value === "next" || value === "right")
+      return { kind: "select-fallback", delta: 1 };
     if (value === "fallback" || value === "f") return { kind: "fallback" };
     if (value === "quit" || value === "q" || value === "done")
       return { kind: "quit" };
@@ -581,6 +588,11 @@ export function parseRawTuiAction(
   }
   if (state.screen === "report") {
     if (key.name === "escape" || text === "q") return { kind: "quit" };
+    if (text === "d") return { kind: "toggle-details" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
+    if (key.name === "left") return { kind: "select-fallback", delta: -1 };
+    if (key.name === "right") return { kind: "select-fallback", delta: 1 };
     if (text === "f") return { kind: "fallback" };
     return { kind: "noop" };
   }
