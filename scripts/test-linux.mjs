@@ -44,7 +44,7 @@ export async function runLinuxTests(
   let failed = false;
   for (const version of versions) {
     output.write(`\n=== node:${version} on linux ===\n`);
-    const temporary = await mkdtemp(join(tmpdir(), "skill-cleaner-linux-"));
+    const temporary = await mkdtemp(join(tmpdir(), "lampwright-linux-"));
     const staged = join(temporary, basename(repositoryRoot));
     let containerId = null;
     try {

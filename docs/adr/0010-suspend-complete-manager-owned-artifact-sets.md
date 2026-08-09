@@ -1,6 +1,6 @@
 # Suspend complete Manager-owned artifact sets without changing Manager state
 
-When a Manager-owned Skill has an unsupported Harness Exposure, `skill-cleaner`
+When a Manager-owned Skill has an unsupported Harness Exposure, `lampwright`
 may use Suspended Disable only if Inventory explicitly enumerates the complete
 primary and supplemental discovery artifact set. Disabled Storage treats that
 set as one reversible operation while preserving the Manager record; this keeps

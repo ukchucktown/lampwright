@@ -45,9 +45,9 @@ export function renderTui(
 ): string {
   const style = createPaint(theme);
   if (state.screen === "loading")
-    return `${style.title("skill-cleaner")}\n\n${style.info("Scanning known skill roots…")}\n`;
+    return `${style.title("Lampwright")}\n\n${style.info("Scanning known skill roots…")}\n`;
   if (state.screen === "error")
-    return `${style.title("skill-cleaner")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or ctrl-c to exit.")}\n`;
+    return `${style.title("Lampwright")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or ctrl-c to exit.")}\n`;
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
@@ -61,7 +61,7 @@ export function renderTui(
     return renderAvailabilityReport(state, style);
   if (state.screen === "trash-review") return renderTrashReview(state, style);
   if (state.screen === "trash-executing")
-    return `${style.title("skill-cleaner — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
+    return `${style.title("Lampwright — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
   if (state.screen === "trash-report") return renderTrashReport(state, style);
   return renderReport(state, style);
 }
@@ -128,7 +128,7 @@ function trashReviewBodyLines(
       : null;
   const lines = [
     style.title(
-      `skill-cleaner — ${state.kind === "restore" ? "Restore review" : "Permanent purge review"}`,
+      `Lampwright — ${state.kind === "restore" ? "Restore review" : "Permanent purge review"}`,
     ),
     "",
     ...wrapPlanLine(state.operation.displayNames.join(", "), width).map(
@@ -226,7 +226,7 @@ function trashReportBodyLines(
           ? "Permanently purged with concerns"
           : "Could not permanently purge";
   const lines = [
-    style.title("skill-cleaner — Trash result"),
+    style.title("Lampwright — Trash result"),
     "",
     status === "restored" || status === "purged"
       ? style.success(heading)
@@ -330,7 +330,7 @@ function availabilityPlanBodyLines(
   const width = Math.max(1, state.browse.model.viewport.columns - 1);
   const operation = state.plan.intent.operation;
   const lines: string[] = [
-    style.title(`skill-cleaner — Review ${operation}`),
+    style.title(`Lampwright — Review ${operation}`),
     "",
     style.title(
       `${operation === "disable" ? "Disable" : "Enable"} ${state.label}?`,
@@ -561,7 +561,7 @@ function renderAvailabilityExecuting(
 ): string {
   const verb =
     state.plan.intent.operation === "disable" ? "Disabling" : "Enabling";
-  return `${style.title(`skill-cleaner — ${verb}`)}\n\n${style.info(`${verb} ${state.label}…`)}\n${style.muted(`${String(state.plan.targets.length)} approved target(s) · ${String(state.plan.actions.length)} approved action(s)`)}\n${style.muted("The final scan and verification must finish before results appear.")}\n`;
+  return `${style.title(`Lampwright — ${verb}`)}\n\n${style.info(`${verb} ${state.label}…`)}\n${style.muted(`${String(state.plan.targets.length)} approved target(s) · ${String(state.plan.actions.length)} approved action(s)`)}\n${style.muted("The final scan and verification must finish before results appear.")}\n`;
 }
 
 function renderAvailabilityReport(
@@ -592,7 +592,7 @@ function availabilityReportBodyLines(
 ): readonly string[] {
   const width = Math.max(1, state.browse.model.viewport.columns - 1);
   const lines: string[] = [
-    style.title("skill-cleaner — Availability result"),
+    style.title("Lampwright — Availability result"),
     "",
     state.report.status === "succeeded"
       ? style.success(`${state.label}: completed`)
@@ -718,7 +718,7 @@ function renderCompactAvailability(
 ): string {
   const width = Math.max(0, viewport.columns - 1);
   return `${[
-    style.title("skill-cleaner"),
+    style.title("Lampwright"),
     style.warning("Resize the terminal"),
     style.muted("q quit"),
   ]
@@ -731,7 +731,7 @@ function renderExecuting(state: TuiExecutingState, style: TuiPaint): string {
   const width = Math.max(0, state.browse.model.viewport.columns - 1);
   const rows = Math.max(0, state.browse.model.viewport.rows - 1);
   const lines = [
-    { text: "skill-cleaner — Removing", paint: style.title },
+    { text: "Lampwright — Removing", paint: style.title },
     { text: "", paint: style.muted },
     { text: `Removing ${state.label}`, paint: style.active },
     {
@@ -765,7 +765,7 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
   const { usable, resultRows: rows, leftWidth: left, rightWidth: right } = grid;
   if (grid.compact)
     return [
-      style.title(fit("skill-cleaner", usable)),
+      style.title(fit("Lampwright", usable)),
       style.warning(fit("Resize the terminal", usable)),
     ]
       .slice(0, Math.max(0, model.viewport.rows - 1))
@@ -791,7 +791,7 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
   const out = [
     fitStyledSegments(
       [
-        { text: "skill-cleaner", paint: style.title },
+        { text: "Lampwright", paint: style.title },
         { text: " search  ", paint: style.muted },
         {
           text:
@@ -903,7 +903,7 @@ export function browseTabHitboxes(state: TuiBrowseState): {
   readonly disabled: readonly [number, number];
   readonly trash: readonly [number, number];
 } {
-  const inventoryStart = "skill-cleaner ".length + 1;
+  const inventoryStart = "Lampwright ".length + 1;
   const inventoryEnd = inventoryStart + "Inventory".length - 1;
   const disabledStart = inventoryEnd + 4;
   const disabledEnd =
@@ -937,7 +937,7 @@ export function renderBrowseLines(
   const selected = model.selected.size;
   const trashCount = state.operations?.size ?? 0;
   out.push(
-    `${style.title("skill-cleaner")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.title(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.title(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -1212,7 +1212,7 @@ function renderCompactBrowse(
   style: TuiPaint,
 ): readonly string[] {
   const lines = [
-    style.title("skill-cleaner"),
+    style.title("Lampwright"),
     style.warning("Resize the terminal"),
     style.muted("q quit"),
   ];
@@ -1334,7 +1334,7 @@ function renderCompactPlan(state: TuiPlanState, style: TuiPaint): string {
   const rows = Math.max(0, state.browse.model.viewport.rows - 1);
   const width = Math.max(0, state.browse.model.viewport.columns - 1);
   return `${[
-    style.title("skill-cleaner"),
+    style.title("Lampwright"),
     style.warning("Resize the terminal"),
     style.muted("q quit"),
   ]
@@ -1348,7 +1348,7 @@ function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
   const ready = removalPlan.blocks.length === 0;
   const width = Math.max(1, state.browse.model.viewport.columns - 1);
   const lines = [
-    style.title("skill-cleaner — Review removal"),
+    style.title("Lampwright — Review removal"),
     "",
     style.title(`Remove ${state.label}?`),
     "",
@@ -1397,7 +1397,7 @@ function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
     ...(removalPlan.verificationChecks.length === 0
       ? []
       : [
-          style.title("After removal, skill-cleaner will verify"),
+          style.title("After removal, Lampwright will verify"),
           ...plainVerificationGroups(removalPlan.verificationChecks).flatMap(
             (checks) =>
               wrapPlanLine(
@@ -1428,7 +1428,7 @@ function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
       removalPlan.intent.mode === "brute-force"
         ? "This is a separate recoverable removal after the managed attempt failed."
         : hasManagedRemoval
-          ? "Managed removal is not recoverable by skill-cleaner and will not enter Trash. A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately."
+          ? "Managed removal is not recoverable by Lampwright and will not enter Trash. A failed managed removal will stop; any brute-force fallback must be reviewed and confirmed separately."
           : hasRecoverableRemoval
             ? "Files are not permanently deleted. They can be restored from Trash."
             : "No filesystem content will be permanently deleted.";
@@ -1649,7 +1649,7 @@ function describePlainActions(
       `${prefix}Ask ${owner} to remove ${capabilities}`,
       stylelessDetail(`Uses ${owner}'s supported removal commands.`),
       stylelessDetail(
-        "This managed removal will not enter Trash and cannot be restored by skill-cleaner.",
+        "This managed removal will not enter Trash and cannot be restored by Lampwright.",
       ),
     ];
   }
@@ -1695,7 +1695,7 @@ function describePlainAction(
       `${prefix}Ask ${owner} to remove ${targetLabel(state, action.target)}`,
       stylelessDetail(`Uses ${owner}'s supported removal command.`),
       stylelessDetail(
-        "This managed removal will not enter Trash and cannot be restored by skill-cleaner.",
+        "This managed removal will not enter Trash and cannot be restored by Lampwright.",
       ),
     ];
   }
@@ -1713,7 +1713,7 @@ function describePlainBlock(block: PlanBlock): readonly string[] {
     ];
   if (block.kind === "ambiguous-ownership")
     return [
-      `  • skill-cleaner cannot determine who owns it: ${block.reason}`,
+      `  • Lampwright cannot determine who owns it: ${block.reason}`,
       "    A force override can bypass this ownership block.",
     ];
   if (block.kind === "git-protection")
@@ -1733,7 +1733,7 @@ function describePlainBlock(block: PlanBlock): readonly string[] {
     ];
   if (block.kind === "filesystem-permission")
     return [
-      `  • skill-cleaner cannot modify ${block.path}: ${block.reason}`,
+      `  • Lampwright cannot modify ${block.path}: ${block.reason}`,
       "    Fix the filesystem permission before trying again.",
     ];
   if (block.kind === "cleanup-conflict")
@@ -1980,7 +1980,7 @@ function reportBodyLines(state: TuiReportState, style: TuiPaint): string[] {
       : [`• Final scan could not finish: ${report.rescanError.message}`]),
   ];
   const lines = [
-    style.title("skill-cleaner — Final report"),
+    style.title("Lampwright — Final report"),
     "",
     outcomeStyle(outcome),
     ...wrapPlanLine(
@@ -2067,7 +2067,7 @@ function renderCompactReport(state: TuiReportState, style: TuiPaint): string {
   const rows = Math.max(0, state.browse.model.viewport.rows - 1);
   const width = Math.max(0, state.browse.model.viewport.columns - 1);
   return `${[
-    style.title("skill-cleaner"),
+    style.title("Lampwright"),
     style.warning("Resize the terminal"),
     style.muted("q quit"),
   ]

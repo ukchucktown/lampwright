@@ -288,9 +288,7 @@ describe("Quarantine module", () => {
     const environment = await createTestEnvironment();
     const source = join(environment.workspace, "source-group-skill");
     await writeFile(source, "skill", "utf8");
-    const { quarantine } = createHarness(
-      join(environment.state, "skill-cleaner"),
-    );
+    const { quarantine } = createHarness(join(environment.state, "lampwright"));
 
     await expect(
       quarantine.quarantine({
@@ -304,7 +302,7 @@ describe("Quarantine module", () => {
   });
   it("lists and reports missing sources without creating state", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "missing-skill");
     const { quarantine } = createHarness(stateRoot);
 
@@ -354,7 +352,7 @@ describe("Quarantine module", () => {
 
   it("quarantines, lists, and restores a file", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "standalone.txt");
     await writeFile(source, "recover me", "utf8");
     const { quarantine } = createHarness(stateRoot);
@@ -379,7 +377,7 @@ describe("Quarantine module", () => {
 
   it("groups only persisted removal-operation provenance and previews it without mutation", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const first = join(environment.home, "first.txt");
     const second = join(environment.home, "second.txt");
     await writeFile(first, "first", "utf8");
@@ -421,7 +419,7 @@ describe("Quarantine module", () => {
 
   it("restores a grouped directory, link, and guarded record preimage", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const directory = join(environment.home, "skill-directory");
     const target = join(environment.workspace, "link-target");
     const link = join(environment.home, "skill-link");
@@ -487,7 +485,7 @@ describe("Quarantine module", () => {
 
   it("reports known conflicts and unattempted entries without inventing a race", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const first = join(environment.home, "first.txt");
     const second = join(environment.home, "second.txt");
     await writeFile(first, "first", "utf8");
@@ -537,7 +535,7 @@ describe("Quarantine module", () => {
 
   it("reports a partial restore when a destination appears after the group preview", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const first = join(environment.home, "first-race.txt");
     const second = join(environment.home, "second-race.txt");
     await writeFile(first, "first", "utf8");
@@ -601,7 +599,7 @@ describe("Quarantine module", () => {
 
   it("keeps legacy entries as separate operations", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const first = join(environment.home, "legacy-one.txt");
     const second = join(environment.home, "legacy-two.txt");
     await writeFile(first, "one", "utf8");
@@ -629,7 +627,7 @@ describe("Quarantine module", () => {
 
   it("previews and permanently purges every entry in a grouped operation", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const first = join(environment.home, "purge-one.txt");
     const second = join(environment.home, "purge-two.txt");
     await writeFile(first, "one", "utf8");
@@ -672,7 +670,7 @@ describe("Quarantine module", () => {
 
   it("previews restore and purge without changing source or Quarantine state", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "preview.txt");
     await writeFile(source, "preview me", "utf8");
     const { quarantine } = createHarness(stateRoot);
@@ -734,7 +732,7 @@ describe("Quarantine module", () => {
 
   it("uses an EXDEV copy without following a nested external link", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "directory-skill");
     const external = join(environment.workspace, "external-target");
     await mkdir(source, { recursive: true });
@@ -774,7 +772,7 @@ describe("Quarantine module", () => {
 
   it("round-trips a link and a broken link without changing their targets", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const target = join(environment.workspace, "link-target");
     const missingTarget = join(environment.workspace, "missing-target");
     const link = join(environment.home, "linked-skill");
@@ -820,7 +818,7 @@ describe("Quarantine module", () => {
       return;
     }
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const target = join(environment.workspace, "symbolic-target");
     const link = join(environment.home, "symbolic-skill");
     await mkdir(target, { recursive: true });
@@ -848,7 +846,7 @@ describe("Quarantine module", () => {
 
   it("never overwrites an occupied destination and supports a free alternate", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "conflict.txt");
     const alternate = join(environment.home, "restored.txt");
     await writeFile(source, "quarantined", "utf8");
@@ -878,7 +876,7 @@ describe("Quarantine module", () => {
 
   it("blocks listing, restore, and purge after payload tampering", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "tamper.txt");
     await writeFile(source, "original", "utf8");
     const { quarantine } = createHarness(stateRoot);
@@ -916,7 +914,7 @@ describe("Quarantine module", () => {
 
   it("purges selected and exactly 30-day-old entries", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const start = new Date("2026-01-01T00:00:00.000Z");
     const first = join(environment.home, "first.txt");
     const second = join(environment.home, "second.txt");
@@ -963,7 +961,7 @@ describe("Quarantine module", () => {
 
   it("captures a record preimage and restores only its exact postimage", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "manager.jsonc");
     const preimage =
       '{\n  // retained formatting\n  "skills": ["one", "two"]\n}\n';
@@ -1011,7 +1009,7 @@ describe("Quarantine module", () => {
 
   it("preserves every owner represented by a global record cleanup", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "global-record.json");
     const content = '{"skills":["one","two"]}\n';
     const first = "installation-1" as InstallationId;
@@ -1070,7 +1068,7 @@ describe("Quarantine module", () => {
 
   it("does not overwrite a record created during explicit replacement", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "record-race.json");
     const preimage = '{"skill":"one"}\n';
     const postimage = "{}\n";
@@ -1116,7 +1114,7 @@ describe("Quarantine module", () => {
 
   it("preserves a record preimage when the live document diverges", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "records.json");
     const alternate = join(environment.home, "records-original.json");
     const preimage = '{"skill":"one"}\n';
@@ -1156,7 +1154,7 @@ describe("Quarantine module", () => {
 
   it("rolls back a failed commit and recovers an interrupted rollback", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "recover-transaction.txt");
     await writeFile(source, "transactional", "utf8");
     let commitFailed = false;
@@ -1207,7 +1205,7 @@ describe("Quarantine module", () => {
 
   it("does not overwrite a destination created during restore", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "restore-race.txt");
     await writeFile(source, "quarantined", "utf8");
     let raced = false;
@@ -1242,7 +1240,7 @@ describe("Quarantine module", () => {
 
   it("does not replace an empty directory created during publication", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "directory-race");
     await mkdir(source);
     await writeFile(join(source, "SKILL.md"), "# quarantined", "utf8");
@@ -1278,7 +1276,7 @@ describe("Quarantine module", () => {
 
   it("resumes an interrupted claimed-directory publication", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "directory-recovery");
     await mkdir(source);
     await writeFile(join(source, "a.txt"), "a", "utf8");
@@ -1322,7 +1320,7 @@ describe("Quarantine module", () => {
 
   it("preserves staged recovery when a directory claim marker is interrupted", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "directory-claim-gap");
     const temporaryPath = join(
       dirname(source),
@@ -1380,7 +1378,7 @@ describe("Quarantine module", () => {
 
   it("clears an interrupted staged copy without occupying the destination", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "partial.txt");
     const temporaryPath = join(
       dirname(source),
@@ -1426,7 +1424,7 @@ describe("Quarantine module", () => {
 
   it("rejects alternate restores inside quarantine state", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "state-alternate.txt");
     await writeFile(source, "quarantined", "utf8");
     const { quarantine } = createHarness(stateRoot);
@@ -1470,7 +1468,7 @@ describe("Quarantine module", () => {
 
   it("blocks a restore when its destination becomes Git-protected", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.workspace, "protected-restore.txt");
     await writeFile(source, "quarantined", "utf8");
     let protectedNow = false;
@@ -1499,7 +1497,7 @@ describe("Quarantine module", () => {
 
   it("rejects a redirected recovery journal without touching its path", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "journal-source.txt");
     const redirected = join(environment.workspace, "redirected.txt");
     await writeFile(source, "transactional", "utf8");
@@ -1562,7 +1560,7 @@ describe("Quarantine module", () => {
 
   it("binds an interrupted restore journal to its persisted intent", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "restore-journal.txt");
     const redirected = join(environment.workspace, "same-content.txt");
     await writeFile(source, "same content", "utf8");
@@ -1619,7 +1617,7 @@ describe("Quarantine module", () => {
 
   it("reapplies restoration metadata before completing crash recovery", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const source = join(environment.home, "metadata.txt");
     const originalTime = new Date("2020-01-02T03:04:05.000Z");
     await writeFile(source, "metadata", "utf8");

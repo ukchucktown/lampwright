@@ -1,8 +1,8 @@
 # Core model
 
 The core model is the shared, immutable value interface between Inventory,
-Planning, Execution, and presentation modules. Import it from `skill-cleaner`.
-Test-only fixture builders are available from `skill-cleaner/testing` and are
+Planning, Execution, and presentation modules. Import it from `lampwright`.
+Test-only fixture builders are available from `lampwright/testing` and are
 kept out of the production entry point.
 
 The testing entry point publishes builders for Installation,
@@ -23,7 +23,7 @@ import {
   parseLogicalSkill,
   parseNonInstallationFinding,
   parseRemovalPlan,
-} from "skill-cleaner";
+} from "lampwright";
 ```
 
 Each parser rejects unknown fields, malformed discriminated unions, unsupported

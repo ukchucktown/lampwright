@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ukchucktown/skill-cleaner/raw/main/schemas/cli-v1.schema.json",
-  "title": "skill-cleaner CLI v1 output",
+  "$id": "https://github.com/ukchucktown/lampwright/raw/main/schemas/cli-v1.schema.json",
+  "title": "Lampwright CLI v1 output",
   "oneOf": [
     { "$ref": "#/$defs/inventory" },
     { "$ref": "#/$defs/availabilityPlanEnvelope" },

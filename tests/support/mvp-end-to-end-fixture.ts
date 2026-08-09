@@ -34,7 +34,7 @@ export interface MvpEndToEndFixture {
     readonly projectSkill: string;
     readonly systemSkill: string;
     readonly brokenLink: string;
-    readonly cleanerState: string;
+    readonly lampwrightState: string;
   };
   createScanner(managerAvailable: boolean): InventoryScanner;
   snapshot(): Promise<readonly string[]>;
@@ -58,7 +58,7 @@ export async function createMvpEndToEndFixture(
     projectSkill: join(workspaceRoot, "project-review"),
     systemSkill: join(systemRoot, "runtime-review"),
     brokenLink: join(genericRoot, "broken-review"),
-    cleanerState: join(isolated.state, "skill-cleaner-e2e"),
+    lampwrightState: join(isolated.state, "lampwright-e2e"),
   } as const;
 
   await Promise.all([

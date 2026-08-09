@@ -323,8 +323,8 @@ describe("Execution", () => {
     ]);
   });
 
-  it("uses exact trusted npx packages from isolated cleaner state", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skill-cleaner-execution-"));
+  it("uses exact trusted npx packages from isolated Lampwright state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-execution-"));
     temporaryDirectories.push(root);
     const target = installationTarget("installation-1");
     const action = managedAction("action-ephemeral", target, {
@@ -378,7 +378,7 @@ describe("Execution", () => {
         executable: "npx",
         arguments: ["--yes", "fixture-manager@1.2.3", "remove", "skill"],
       },
-      cwd: expect.stringContaining("skill-cleaner-execution-"),
+      cwd: expect.stringContaining("lampwright-execution-"),
       environment: expect.objectContaining({
         DISABLE_TELEMETRY: "1",
         DO_NOT_TRACK: "1",
@@ -389,7 +389,7 @@ describe("Execution", () => {
   });
 
   it("does not let force stand in for exact package trust", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skill-cleaner-untrusted-"));
+    const root = await mkdtemp(join(tmpdir(), "lampwright-untrusted-"));
     temporaryDirectories.push(root);
     const target = installationTarget("installation-1");
     const packageTrust = {
@@ -764,7 +764,7 @@ describe("Execution", () => {
   it.each(recordDocuments)(
     "captures a %s record preimage before exact declarative cleanup",
     async (format, content) => {
-      const root = await mkdtemp(join(tmpdir(), "skill-cleaner-record-"));
+      const root = await mkdtemp(join(tmpdir(), "lampwright-record-"));
       temporaryDirectories.push(root);
       const recordPath = join(root, "manager.json");
       await writeFile(recordPath, content);
@@ -873,7 +873,7 @@ describe("Execution", () => {
   ] as const)(
     "removes approved %s array records without index-shift collateral",
     async (format, content) => {
-      const root = await mkdtemp(join(tmpdir(), "skill-cleaner-array-"));
+      const root = await mkdtemp(join(tmpdir(), "lampwright-array-"));
       temporaryDirectories.push(root);
       const recordPath = join(root, `manager.${format}`);
       await writeFile(recordPath, content);
@@ -959,7 +959,7 @@ describe("Execution", () => {
   );
 
   it("does not treat a changed object record as absent", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skill-cleaner-record-check-"));
+    const root = await mkdtemp(join(tmpdir(), "lampwright-record-check-"));
     temporaryDirectories.push(root);
     const recordPath = join(root, "manager.json");
     await writeFile(recordPath, '{"skills":{"0":{"version":2}}}\n');
@@ -985,7 +985,7 @@ describe("Execution", () => {
   it.skipIf(process.platform === "win32")(
     "rejects a record document link without following its target",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "skill-cleaner-link-record-"));
+      const root = await mkdtemp(join(tmpdir(), "lampwright-link-record-"));
       temporaryDirectories.push(root);
       const targetPath = join(root, "target.json");
       const recordPath = join(root, "manager.json");
@@ -1057,7 +1057,7 @@ describe("Execution", () => {
   );
 
   it("creates audit and trust state only when their mutating operations run", async () => {
-    const root = await mkdtemp(join(tmpdir(), "skill-cleaner-state-"));
+    const root = await mkdtemp(join(tmpdir(), "lampwright-state-"));
     temporaryDirectories.push(root);
     const stateRoot = join(root, "state");
     const options = harness({

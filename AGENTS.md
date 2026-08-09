@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`skill-cleaner` is a cross-platform TypeScript terminal application for discovering and safely removing AI agent skills regardless of whether they were installed as standalone files, by a manager, or through a plugin system.
+`lampwright` is a cross-platform TypeScript terminal application for discovering and safely removing AI agent skills regardless of whether they were installed as standalone files, by a manager, or through a plugin system.
 
 The project is specification-first. Do not invent product behavior when the accepted documents or tracked issue already define it.
 
@@ -22,7 +22,7 @@ When guidance appears inconsistent, stop and reconcile it in the specification o
 ## Current structure
 
 ```text
-skill-cleaner/
+lampwright/
 ├── AGENTS.md              # shared repository workflow and guardrails
 ├── CLAUDE.md              # Claude Code pointer to AGENTS.md
 ├── CONTEXT.md             # ubiquitous domain language

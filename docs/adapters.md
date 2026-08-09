@@ -13,13 +13,13 @@ content-hash trust, and returns one recursively frozen `AdapterCatalog`.
 Callers do not parse or interpret adapter documents.
 
 The editor-completable schema is published with the package as
-`skill-cleaner/adapter-v1.schema.json` and lives in the repository at
+`lampwright/adapter-v1.schema.json` and lives in the repository at
 [`schemas/adapter-v1.schema.json`](../schemas/adapter-v1.schema.json). A local
 adapter can point an editor at the installed copy:
 
 ```jsonc
 {
-  "$schema": "./node_modules/skill-cleaner/schemas/adapter-v1.schema.json",
+  "$schema": "./node_modules/lampwright/schemas/adapter-v1.schema.json",
   "schemaVersion": 1,
   "id": "example.manager",
   "name": "Example manager",
@@ -171,7 +171,7 @@ The `vercel.skills` built-in pins the native fallback package to
 missing, only global removal may use the pinned `npx` envelope, and only on the
 Node.js versions supported by that package. Project removal requires the
 installed executable because the manager derives project scope from its
-working directory; running the package from the cleaner's isolated ephemeral
+working directory; running the package from Lampwright's isolated ephemeral
 directory would target the wrong scope.
 
 Global commands pass the pinned set of agents that support global installation

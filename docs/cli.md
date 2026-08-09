@@ -1,6 +1,6 @@
 # Non-interactive CLI
 
-`skill-cleaner scan`, `disable`, `enable`, `remove`, `restore`, and `purge` are
+`lampwright scan`, `disable`, `enable`, `remove`, `restore`, and `purge` are
 thin callers of Inventory, Disabled Storage, Planning, Execution, and
 Quarantine. They do not inspect configuration, edit settings, or move Skill
 paths themselves.
@@ -21,10 +21,10 @@ Names, source IDs, and Plugin boundaries are never inferred as Availability
 identity.
 
 ```console
-skill-cleaner disable installation:<installation-id> --dry-run --json
-skill-cleaner disable logical-skill:<logical-skill-id> --yes
-skill-cleaner enable installation:<natively-disabled-installation-id> --yes
-skill-cleaner enable disabled-entry:<disabled-storage-id> --yes
+lampwright disable installation:<installation-id> --dry-run --json
+lampwright disable logical-skill:<logical-skill-id> --yes
+lampwright enable installation:<natively-disabled-installation-id> --yes
+lampwright enable disabled-entry:<disabled-storage-id> --yes
 ```
 
 Disable accepts `--force` only for blocks the Availability Plan marks
@@ -77,7 +77,7 @@ Enable return an empty array. Embedded Inventory, AvailabilityPlan,
 AvailabilityReport, RemovalPlan, ExecutionReport, Quarantine previews, and
 results retain their own versioned public shapes. The
 published schema is [`schemas/cli-v1.schema.json`](../schemas/cli-v1.schema.json)
-and is also exported from the package as `skill-cleaner/cli-v1.schema.json`.
+and is also exported from the package as `lampwright/cli-v1.schema.json`.
 
 JSON is written to standard output even for a nonzero exit so automation can
 parse one stable stream. Concise human success output uses standard output;

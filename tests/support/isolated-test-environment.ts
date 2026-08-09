@@ -42,7 +42,7 @@ function createSafeBaseEnvironment(): NodeJS.ProcessEnv {
 
 export async function createIsolatedTestEnvironment(): Promise<IsolatedTestEnvironment> {
   const root = await realpath(
-    await mkdtemp(join(tmpdir(), "skill-cleaner-test-")),
+    await mkdtemp(join(tmpdir(), "lampwright-test-")),
   );
   const home = join(root, "home");
   const workspace = join(root, "workspace");

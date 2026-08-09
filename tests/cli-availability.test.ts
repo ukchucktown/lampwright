@@ -147,10 +147,10 @@ describe("Availability CLI", () => {
     const output = await runCli(["--help"]);
     expect(output.exitCode).toBe(0);
     expect(output.output).toContain(
-      "skill-cleaner disable <selector...> [--dry-run] [--yes] [--force]",
+      "lampwright disable <selector...> [--dry-run] [--yes] [--force]",
     );
     expect(output.output).toContain(
-      "skill-cleaner enable <selector...> [--dry-run] [--yes] [--json]",
+      "lampwright enable <selector...> [--dry-run] [--yes] [--json]",
     );
     expect(output.output).toContain("Enable only:  disabled-entry:<entry-id>");
   });

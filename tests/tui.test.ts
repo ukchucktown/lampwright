@@ -912,7 +912,7 @@ describe("terminal theme", () => {
     terminal.render(state);
     terminal.close();
     expect(written).not.toContain(String.fromCharCode(27));
-    expect(written).toContain("skill-cleaner");
+    expect(written).toContain("Lampwright");
   });
 });
 
@@ -1515,7 +1515,7 @@ describe("global name-regex search", () => {
     };
     const rendered = renderTui(state, plainTuiTheme);
     const lines = rendered.split("\n");
-    expect(lines[0]).toContain("skill-cleaner search");
+    expect(lines[0]).toContain("Lampwright search");
     expect(lines[1]).toContain("↑↓ move");
     expect(lines[1]).toContain("ctrl-a");
     expect(lines[2]!.trimEnd()).toMatch(/^┌─+┐$/u);
@@ -1769,10 +1769,10 @@ describe("terminal removal interactions", () => {
     await controller.dispatch({ kind: "select" });
     const rendered = renderTui(controller.state, plainTuiTheme);
     expect(rendered).toContain(
-      "will not enter Trash and cannot be restored by skill-cleaner",
+      "will not enter Trash and cannot be restored by Lampwright",
     );
     expect(rendered).toContain(
-      "Managed removal is not recoverable by skill-cleaner and will not enter Trash",
+      "Managed removal is not recoverable by Lampwright and will not enter Trash",
     );
   });
 

@@ -100,18 +100,18 @@ function readPackageMetadata(): PackageMetadata {
   return value as PackageMetadata;
 }
 
-const help = `skill-cleaner ${readPackageMetadata().version}
+const help = `lampwright ${readPackageMetadata().version}
 
 Discover and safely manage AI agent skills.
 
 Usage:
-  skill-cleaner
-  skill-cleaner scan [--json] [--adapter <path>]
-  skill-cleaner disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
-  skill-cleaner enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
-  skill-cleaner remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
-  skill-cleaner restore <entry-id> [--dry-run] [--yes] [--json]
-  skill-cleaner purge <entry-id...> [--dry-run] [--yes] [--json]
+  lampwright
+  lampwright scan [--json] [--adapter <path>]
+  lampwright disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
+  lampwright enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
+  lampwright remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
+  lampwright restore <entry-id> [--dry-run] [--yes] [--json]
+  lampwright purge <entry-id...> [--dry-run] [--yes] [--json]
 
 Selectors:
   Availability: installation:<installation-id>  logical-skill:<logical-skill-id>
@@ -935,7 +935,7 @@ async function main(): Promise<void> {
       createNodeTuiTerminal(),
     );
     if (outcome.status === "failed") {
-      process.stderr.write(`skill-cleaner: ${outcome.message}\n`);
+      process.stderr.write(`lampwright: ${outcome.message}\n`);
       process.exitCode = 1;
     } else if (outcome.status === "completed") {
       process.exitCode = executionExitCode(outcome.report);

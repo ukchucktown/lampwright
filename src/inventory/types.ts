@@ -77,7 +77,7 @@ export interface InventoryScanEnvironment {
    * lock from `<XDG_STATE_HOME>/skills/.skill-lock.json` when it is set and
    * from `<home>/.agents/.skill-lock.json` when it is not. Substituting a
    * conventional default such as `~/.local/state` makes the unset branch
-   * unreachable and hides real installations. skill-cleaner's own state root is
+   * unreachable and hides real installations. Lampwright's own state root is
    * unrelated and lives behind `state/root.ts`.
    */
   readonly stateDirectory?: string | null;

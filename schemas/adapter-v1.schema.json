@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ukchucktown/skill-cleaner/raw/main/schemas/adapter-v1.schema.json",
-  "title": "skill-cleaner adapter v1",
-  "description": "Declarative local adapter definition for skill-cleaner.",
+  "$id": "https://github.com/ukchucktown/lampwright/raw/main/schemas/adapter-v1.schema.json",
+  "title": "Lampwright adapter v1",
+  "description": "Declarative local adapter definition for Lampwright.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "id", "name", "platforms"],
