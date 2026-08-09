@@ -447,7 +447,7 @@ describe("Disabled TUI projection", () => {
     expect(technical).toContain("incomplete-manager-01");
     expect(technical).toContain("incomplete-manager-25");
     expect(technical.replaceAll(/\s/gu, "")).toContain(
-      installations[24]!.location.path,
+      JSON.stringify(installations[24]!.location.path).slice(1, -1),
     );
   });
 

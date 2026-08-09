@@ -387,8 +387,15 @@ describe("Availability Planning and Execution", () => {
       installationId: installation.id,
       affectedInstallationIds: [installation.id],
     });
-    const serializedAction = JSON.stringify(availabilityPlan.actions[0]);
-    for (const path of paths) expect(serializedAction).toContain(path);
+    const action = availabilityPlan.actions[0];
+    if (
+      action?.kind !== "suspended-disable" ||
+      !("artifacts" in action.request)
+    )
+      throw new TypeError("expected one multi-artifact suspension action");
+    expect(
+      action.request.artifacts.map((artifact) => artifact.location.path),
+    ).toEqual(paths);
   });
 
   it("disables and enables a complete Vercel-managed set while preserving Manager state", async () => {
