@@ -15,7 +15,7 @@ assertEqual("Git tag", process.env.GITHUB_REF_NAME, expectedTag);
 assertEqual(
   "GitHub repository",
   process.env.GITHUB_REPOSITORY,
-  "ukchucktown/skill-cleaner",
+  "ukchucktown/lampwright",
 );
 assertEqual("repository visibility", process.env.REPOSITORY_PRIVATE, "false");
 

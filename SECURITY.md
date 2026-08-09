@@ -31,7 +31,7 @@ Particularly sensitive areas include:
 
 - path containment, links, junctions, and Git worktree protection;
 - Adapter schema, content-hash trust, and structured command construction;
-- exact package-runner approval and cleaner-owned execution state;
+- exact package-runner approval and Lampwright-owned execution state;
 - Plugin ownership boundaries, dependencies, and explicit fallback;
 - Quarantine integrity, restoration conflicts, and declarative record hashes;
 - accidental telemetry, network transmission, or read-only state creation.

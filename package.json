@@ -1,11 +1,11 @@
 {
-  "name": "skill-cleaner",
+  "name": "lampwright",
   "version": "0.1.0",
   "description": "Discover, reversibly disable, enable, and safely remove AI agent skills.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "skill-cleaner": "dist/cli.js"
+    "lampwright": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -44,12 +44,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ukchucktown/skill-cleaner.git"
+    "url": "git+https://github.com/ukchucktown/lampwright.git"
   },
   "bugs": {
-    "url": "https://github.com/ukchucktown/skill-cleaner/issues"
+    "url": "https://github.com/ukchucktown/lampwright/issues"
   },
-  "homepage": "https://github.com/ukchucktown/skill-cleaner#readme",
+  "homepage": "https://github.com/ukchucktown/lampwright#readme",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

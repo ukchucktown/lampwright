@@ -168,7 +168,7 @@ describe("cross-platform MVP end to end", () => {
     await expect(
       readFile(join(fixture.paths.projectSkill, "SKILL.md"), "utf8"),
     ).resolves.toContain("project-review");
-    await expect(lstat(fixture.paths.cleanerState)).rejects.toMatchObject({
+    await expect(lstat(fixture.paths.lampwrightState)).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -208,11 +208,11 @@ describe("cross-platform MVP end to end", () => {
       );
       return { exitCode: 0, stdout: "removed", stderr: "" };
     });
-    const quarantine = quarantineFor(fixture.paths.cleanerState);
+    const quarantine = quarantineFor(fixture.paths.lampwrightState);
     const execution = executionFor(
       scanner,
       quarantine,
-      fixture.paths.cleanerState,
+      fixture.paths.lampwrightState,
       { run },
     );
 
@@ -259,11 +259,11 @@ describe("cross-platform MVP end to end", () => {
       force: false,
       mode: "managed-first",
     });
-    const quarantine = quarantineFor(fixture.paths.cleanerState);
+    const quarantine = quarantineFor(fixture.paths.lampwrightState);
     const execution = executionFor(
       scanner,
       quarantine,
-      fixture.paths.cleanerState,
+      fixture.paths.lampwrightState,
       {
         run: vi.fn(async () => ({
           exitCode: 1,
@@ -292,7 +292,7 @@ describe("cross-platform MVP end to end", () => {
       ]),
     );
     await expect(lstat(fixture.paths.managedReview)).resolves.toBeDefined();
-    await expect(lstat(fixture.paths.cleanerState)).rejects.toMatchObject({
+    await expect(lstat(fixture.paths.lampwrightState)).rejects.toMatchObject({
       code: "ENOENT",
     });
 

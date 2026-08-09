@@ -641,7 +641,7 @@ describe("the non-interactive CLI", () => {
   });
 });
 
-describe("the built skill-cleaner executable", () => {
+describe("the built lampwright executable", () => {
   it("reads the Vercel global lock from the home-relative location when XDG_STATE_HOME is unset", async () => {
     const environment = await createTestEnvironment();
     const canonical = join(
@@ -701,7 +701,7 @@ describe("the built skill-cleaner executable", () => {
   it("prints help and exits successfully", async () => {
     const output = await runBuiltExecutable("--help");
 
-    expect(output).toContain("Usage:\n  skill-cleaner\n  skill-cleaner scan");
+    expect(output).toContain("Usage:\n  lampwright\n  lampwright scan");
     expect(output).toContain("--trust-adapter");
     expect(output).toContain("--version");
   });
@@ -722,7 +722,7 @@ describe("the built skill-cleaner executable", () => {
       const environment = await createTestEnvironment();
       const packageExecutable = join(
         environment.temporary,
-        "skill-cleaner-package-bin",
+        "lampwright-package-bin",
       );
       await symlink(executablePath, packageExecutable, "file");
       const { stdout, stderr } = await execFileAsync(process.execPath, [

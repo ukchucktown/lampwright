@@ -16,8 +16,8 @@ describe("release readiness", () => {
       ...process.env,
       GITHUB_REF_NAME: "v0.1.0",
       GITHUB_REF_TYPE: "tag",
-      GITHUB_REPOSITORY: "ukchucktown/skill-cleaner",
-      RELEASE_CONFIRMATION: "skill-cleaner@0.1.0",
+      GITHUB_REPOSITORY: "ukchucktown/lampwright",
+      RELEASE_CONFIRMATION: "lampwright@0.1.0",
       REPOSITORY_PRIVATE: "false",
     };
 
@@ -27,7 +27,7 @@ describe("release readiness", () => {
     if (supportsTrustedPublishingRuntime())
       await expect(exactAuthority).resolves.toMatchObject({
         stdout: expect.stringContaining(
-          "Release authority verified for skill-cleaner@0.1.0",
+          "Release authority verified for lampwright@0.1.0",
         ),
       });
     else

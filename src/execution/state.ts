@@ -159,7 +159,7 @@ export async function prepareEphemeralExecutionState(
   const base = join(stateRoot, "execution", "v1");
   const cache = join(base, "npm-cache");
   await ensureStateDirectory(stateRoot, ["execution", "v1", "npm-cache"]);
-  const cwd = await mkdtemp(join(tmpdir(), "skill-cleaner-execution-"));
+  const cwd = await mkdtemp(join(tmpdir(), "lampwright-execution-"));
   return {
     cwd,
     cache,
@@ -173,7 +173,7 @@ export async function prepareIsolatedExecutionWorkingDirectory(): Promise<{
   readonly cwd: string;
   cleanup(): Promise<void>;
 }> {
-  const cwd = await mkdtemp(join(tmpdir(), "skill-cleaner-owner-"));
+  const cwd = await mkdtemp(join(tmpdir(), "lampwright-owner-"));
   return {
     cwd,
     async cleanup() {

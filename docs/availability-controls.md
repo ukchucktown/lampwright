@@ -16,7 +16,7 @@ discover it. A Harness Exposure records two independent facts:
 `unresolved` means Inventory cannot prove the runtime state from a stable,
 unambiguous configuration snapshot. `unsupported` describes control
 capability, not runtime state: a visible Skill can be enabled while Skill
-Cleaner has no native control for that harness.
+Lampwright has no native control for that harness.
 
 Native control evidence contains:
 
@@ -60,7 +60,7 @@ remains separate: disabling an exposure does not change an Installation from
   `name` selector and an `enabled` boolean.
 - Effective value: matching rules are applied in document order and the last
   matching rule wins; no match means enabled.
-- Cleaner mutation identity: the canonical absolute `SKILL.md` path. Name
+- Lampwright mutation identity: the canonical absolute `SKILL.md` path. Name
   rules are read because they affect the current value, but Planning may only
   authorize an exact-path rule for a Skill.
 - Writable candidate: the user Codex document only. Current Codex skill-rule
@@ -83,13 +83,13 @@ append an exact-path rule without confusing a name match with identity.
 - Effective precedence, low to high: user, shared project, local project.
   `off` is disabled; every other valid value remains enabled with its exact
   mode preserved.
-- Writable candidates: user and local project. Skill Cleaner never writes the
+- Writable candidates: user and local project. Lampwright never writes the
   shared project document. A local candidate is unavailable unless Git reports
   its path ignored.
 
 Managed policy and command-line/session overrides are outside this local-file
 control. If observed evidence shows that one affects the Skill, the exposure is
-`unresolved`; Skill Cleaner never claims that a lower-precedence local edit can
+`unresolved`; Lampwright never claims that a lower-precedence local edit can
 override it.
 
 ## Gemini CLI

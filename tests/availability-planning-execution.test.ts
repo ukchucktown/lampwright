@@ -223,7 +223,7 @@ describe("Availability Planning and Execution", () => {
       });
       expect(disabledPlan.actions).toHaveLength(1);
       const runner = execution(
-        join(fixture.environment.state, "skill-cleaner"),
+        join(fixture.environment.state, "lampwright"),
         fixture.scanLive,
         audit,
       );
@@ -284,7 +284,7 @@ describe("Availability Planning and Execution", () => {
       });
       const audit: unknown[] = [];
       const runner = execution(
-        join(fixture.environment.state, "skill-cleaner"),
+        join(fixture.environment.state, "lampwright"),
         fixture.scanLive,
         audit,
       );
@@ -541,7 +541,7 @@ describe("Availability Planning and Execution", () => {
     let scans = 0;
     const audit: unknown[] = [];
     const runner = execution(
-      join(fixture.environment.state, "skill-cleaner"),
+      join(fixture.environment.state, "lampwright"),
       fixture.scanLive,
       audit,
       {
@@ -586,7 +586,7 @@ describe("Availability Planning and Execution", () => {
       expect(disabledPlan.actions).toHaveLength(1);
       await expect(readFile(fixture.config, "utf8")).resolves.toBe(preimage);
       await expect(
-        access(join(fixture.environment.state, "skill-cleaner")),
+        access(join(fixture.environment.state, "lampwright")),
       ).rejects.toMatchObject({ code: "ENOENT" });
       const action = disabledPlan.actions[0]!;
       if (action.kind !== "native-control")
@@ -601,7 +601,7 @@ describe("Availability Planning and Execution", () => {
             : "workspace",
       ]);
       const runner = execution(
-        join(fixture.environment.state, "skill-cleaner"),
+        join(fixture.environment.state, "lampwright"),
         fixture.scanLive,
         audit,
       );
@@ -668,7 +668,7 @@ describe("Availability Planning and Execution", () => {
     expect(disabledPlan.actions).toMatchObject([{ kind: "suspended-disable" }]);
     const audit: unknown[] = [];
     const runner = execution(
-      join(environment.state, "skill-cleaner"),
+      join(environment.state, "lampwright"),
       scanLive,
       audit,
     );
@@ -716,7 +716,7 @@ describe("Availability Planning and Execution", () => {
     const originalId = initial.installations[0]!.id;
     const audit: unknown[] = [];
     const runner = execution(
-      join(environment.state, "skill-cleaner"),
+      join(environment.state, "lampwright"),
       scanLive,
       audit,
     );
@@ -911,7 +911,7 @@ describe("Availability Planning and Execution", () => {
     expect(availabilityPlan.verificationChecks).toHaveLength(2);
     const audit: unknown[] = [];
     const runner = execution(
-      join(environment.state, "skill-cleaner"),
+      join(environment.state, "lampwright"),
       scanLive,
       audit,
     );
@@ -949,7 +949,7 @@ describe("Availability Planning and Execution", () => {
       return current;
     };
     const partialRunner = execution(
-      join(environment.state, "skill-cleaner-partial"),
+      join(environment.state, "lampwright-partial"),
       scanLive,
       audit,
       { scan: racingScan },
@@ -989,7 +989,7 @@ describe("Availability Planning and Execution", () => {
     ).mutations[0]!.path = external;
     const audit: unknown[] = [];
     const runner = execution(
-      join(fixture.environment.state, "skill-cleaner"),
+      join(fixture.environment.state, "lampwright"),
       fixture.scanLive,
       audit,
     );
@@ -1037,7 +1037,7 @@ describe("Availability Planning and Execution", () => {
     const before = await readFile(fixture.config, "utf8");
     const audit: unknown[] = [];
     const runner = execution(
-      join(fixture.environment.state, "skill-cleaner"),
+      join(fixture.environment.state, "lampwright"),
       fixture.scanLive,
       audit,
     );
@@ -1363,7 +1363,7 @@ describe("Availability Planning and Execution", () => {
     const before = await readFile(fixture.config, "utf8");
     const audit: unknown[] = [];
     const runner = execution(
-      join(fixture.environment.state, "skill-cleaner"),
+      join(fixture.environment.state, "lampwright"),
       fixture.scanLive,
       audit,
       {
@@ -1407,7 +1407,7 @@ describe("Availability Planning and Execution", () => {
     };
     const audit: unknown[] = [];
     const runner = execution(
-      join(fixture.environment.state, "skill-cleaner"),
+      join(fixture.environment.state, "lampwright"),
       fixture.scanLive,
       audit,
       { scan: racingScan },
@@ -1536,7 +1536,7 @@ describe("Availability Planning and Execution", () => {
     };
     const audit: unknown[] = [];
     const runner = execution(
-      join(environment.state, "skill-cleaner"),
+      join(environment.state, "lampwright"),
       scanLive,
       audit,
       { scan: racingScan },

@@ -439,7 +439,7 @@ describe("Claude Code plugin adapter", () => {
       scan: () => inventoryScanner.scan({}),
       replan: (fresh, intent) => plan(fresh, intent),
       quarantine: createQuarantineModule({
-        stateRoot: join(environment.stateDirectory, "cleaner"),
+        stateRoot: join(environment.stateDirectory, "lampwright"),
         now: () => fixedTime,
         createId: () => "unused",
         fileSystem: nodeQuarantineFileSystem,
@@ -453,7 +453,7 @@ describe("Claude Code plugin adapter", () => {
         trust: vi.fn(async () => undefined),
       },
       now: () => fixedTime,
-      stateRoot: join(environment.stateDirectory, "cleaner"),
+      stateRoot: join(environment.stateDirectory, "lampwright"),
     });
 
     const report = await execution.execute(removalPlan, {
@@ -837,7 +837,7 @@ describe("Claude Code plugin adapter", () => {
       scan: () => inventoryScanner.scan({}),
       replan: (fresh, intent) => plan(fresh, intent),
       quarantine: createQuarantineModule({
-        stateRoot: join(environment.stateDirectory, "cleaner"),
+        stateRoot: join(environment.stateDirectory, "lampwright"),
         now: () => fixedTime,
         createId: () => `claude-${String((quarantineId += 1))}`,
         fileSystem: nodeQuarantineFileSystem,
@@ -853,7 +853,7 @@ describe("Claude Code plugin adapter", () => {
         trust: vi.fn(async () => undefined),
       },
       now: () => fixedTime,
-      stateRoot: join(environment.stateDirectory, "cleaner"),
+      stateRoot: join(environment.stateDirectory, "lampwright"),
       maxConcurrency: 1,
     });
 

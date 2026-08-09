@@ -19,7 +19,7 @@ For deterministic tests, create an `InventoryScanner` with an injected clock,
 isolated path environment, and structured command runner:
 
 ```ts
-import { createInventoryScanner } from "skill-cleaner";
+import { createInventoryScanner } from "lampwright";
 
 const scanner = createInventoryScanner({
   now: () => new Date("2026-01-01T00:00:00.000Z"),

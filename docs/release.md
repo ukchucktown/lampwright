@@ -34,8 +34,8 @@ The release configuration follows these current primary-source requirements:
   before a publish job runs. See
   [GitHub deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
 
-As verified on 2026-08-08, the GitHub repository is public and
-`npm view skill-cleaner` returns `E404`. Do not reserve or publish the name
+As verified on 2026-08-09, the GitHub repository is public and
+`npm view lampwright` returns `E404`. Do not reserve or publish the name
 now; recheck its availability only at explicitly approved release time. The
 checked-in publish workflow deliberately rejects a private
 repository, so it cannot emit a provenance-less release. Changing visibility
@@ -55,9 +55,9 @@ digest, and retains both as one review artifact. It never publishes.
 The manually dispatched `publish.yml` workflow requires all of the following
 before its publish step is reachable:
 
-- an exact `skill-cleaner@<version>` confirmation input;
+- an exact `lampwright@<version>` confirmation input;
 - the matching `v<version>` Git tag;
-- the canonical `ukchucktown/skill-cleaner` repository;
+- the canonical `ukchucktown/lampwright` repository;
 - a public repository, Node.js 22.14 or newer, and npm 11.15.0;
 - the `npm-production` GitHub environment;
 - a fresh install, every source gate, and the package-content audit.
@@ -120,7 +120,7 @@ The test builds only temporary homes, workspaces, state roots, caches, Manager
 records, Plugins, links, and Git evidence. It snapshots the complete fixture
 before scanning and Planning, then requires a byte-identical snapshot
 afterward. It separately reads the unrelated Installation, Plugin collateral,
-and Git-protected project Skill and proves no cleaner state root exists.
+and Git-protected project Skill and proves no Lampwright state root exists.
 
 ## Manual release checklist
 
@@ -147,17 +147,17 @@ First publication (manual and separately authorized):
 
 1. Make the repository public only after the explicit visibility approval.
 2. Create the signed `v<version>` tag at the reviewed commit and push that tag.
-3. Because `skill-cleaner` does not yet exist on npm, create a short-lived,
+3. Because `lampwright` does not yet exist on npm, create a short-lived,
    narrowly scoped `NPM_TOKEN` suitable for the bootstrap publication, require
    account 2FA, and store it only as the `npm-production` environment secret.
 4. Dispatch `Publish to npm` from the exact tag and type the exact
-   `skill-cleaner@<version>` confirmation. Approve the protected environment.
+   `lampwright@<version>` confirmation. Approve the protected environment.
 5. Verify the registry package, install it in a fresh temporary project, run
-   `npx skill-cleaner --version` and `--help`, and verify its attestation with a
+   `npx lampwright --version` and `--help`, and verify its attestation with a
    current npm CLI (`npm audit signatures`).
 6. Delete the bootstrap token immediately. In the npm package settings,
    configure GitHub Actions trusted publishing for organization/user
-   `ukchucktown`, repository `skill-cleaner`, workflow `publish.yml`, and the
+   `ukchucktown`, repository `lampwright`, workflow `publish.yml`, and the
    `npm-production` environment. Restrict or disallow traditional publish
    tokens after the OIDC path is verified.
 7. For later versions, consider changing the trusted publisher and workflow to

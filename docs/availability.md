@@ -27,7 +27,7 @@ completed publication.
   content are preserved.
 - **Claude Code** writes the highest-precedence safe writable
   `skillOverrides` layer: local workspace before user. Shared workspace settings
-  are evidence, not a cleaner mutation target. Name collisions across visible
+  are evidence, not a Lampwright mutation target. Name collisions across visible
   Skill identities block absolutely.
 - **Gemini CLI** changes exact case-sensitive membership in `skills.disabled`.
   Enable removes the name from every applied layer that currently disables it.
@@ -71,11 +71,11 @@ destinations cannot redirect cleanup outside Disabled Storage.
 
 ## Plans, reports, and recovery procedure
 
-1. Run `skill-cleaner scan --json` when live state is uncertain.
+1. Run `lampwright scan --json` when live state is uncertain.
 2. Use an exact Availability selector. Disable accepts `installation:`,
    `logical-skill:`, or `group:`. Enable also accepts
    `disabled-entry:<opaque-id>`.
-3. Review the plan or use `--dry-run --json`. A dry run creates no cleaner state.
+3. Review the plan or use `--dry-run --json`. A dry run creates no Lampwright state.
 4. Resolve absolute blocks at their source. Use `--force` only for a plan that
    marks dependency risk overridable.
 5. Confirm once. Execution performs its own fresh scan/list/replan before any

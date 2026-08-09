@@ -1,13 +1,13 @@
-# skill-cleaner v1 specification
+# Lampwright v1 specification
 
 Status: Accepted product direction; implementation under active refinement
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 ## 1. Summary
 
-`skill-cleaner` is a cross-platform terminal application that discovers, disables, enables, and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
+`lampwright` is a cross-platform terminal application that discovers, disables, enables, and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
 
-The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend a complete planner-authorized artifact set when no safe native control exists. For an explicitly supported Manager-owned Installation, suspension preserves the Manager record and displaces every declared discovery artifact. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
+The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks Lampwright to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend a complete planner-authorized artifact set when no safe native control exists. For an explicitly supported Manager-owned Installation, suspension preserves the Manager record and displaces every declared discovery artifact. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
 
 The primary interface is an interactive terminal UI. Until an explicitly approved npm publication, it runs from a trusted checkout as `node dist/cli.js`. A compact non-interactive interface and JSON output support automation and future agent sessions.
 
@@ -57,14 +57,14 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 
 - Language: TypeScript.
 - Runtime: Node.js 20 or newer.
-- Distribution: npm package named `skill-cleaner`.
-- Executable: `skill-cleaner`.
+- Distribution: npm package named `lampwright`.
+- Executable: `lampwright`.
 - Current invocation from a trusted checkout: `node dist/cli.js` after build.
-- Future published invocation: `npx skill-cleaner`.
+- Future published invocation: `npx lampwright`.
 - License: MIT.
 - Supported operating systems: current macOS, mainstream Linux distributions, and supported Windows releases.
 
-The cleaner may itself be downloaded by `npx`. It must not add dependencies to a user's project, install global packages, or install missing managers.
+Lampwright may itself be downloaded by `npx`. It must not add dependencies to a user's project, install global packages, or install missing managers.
 
 ## 6. Inventory and discovery
 
@@ -133,7 +133,7 @@ Installation Groups are a separate navigational batch-selection mechanism. In v1
 
 ## 7. Search and terminal UI
 
-Running `node dist/cli.js` from a built trusted checkout without a subcommand opens the terminal UI. `npx skill-cleaner` is the future published invocation.
+Running `node dist/cli.js` from a built trusted checkout without a subcommand opens the terminal UI. `npx lampwright` is the future published invocation.
 
 The UI must:
 
@@ -248,7 +248,7 @@ Removing a Plugin must show all owned skills, agents, commands, hooks, configura
 
 ### 9.2 Project protection
 
-For every path inside a Git worktree, the planner asks Git whether the path is ignored. If Git does not classify it as ignored, the path is Git-protected and no cleaner action may mutate it. This invariant is not bypassed by force.
+For every path inside a Git worktree, the planner asks Git whether the path is ignored. If Git does not classify it as ignored, the path is Git-protected and no Lampwright action may mutate it. This invariant is not bypassed by force.
 
 ### 9.3 Availability planning
 
@@ -262,7 +262,7 @@ Codex path-based skill configuration, Claude Code skill overrides, and Gemini
 CLI disabled-skill settings are the initial Native Disable controls. A
 name-based control is blocked when it could affect another Skill Identity with
 the same harness-visible name. Plugin-owned and System Skills are never
-individually disabled by the cleaner.
+individually disabled by Lampwright.
 
 Inventory represents runtime status separately from native-control support and
 materializes the exact, fail-closed configuration evidence defined in
@@ -285,7 +285,7 @@ replacement at a displaced path is an Enable conflict and is never overwritten.
 
 ### 10.1 Managed removal
 
-If an Owner and its lifecycle operation are available, the cleaner uses Managed Removal. A manager executable already present on the machine may be invoked directly.
+If an Owner and its lifecycle operation are available, Lampwright uses Managed Removal. A manager executable already present on the machine may be invoked directly.
 
 An adapter may request ephemeral execution through an existing package runner when:
 
@@ -296,7 +296,7 @@ An adapter may request ephemeral execution through an existing package runner wh
 
 ### 10.2 Failed managed removal
 
-If Managed Removal fails, the cleaner stops actions that depend on it, reports the failure, and rescans the affected target. Brute-force Removal may then be offered as a second, separately confirmed action. The cleaner must never silently fall back.
+If Managed Removal fails, Lampwright stops actions that depend on it, reports the failure, and rescans the affected target. Brute-force Removal may then be offered as a second, separately confirmed action. Lampwright must never silently fall back.
 
 ### 10.3 Brute-force removal
 
@@ -331,9 +331,13 @@ Persistent state is created lazily only for:
 - Disabled Storage manifests and suspended content
 - Optional rebuildable search cache
 
-State follows operating-system conventions and supports an explicit directory override.
+State follows operating-system conventions and supports an explicit directory
+override. The default directory retains the legacy `skill-cleaner` application
+identifier on every platform. Lampwright also retains the legacy transaction
+and claim filename prefixes so existing Trash, Disabled Storage, trust, audit,
+and interrupted-operation recovery remain usable after the product rename.
 
-Quarantine entries record original path, link information, content hash, ownership evidence, adapter, removal time, and restoration metadata. Entries are retained for 30 days by default and may be restored or purged explicitly. Automatic expiry may remove entries during a later mutating cleaner run, never during read-only use.
+Quarantine entries record original path, link information, content hash, ownership evidence, adapter, removal time, and restoration metadata. Entries are retained for 30 days by default and may be restored or purged explicitly. Automatic expiry may remove entries during a later mutating Lampwright run, never during read-only use.
 
 Restoration must not overwrite an occupied destination without an explicit conflict decision. Managed uninstalls are logged but are not represented as automatically reversible unless the Owner itself supports restoration.
 
@@ -349,13 +353,13 @@ remains live harness evidence and is not copied into Disabled Storage.
 The intended minimal command surface is:
 
 ```console
-skill-cleaner                  # interactive fuzzy-search UI
-skill-cleaner scan             # print inventory
-skill-cleaner disable <target> # disable selected target(s) without removal
-skill-cleaner enable <target>  # enable native or suspended target(s)
-skill-cleaner remove <target>  # plan and remove selected target(s)
-skill-cleaner restore <entry>  # restore quarantined artifacts
-skill-cleaner purge <entry>    # permanently delete quarantine entries
+lampwright                  # interactive fuzzy-search UI
+lampwright scan             # print inventory
+lampwright disable <target> # disable selected target(s) without removal
+lampwright enable <target>  # enable native or suspended target(s)
+lampwright remove <target>  # plan and remove selected target(s)
+lampwright restore <entry>  # restore quarantined artifacts
+lampwright purge <entry>    # permanently delete quarantine entries
 ```
 
 Shared automation options include:
@@ -379,7 +383,7 @@ The exact target-selector syntax will be finalized with the core inventory model
 
 ## 14. Privacy and network behavior
 
-The cleaner has no telemetry. Inventory, paths, skill metadata, and search queries remain local.
+Lampwright has no telemetry. Inventory, paths, skill metadata, and search queries remain local.
 
 Network access is not required for scanning, search, planning, quarantine, restoration, or local adapters. An explicitly approved ephemeral package runner may access the network as described in its plan.
 

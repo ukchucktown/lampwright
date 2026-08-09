@@ -23,7 +23,7 @@ blocks, warnings, approvals, and verification checks—while excluding only
 `createdAt`. A changed or forged plan returns a blocked report and creates no
 audit or trust state.
 
-Cleaner-owned changes are closed over the plan:
+Lampwright-owned changes are closed over the plan:
 
 - A Quarantine action passes its exact `ArtifactLocation` and Inventory-derived
   ownership subjects to the Quarantine module.
@@ -43,9 +43,9 @@ Owner processes are the declared mutation boundary described by
 [ADR 0005](./adr/0005-treat-owner-processes-as-declared-mutation-boundaries.md).
 Commands are always structured executable/argument values and the production
 runner sets `shell: false`. Exact-version `npx` runs from a fresh operating
-system temporary directory with a cleaner-owned npm cache, so acquisition does
+system temporary directory with a Lampwright-owned npm cache, so acquisition does
 not operate from or add dependencies to the user's project. Every direct and
-ephemeral Owner invocation receives cleaner-owned `DO_NOT_TRACK=1` and
+ephemeral Owner invocation receives Lampwright-owned `DO_NOT_TRACK=1` and
 `DISABLE_TELEMETRY=1` environment values; Adapters cannot override them.
 Generic direct and verification commands reject `npx`, `npm`, `yarn`, `pnpm`,
 `pnpx`, and `bunx` names, including case-insensitive Windows launcher suffixes,
@@ -55,7 +55,7 @@ that directory to the structured process runner. A direct invocation may
 instead request a fresh operating-system temporary directory, which Execution
 removes afterward. Both choices are part of the approved plan and freshness
 comparison; neither is inferred from Execution's own process directory.
-Ephemeral packages likewise run only from a fresh cleaner-owned temporary
+Ephemeral packages likewise run only from a fresh Lampwright-owned temporary
 directory.
 
 ## Scheduling and fallback

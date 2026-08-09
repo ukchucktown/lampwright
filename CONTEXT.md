@@ -1,6 +1,6 @@
 # Skill Cleanup
 
-This context describes how `skill-cleaner` identifies AI agent skills, attributes lifecycle ownership, controls their availability, and removes installed capabilities without damaging unrelated tools or project source.
+This context describes how `lampwright` identifies AI agent skills, attributes lifecycle ownership, controls their availability, and removes installed capabilities without damaging unrelated tools or project source.
 
 ## Installed capabilities
 
@@ -24,7 +24,7 @@ A group of Installations known through strong evidence to share one Skill Identi
 _Avoid_: Duplicate, package
 
 **System Skill**:
-A Skill supplied as an inseparable part of an agent runtime and outside the cleaner's removal boundary.
+A Skill supplied as an inseparable part of an agent runtime and outside Lampwright's removal boundary.
 _Avoid_: Installed skill, managed skill
 
 **Source Artifact**:
@@ -112,7 +112,7 @@ A structured declaration that another installed capability requires a Removal Ta
 Heuristic evidence that another Skill mentions, links to, or may invoke a Removal Target. Soft References warn but do not block.
 
 **Git-protected Artifact**:
-An artifact inside a Git worktree that Git does not classify as ignored. Git-protected Artifacts are visible but immutable to the cleaner.
+An artifact inside a Git worktree that Git does not classify as ignored. Git-protected Artifacts are visible but immutable to Lampwright.
 
 **Scope**:
 The availability boundary of an Installation, such as user-wide, workspace-local, or agent-specific.

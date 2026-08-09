@@ -1,6 +1,6 @@
-# Contributing to skill-cleaner
+# Contributing to Lampwright
 
-`skill-cleaner` is specification-first. Start with the tracked issue and read
+`lampwright` is specification-first. Start with the tracked issue and read
 the linked sections of [`docs/spec.md`](./docs/spec.md),
 [`CONTEXT.md`](./CONTEXT.md), [`docs/module-design.md`](./docs/module-design.md),
 and the relevant [architectural decisions](./docs/adr/) before editing code.

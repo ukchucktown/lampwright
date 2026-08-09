@@ -1,6 +1,6 @@
 # Terminal UI
 
-Running `skill-cleaner` with no arguments opens the interactive inventory. The
+Running `lampwright` with no arguments opens the interactive inventory. The
 terminal UI is a thin presentation layer over Inventory, Planning, Execution,
 and Disabled Storage. Browsing reads immutable Inventory/Disabled values;
 reviews request complete Removal or Availability Plans; confirmation passes
@@ -55,7 +55,7 @@ Both preview every item; a known conflict blocks the whole restore and `y` is
 the mutation boundary. A race can report an honest partial result but never
 overwrites an occupied path, bypasses Git protection, or ignores integrity.
 Purge is explicitly irreversible. Managed removals do not enter Trash because
-their content is not recoverable by skill-cleaner.
+their content is not recoverable by Lampwright.
 
 Two navigation panes sit over a read-only detail pane in a fixed grid. The left
 pane lists sections, the right lists the entries of the focused section, and

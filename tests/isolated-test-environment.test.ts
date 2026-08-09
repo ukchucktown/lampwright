@@ -80,7 +80,7 @@ describe("createIsolatedTestEnvironment", () => {
     "canonicalizes a symlinked temporary root",
     async () => {
       const physicalTemporaryRoot = await mkdtemp(
-        join(tmpdir(), "skill-cleaner-physical-"),
+        join(tmpdir(), "lampwright-physical-"),
       );
       const linkedTemporaryRoot = `${physicalTemporaryRoot}-link`;
       const originalTemporaryRoot = process.env.TMPDIR;
@@ -107,7 +107,7 @@ describe("createIsolatedTestEnvironment", () => {
   );
 
   it("does not pass unrelated host variables to child processes", async () => {
-    const sentinelName = "SKILL_CLEANER_HOST_PATH_SENTINEL";
+    const sentinelName = "LAMPWRIGHT_HOST_PATH_SENTINEL";
     process.env[sentinelName] = process.cwd();
 
     try {

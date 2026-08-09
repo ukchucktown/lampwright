@@ -1,6 +1,6 @@
-# skill-cleaner
+# Lampwright
 
-`skill-cleaner` is a cross-platform terminal application for discovering,
+`lampwright` is a cross-platform terminal application for discovering,
 reversibly disabling, enabling, and safely removing AI agent Skills whether
 they were installed as standalone files, by a Manager, or through a Plugin
 system.
@@ -18,7 +18,7 @@ release, build and run the executable from a trusted checkout.
 
 ## Safety model
 
-Inventory is rebuilt from live, bounded evidence on every run. The cleaner
+Inventory is rebuilt from live, bounded evidence on every run. Lampwright
 attributes ownership before Planning, prefers the Owner's supported Managed
 Removal, and never silently substitutes a filesystem fallback. A separately
 confirmed Brute-force Removal moves artifacts into Quarantine.
@@ -32,19 +32,19 @@ paths, Inventory, metadata, or search queries.
 ## Interfaces
 
 ```console
-skill-cleaner                  # interactive fuzzy-search UI
-skill-cleaner scan             # print the live Inventory
-skill-cleaner disable <target> # natively disable or safely suspend targets
-skill-cleaner enable <target>  # enable native or Disabled Storage targets
-skill-cleaner remove <target>  # review and remove selected target(s)
-skill-cleaner restore <entry>  # restore a Quarantine entry
-skill-cleaner purge <entry>    # permanently delete Quarantine entries
+lampwright                  # interactive fuzzy-search UI
+lampwright scan             # print the live Inventory
+lampwright disable <target> # natively disable or safely suspend targets
+lampwright enable <target>  # enable native or Disabled Storage targets
+lampwright remove <target>  # review and remove selected target(s)
+lampwright restore <entry>  # restore a Quarantine entry
+lampwright purge <entry>    # permanently delete Quarantine entries
 ```
 
 See [Reversible Skill availability](./docs/availability.md) for Native versus
 Suspended state, safe recovery, reports, and platform behavior.
 
-Use `skill-cleaner --help` for selectors, approvals, JSON output, dry-run, and
+Use `lampwright --help` for selectors, approvals, JSON output, dry-run, and
 stable exit statuses. See the [terminal UI](./docs/tui.md) and
 [non-interactive CLI](./docs/cli.md) guides for the complete behavior.
 

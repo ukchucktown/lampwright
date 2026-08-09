@@ -113,7 +113,7 @@ timestamp. It never reloads an Adapter or reconstructs an Owner command.
 
 Actions expose only approved plan authority. Managed commands run without a
 shell; exact `npx` packages use an isolated temporary working directory and
-cleaner-owned cache. Quarantine provenance is reconstructed from the fresh
+Lampwright-owned cache. Quarantine provenance is reconstructed from the fresh
 Inventory. Declarative record cleanup verifies the complete file and selected
 record hashes, captures its preimage in Quarantine, and fails closed on links,
 hard links, ambiguous documents, or changes. A bounded dependency scheduler

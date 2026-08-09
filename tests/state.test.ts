@@ -11,7 +11,7 @@ const createTestEnvironment = createIsolatedTestEnvironmentFixture();
 describe("local adapter trust state", () => {
   it("is read-only until an exact adapter hash is explicitly trusted", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const store = createFileAdapterTrustStore(stateRoot);
     const approval = {
       adapterId: "fixture.command",
@@ -37,7 +37,7 @@ describe("local adapter trust state", () => {
 
   it("does not trust a decision file with another hard-link owner", async () => {
     const environment = await createTestEnvironment();
-    const stateRoot = join(environment.state, "skill-cleaner");
+    const stateRoot = join(environment.state, "lampwright");
     const store = createFileAdapterTrustStore(stateRoot);
     const approval = {
       adapterId: "fixture.command",

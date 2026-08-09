@@ -146,7 +146,7 @@ function restorePath(source: string, id: string): string {
 describe("Disabled Storage", () => {
   it("round-trips a filesystem-owned file with its complete non-expiring manifest", async () => {
     const environment = await createEnvironment();
-    const state = join(environment.state, "skill-cleaner");
+    const state = join(environment.state, "lampwright");
     const source = join(environment.home, "example-skill.md");
     await writeFile(source, "skill", "utf8");
     const storage = harness(state);
@@ -492,7 +492,7 @@ describe("Disabled Storage", () => {
 
   it("does not create state while listing, previewing a missing entry, or suspending an absent source", async () => {
     const environment = await createEnvironment();
-    const state = join(environment.state, "skill-cleaner");
+    const state = join(environment.state, "lampwright");
     const source = join(environment.home, "missing-skill");
     const storage = harness(state);
     await expect(storage.list()).resolves.toEqual([]);
@@ -505,7 +505,7 @@ describe("Disabled Storage", () => {
 
   it("retains shared approved-operation provenance across distinct entries", async () => {
     const environment = await createEnvironment();
-    const state = join(environment.state, "skill-cleaner");
+    const state = join(environment.state, "lampwright");
     const first = join(environment.home, "first-skill");
     const second = join(environment.home, "second-skill");
     await writeFile(first, "one", "utf8");
