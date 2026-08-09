@@ -857,7 +857,7 @@ export function createDisabledStorageModule(
         await fs.link(temporary, destination);
         await fs.unlink(temporary);
       } else if (artifact.originalLocation.artifactType.kind === "directory") {
-        const claim = `.skill-cleaner-${entryId}.claim`;
+        const claim = `.lampwright-${entryId}.claim`;
         const claimPath = join(destination, claim);
         const expectedClaim = directoryClaim(entryId, artifact.integrity);
         if ((await available(join(temporary, claim))) !== null)
@@ -1638,15 +1638,12 @@ function readId(createId: () => string): DisabledEntryId {
   return id as DisabledEntryId;
 }
 function pendingPath(source: string, id: string): string {
-  return join(
-    dirname(source),
-    `.${basename(source)}.skill-cleaner-${id}.pending`,
-  );
+  return join(dirname(source), `.${basename(source)}.lampwright-${id}.pending`);
 }
 function restoreTemporaryPath(destination: string, id: string): string {
   return join(
     dirname(destination),
-    `.${basename(destination)}.skill-cleaner-${id}.restore`,
+    `.${basename(destination)}.lampwright-${id}.restore`,
   );
 }
 function payloadFor(directory: string, index: number): string {

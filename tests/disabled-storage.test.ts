@@ -130,17 +130,11 @@ async function suspendedEntry(
 }
 
 function pendingPath(source: string, id: string): string {
-  return join(
-    dirname(source),
-    `.${basename(source)}.skill-cleaner-${id}.pending`,
-  );
+  return join(dirname(source), `.${basename(source)}.lampwright-${id}.pending`);
 }
 
 function restorePath(source: string, id: string): string {
-  return join(
-    dirname(source),
-    `.${basename(source)}.skill-cleaner-${id}.restore`,
-  );
+  return join(dirname(source), `.${basename(source)}.lampwright-${id}.restore`);
 }
 
 describe("Disabled Storage", () => {
@@ -1117,7 +1111,7 @@ describe("Disabled Storage", () => {
     await expect(readFile(join(source, "a.txt"), "utf8")).resolves.toBe("a");
     await missing(join(source, "b.txt"));
     await expect(
-      readFile(join(source, `.skill-cleaner-${entry.id}.claim`), "utf8"),
+      readFile(join(source, `.lampwright-${entry.id}.claim`), "utf8"),
     ).resolves.toContain(entry.id);
 
     const recovered = harness(stateRoot);
@@ -1125,7 +1119,7 @@ describe("Disabled Storage", () => {
       status: "enabled",
     });
     await expect(readFile(join(source, "b.txt"), "utf8")).resolves.toBe("b");
-    await missing(join(source, `.skill-cleaner-${entry.id}.claim`));
+    await missing(join(source, `.lampwright-${entry.id}.claim`));
     await expect(recovered.list()).resolves.toEqual([]);
   });
 
@@ -1153,7 +1147,7 @@ describe("Disabled Storage", () => {
     };
     await harness(stateRoot, faultFileSystem).enable(entry);
     await writeFile(
-      join(source, `.skill-cleaner-${entry.id}.claim`),
+      join(source, `.lampwright-${entry.id}.claim`),
       "forged claim",
       "utf8",
     );

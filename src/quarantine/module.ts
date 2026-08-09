@@ -2205,21 +2205,18 @@ function requireEntryId(value: string): void {
 }
 
 function pendingSourcePath(source: string, id: string): string {
-  return join(
-    dirname(source),
-    `.${basename(source)}.skill-cleaner-${id}.pending`,
-  );
+  return join(dirname(source), `.${basename(source)}.lampwright-${id}.pending`);
 }
 
 function restoreTemporaryPath(destination: string, id: string): string {
   return join(
     dirname(destination),
-    `.${basename(destination)}.skill-cleaner-${id}.restore`,
+    `.${basename(destination)}.lampwright-${id}.restore`,
   );
 }
 
 function restoreDirectoryClaimName(id: string): string {
-  return `.skill-cleaner-${id}.claim`;
+  return `.lampwright-${id}.claim`;
 }
 
 function restoreDirectoryClaim(entry: QuarantineEntry): Buffer {
@@ -2232,7 +2229,7 @@ function restoreDirectoryClaim(entry: QuarantineEntry): Buffer {
 function restoreBackupPath(destination: string, id: string): string {
   return join(
     dirname(destination),
-    `.${basename(destination)}.skill-cleaner-${id}.backup`,
+    `.${basename(destination)}.lampwright-${id}.backup`,
   );
 }
 

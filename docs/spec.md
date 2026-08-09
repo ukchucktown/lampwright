@@ -331,11 +331,12 @@ Persistent state is created lazily only for:
 - Disabled Storage manifests and suspended content
 - Optional rebuildable search cache
 
-State follows operating-system conventions and supports an explicit directory
-override. The default directory retains the legacy `skill-cleaner` application
-identifier on every platform. Lampwright also retains the legacy transaction
-and claim filename prefixes so existing Trash, Disabled Storage, trust, audit,
-and interrupted-operation recovery remain usable after the product rename.
+State follows one canonical application identifier and supports an explicit
+directory override. macOS and Linux use `$XDG_STATE_HOME/lampwright` when that
+variable is an absolute path and otherwise use `~/.local/state/lampwright`.
+Windows uses `%LOCALAPPDATA%\\lampwright`, then `%APPDATA%\\lampwright`, then
+`~/AppData/Local/lampwright`. Transaction, recovery, and claim filenames use
+the `.lampwright-` prefix.
 
 Quarantine entries record original path, link information, content hash, ownership evidence, adapter, removal time, and restoration metadata. Entries are retained for 30 days by default and may be restored or purged explicitly. Automatic expiry may remove entries during a later mutating Lampwright run, never during read-only use.
 

@@ -2511,7 +2511,7 @@ describe("Inventory scan", () => {
     ]);
     expect(stringifyModel(first)).not.toContain(outsideRoot);
     await expect(
-      access(join(environment.state, "skill-cleaner")),
+      access(join(environment.state, "lampwright")),
     ).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       Promise.all(protectedDirectories.map(snapshotDirectory)),
