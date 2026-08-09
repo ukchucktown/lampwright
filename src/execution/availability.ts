@@ -199,7 +199,14 @@ async function executeAction(
         result.status === "suspended"
           ? {
               entryId: result.entry.id,
-              path: result.entry.originalLocation.path,
+              path:
+                result.entry.schemaVersion === 1
+                  ? result.entry.originalLocation.path
+                  : result.entry.artifacts[0]!.originalLocation.path,
+              artifactCount:
+                result.entry.schemaVersion === 1
+                  ? 1
+                  : result.entry.artifacts.length,
             }
           : { path: result.path, reason: "already absent" };
     } else {

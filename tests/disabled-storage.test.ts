@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDisabledStorageModule,
+  parseDisabledEntry,
   type ArtifactLocation,
   type DisabledStorageModule,
   type InstallationId,
@@ -52,6 +53,42 @@ function request(
       },
     ],
     operation: { id: "availability-plan-1", displayNames: ["Example skill"] },
+  };
+}
+
+function setRequest(
+  locations: readonly [ArtifactLocation, ...ArtifactLocation[]],
+): SuspendRequest {
+  return {
+    schemaVersion: 2,
+    artifacts: locations.map((item) => ({ location: item })) as [
+      { location: ArtifactLocation },
+      ...{ location: ArtifactLocation }[],
+    ],
+    skillIdentity: {
+      strongEvidence: [
+        {
+          strength: "strong",
+          kind: "canonical-target",
+          canonicalPath: locations[0].canonicalPath ?? locations[0].path,
+        },
+      ],
+      weakEvidence: [],
+    },
+    installationIds: ["vercel-installation" as InstallationId],
+    ownership: {
+      kind: "manager",
+      managerId: "vercel-skills",
+      confidence: "declared",
+    },
+    harnessExposures: [
+      {
+        harnessId: "example",
+        status: "enabled",
+        control: { kind: "unsupported", reason: "fixture" },
+      },
+    ],
+    operation: { id: "availability-plan-set", displayNames: ["Managed set"] },
   };
 }
 
@@ -138,6 +175,319 @@ describe("Disabled Storage", () => {
     });
     await expect(readFile(source, "utf8")).resolves.toBe("skill");
     await expect(storage.list()).resolves.toEqual([]);
+  });
+
+  it("round-trips one Manager-owned v2 file, directory, and link set without changing its record", async () => {
+    const environment = await createEnvironment();
+    const record = join(environment.home, "vercel-manager-record.json");
+    const directory = join(environment.home, "a-primary");
+    const file = join(environment.home, "b-copy.md");
+    const link = join(environment.home, "c-copy-link");
+    const linkTarget = join(environment.temporary, "shared-link-target");
+    await writeFile(record, '{"skill":"managed-set"}\n');
+    await mkdir(directory);
+    await mkdir(linkTarget);
+    await writeFile(join(directory, "SKILL.md"), "primary");
+    await writeFile(file, "copy");
+    await symlink(linkTarget, link, "dir");
+    const locations: [ArtifactLocation, ...ArtifactLocation[]] = [
+      location(directory, "directory"),
+      location(file, "file"),
+      {
+        path: link,
+        canonicalPath: linkTarget,
+        artifactType: {
+          kind: "symbolic-link",
+          target: linkTarget,
+          broken: false,
+        },
+      },
+    ];
+    const storage = harness(join(environment.state, "managed-set"));
+    const entry = await suspendedEntry(storage, setRequest(locations));
+    expect(entry.schemaVersion).toBe(2);
+    if (entry.schemaVersion !== 2) throw new Error("expected v2 entry");
+    expect(
+      entry.artifacts.map((artifact) => artifact.originalLocation.path),
+    ).toEqual(locations.map((item) => item.path));
+    await Promise.all(locations.map((item) => missing(item.path)));
+    await expect(readFile(record, "utf8")).resolves.toBe(
+      '{"skill":"managed-set"}\n',
+    );
+    await expect(storage.enable(entry)).resolves.toMatchObject({
+      status: "enabled",
+      destinations: locations.map((item) => item.path),
+    });
+    await expect(readFile(join(directory, "SKILL.md"), "utf8")).resolves.toBe(
+      "primary",
+    );
+    await expect(readFile(file, "utf8")).resolves.toBe("copy");
+    await expect(readlink(link)).resolves.toBe(linkTarget);
+    await expect(readFile(record, "utf8")).resolves.toBe(
+      '{"skill":"managed-set"}\n',
+    );
+    await expect(storage.list()).resolves.toEqual([]);
+  });
+
+  it("rejects forged Plugin and agent-runtime v2 manifests while preserving v1 parsing", async () => {
+    const environment = await createEnvironment();
+    const state = join(environment.state, "forged-v2-ownership");
+    const source = join(environment.home, "managed-artifact");
+    await writeFile(source, "managed", "utf8");
+    const storage = harness(state);
+    const entry = await suspendedEntry(
+      storage,
+      setRequest([location(source, "file")]),
+    );
+    if (entry.schemaVersion !== 2) throw new Error("expected v2 entry");
+    const manifest = join(layout(state).entries, entry.id, "manifest.json");
+    const forbiddenOwnership = [
+      {
+        kind: "plugin",
+        pluginId: "forged-plugin",
+        independentlySelectable: true,
+        confidence: "declared",
+      },
+      {
+        kind: "agent-runtime",
+        agentId: "forged-runtime",
+        confidence: "declared",
+      },
+    ] as const;
+    for (const ownership of forbiddenOwnership) {
+      const forged = { ...entry, ownership };
+      expect(() => parseDisabledEntry(forged)).toThrow();
+      await writeFile(manifest, `${JSON.stringify(forged)}\n`, "utf8");
+      await expect(storage.list()).rejects.toThrow();
+    }
+
+    const legacyBase = {
+      schemaVersion: 1 as const,
+      id: entry.id,
+      suspendedAt: entry.suspendedAt,
+      originalLocation: entry.artifacts[0].originalLocation,
+      integrity: entry.artifacts[0].integrity,
+      skillIdentity: entry.skillIdentity,
+      installationIds: entry.installationIds,
+      harnessExposures: entry.harnessExposures,
+      operation: entry.operation,
+      restoration: entry.artifacts[0].restoration,
+    };
+    for (const ownership of forbiddenOwnership)
+      expect(
+        parseDisabledEntry({ ...legacyBase, ownership }).ownership,
+      ).toEqual(ownership);
+  });
+
+  it("preflights every v2 destination and retains the complete entry on one collision", async () => {
+    const environment = await createEnvironment();
+    const paths = ["a-primary", "b-copy", "c-copy"].map((name) =>
+      join(environment.home, name),
+    );
+    await Promise.all(
+      paths.map((path, index) => writeFile(path, `value-${index}`)),
+    );
+    const locations = paths.map((path) => location(path, "file")) as [
+      ArtifactLocation,
+      ...ArtifactLocation[],
+    ];
+    const storage = harness(join(environment.state, "collision-set"));
+    const entry = await suspendedEntry(storage, setRequest(locations));
+    await writeFile(paths[1]!, "manager-recreated");
+    await expect(storage.previewEnable(entry)).resolves.toMatchObject({
+      status: "blocked",
+      path: paths[1],
+      reason: "destination-occupied",
+    });
+    await expect(storage.enable(entry)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "destination-occupied",
+    });
+    await missing(paths[0]!);
+    await missing(paths[2]!);
+    await expect(readFile(paths[1]!, "utf8")).resolves.toBe(
+      "manager-recreated",
+    );
+    await expect(storage.list()).resolves.toEqual([entry]);
+  });
+
+  it("rolls every v2 source back when suspension is interrupted mid-set", async () => {
+    const environment = await createEnvironment();
+    const paths = ["a-primary", "b-copy", "c-copy"].map((name) =>
+      join(environment.home, name),
+    );
+    await Promise.all(
+      paths.map((path, index) => writeFile(path, `value-${index}`)),
+    );
+    let pendingRenames = 0;
+    const fileSystem: ArtifactFileSystem = {
+      ...nodeArtifactFileSystem,
+      async rename(from, to) {
+        if (to.includes(".pending")) {
+          pendingRenames += 1;
+          if (pendingRenames === 2) throw new Error("injected mid-set move");
+        }
+        await nodeArtifactFileSystem.rename(from, to);
+      },
+    };
+    const storage = harness(
+      join(environment.state, "rollback-set"),
+      fileSystem,
+    );
+    await expect(
+      storage.suspend(
+        setRequest(
+          paths.map((path) => location(path, "file")) as [
+            ArtifactLocation,
+            ...ArtifactLocation[],
+          ],
+        ),
+      ),
+    ).resolves.toMatchObject({ status: "blocked" });
+    for (let index = 0; index < paths.length; index += 1)
+      await expect(readFile(paths[index]!, "utf8")).resolves.toBe(
+        `value-${index}`,
+      );
+    await expect(storage.list()).resolves.toEqual([]);
+  });
+
+  it("resumes an interrupted v2 enable only from its validated journal", async () => {
+    const environment = await createEnvironment();
+    const paths = ["a-primary", "b-copy", "c-copy"].map((name) =>
+      join(environment.home, name),
+    );
+    await Promise.all(
+      paths.map((path, index) => writeFile(path, `value-${index}`)),
+    );
+    let publishedFiles = 0;
+    const fileSystem: ArtifactFileSystem = {
+      ...nodeArtifactFileSystem,
+      async link(existing, created) {
+        if (created.endsWith("b-copy") && publishedFiles === 1) {
+          publishedFiles += 1;
+          throw new Error("injected partial set publication");
+        }
+        await nodeArtifactFileSystem.link(existing, created);
+        if (!created.includes(".restore")) publishedFiles += 1;
+      },
+    };
+    const storage = harness(join(environment.state, "resume-set"), fileSystem);
+    const entry = await suspendedEntry(
+      storage,
+      setRequest(
+        paths.map((path) => location(path, "file")) as [
+          ArtifactLocation,
+          ...ArtifactLocation[],
+        ],
+      ),
+    );
+    await expect(storage.enable(entry)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "state-unsafe",
+    });
+    await expect(storage.list()).resolves.toEqual([]);
+    await expect(storage.enable(entry)).resolves.toMatchObject({
+      status: "enabled",
+    });
+    for (let index = 0; index < paths.length; index += 1)
+      await expect(readFile(paths[index]!, "utf8")).resolves.toBe(
+        `value-${index}`,
+      );
+    await expect(storage.list()).resolves.toEqual([]);
+  });
+
+  it("resumes a claimed mid-directory publication inside a v2 set", async () => {
+    const environment = await createEnvironment();
+    const state = join(environment.state, "directory-resume-set");
+    const directory = join(environment.home, "a-directory");
+    const file = join(environment.home, "z-file");
+    await mkdir(directory);
+    await writeFile(join(directory, "a.txt"), "a", "utf8");
+    await writeFile(join(directory, "b.txt"), "b", "utf8");
+    await writeFile(file, "file", "utf8");
+    const entry = await suspendedEntry(
+      harness(state),
+      setRequest([location(directory, "directory"), location(file, "file")]),
+    );
+    let interrupted = false;
+    const fileSystem: ArtifactFileSystem = {
+      ...nodeArtifactFileSystem,
+      async writeFile(path, data, options) {
+        if (path === join(directory, "b.txt") && !interrupted) {
+          interrupted = true;
+          throw Object.assign(new Error("mid-set directory publication"), {
+            code: "EIO",
+          });
+        }
+        await nodeArtifactFileSystem.writeFile(path, data, options);
+      },
+    };
+    await expect(
+      harness(state, fileSystem).enable(entry),
+    ).resolves.toMatchObject({
+      status: "blocked",
+      reason: "state-unsafe",
+    });
+    await expect(readFile(join(directory, "a.txt"), "utf8")).resolves.toBe("a");
+    await missing(join(directory, "b.txt"));
+    await missing(file);
+
+    const recovered = harness(state);
+    await expect(recovered.enable(entry)).resolves.toMatchObject({
+      status: "enabled",
+    });
+    await expect(readFile(join(directory, "b.txt"), "utf8")).resolves.toBe("b");
+    await expect(readFile(file, "utf8")).resolves.toBe("file");
+    await expect(recovered.list()).resolves.toEqual([]);
+  });
+
+  it("surfaces a retained v2 entry after a later publication races with enable", async () => {
+    const environment = await createEnvironment();
+    const paths = ["a-primary", "b-copy", "c-copy"].map((name) =>
+      join(environment.home, name),
+    );
+    await Promise.all(
+      paths.map((path, index) => writeFile(path, `value-${index}`)),
+    );
+    let raced = false;
+    const fileSystem: ArtifactFileSystem = {
+      ...nodeArtifactFileSystem,
+      async link(existing, created) {
+        if (!raced && created === paths[1]) {
+          raced = true;
+          await writeFile(created, "raced replacement");
+        }
+        await nodeArtifactFileSystem.link(existing, created);
+      },
+    };
+    const state = join(environment.state, "publish-race-set");
+    const storage = harness(state, fileSystem);
+    const entry = await suspendedEntry(
+      storage,
+      setRequest(
+        paths.map((path) => location(path, "file")) as [
+          ArtifactLocation,
+          ...ArtifactLocation[],
+        ],
+      ),
+    );
+
+    await expect(storage.enable(entry)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "destination-occupied",
+    });
+    await expect(readFile(paths[0]!, "utf8")).resolves.toBe("value-0");
+    await expect(readFile(paths[1]!, "utf8")).resolves.toBe(
+      "raced replacement",
+    );
+    await missing(paths[2]!);
+    await missing(restorePath(paths[1]!, entry.id));
+    await missing(restorePath(paths[2]!, entry.id));
+    await expect(storage.list()).resolves.toEqual([entry]);
+    await expect(storage.previewEnable(entry)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "destination-occupied",
+    });
   });
 
   it("does not create state while listing, previewing a missing entry, or suspending an absent source", async () => {

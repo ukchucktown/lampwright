@@ -45,10 +45,13 @@ export function createDisabledSections(
       name: entry.operation.displayNames.join(", "),
       description: null,
       exposedTo: [...new Set(entry.harnessExposures.map((x) => x.harnessId))],
-      paths: [entry.originalLocation.path],
+      paths:
+        entry.schemaVersion === 1
+          ? [entry.originalLocation.path]
+          : entry.artifacts.map((artifact) => artifact.originalLocation.path),
       owner: entry.ownership.kind,
       note: selectable
-        ? `Suspended · restores one stored artifact for ${String(entry.installationIds.length)} Installation(s)`
+        ? `Suspended · restores ${String(entry.schemaVersion === 1 ? 1 : entry.artifacts.length)} stored artifact(s) for ${String(entry.installationIds.length)} Installation(s)`
         : "Suspended · informational only",
       target: null,
       availabilityTargets: selectable

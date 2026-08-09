@@ -99,11 +99,20 @@ function successfulAvailabilityReport(
       completedAt,
       details:
         action.kind === "suspended-disable"
-          ? { entryId, path: action.request.location.path }
+          ? {
+              entryId,
+              path:
+                "artifacts" in action.request
+                  ? action.request.artifacts[0].location.path
+                  : action.request.location.path,
+            }
           : action.kind === "suspended-enable"
             ? {
                 entryId: action.entry.id,
-                destination: action.entry.originalLocation.path,
+                destination:
+                  action.entry.schemaVersion === 1
+                    ? action.entry.originalLocation.path
+                    : action.entry.artifacts[0].originalLocation.path,
               }
             : {
                 path: action.mutations[0].path,

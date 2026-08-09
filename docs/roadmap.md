@@ -42,3 +42,4 @@ Issue #15 prepares a release but explicitly does not publish to npm or make the 
   2. [#73 Plan and execute reversible Skill availability changes](https://github.com/ukchucktown/skill-cleaner/issues/73) follows both foundations.
   3. [#74 Add Disabled Skill management to the TUI](https://github.com/ukchucktown/skill-cleaner/issues/74) and [#75 Add disable and enable workflows to the CLI](https://github.com/ukchucktown/skill-cleaner/issues/75) can proceed in parallel after #73.
   4. [#76 Harden reversible Skill availability across platforms](https://github.com/ukchucktown/skill-cleaner/issues/76) closes the feature.
+  5. [#77 Suspend complete Manager-owned Skill artifact sets](https://github.com/ukchucktown/skill-cleaner/issues/77) extends Suspended Disable after the original interfaces and hardening are complete.

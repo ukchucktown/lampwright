@@ -292,6 +292,14 @@ export async function scanGeminiCli(
               },
             }
           : managed;
+      const installationStatus =
+        location.artifactType.kind === "symbolic-link" ||
+        location.artifactType.kind === "junction"
+          ? location.artifactType.broken
+            ? "broken"
+            : "active"
+          : metadata.status;
+      const artifactProtection = await protectionFor(location, commandRunner);
       return {
         id: stableId(
           "installation",
@@ -304,13 +312,7 @@ export async function scanGeminiCli(
             : entry.scope.kind === "workspace"
               ? "standalone-project-skill"
               : "active-installation",
-        status:
-          location.artifactType.kind === "symbolic-link" ||
-          location.artifactType.kind === "junction"
-            ? location.artifactType.broken
-              ? "broken"
-              : "active"
-            : metadata.status,
+        status: installationStatus,
         skill: metadata.skill,
         identity: { strongEvidence, weakEvidence },
         source: null,
@@ -323,6 +325,22 @@ export async function scanGeminiCli(
         agentId,
         exposedTo: [agentId],
         harnessExposures: [],
+        suspension:
+          !extension && !isNative && installationStatus === "active"
+            ? {
+                kind: "available",
+                artifacts: [{ location, protection: artifactProtection }],
+                managerRecord: "not-applicable",
+                managerMayRecreate: false,
+              }
+            : {
+                kind: "unavailable",
+                reason: extension
+                  ? "Plugin-owned Skills cannot be suspended independently"
+                  : isNative
+                    ? "Gemini Manager ownership has no declared suspension authority"
+                    : "only a complete active Installation can be suspended",
+              },
         scope: entry.scope,
         location,
         contentHash,
@@ -341,7 +359,7 @@ export async function scanGeminiCli(
                 confidence: "declared" as const,
               }
             : { kind: "filesystem" as const, confidence: "inferred" as const },
-        protection: await protectionFor(location, commandRunner),
+        protection: artifactProtection,
         removal: extension
           ? {
               managed: null,

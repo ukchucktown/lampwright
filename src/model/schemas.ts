@@ -194,6 +194,23 @@ const artifactLocationSchema = z.strictObject({
   artifactType: artifactTypeSchema,
 });
 
+const suspensionEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("available"),
+    artifacts: z
+      .array(
+        z.strictObject({
+          location: artifactLocationSchema,
+          protection: protectionStatusSchema,
+        }),
+      )
+      .min(1),
+    managerRecord: z.enum(["not-applicable", "preserved"]),
+    managerMayRecreate: z.boolean(),
+  }),
+  z.strictObject({ kind: z.literal("unavailable"), reason: nonEmptyString }),
+]);
+
 const sourceReferenceSchema = z.strictObject({
   id: nonEmptyString,
   url: z.url().nullable(),
@@ -717,6 +734,7 @@ export const installationSchema = z
     agentId: nonEmptyString,
     exposedTo: z.array(nonEmptyString),
     harnessExposures: z.array(harnessExposureSchema),
+    suspension: suspensionEvidenceSchema,
     scope: scopeSchema,
     location: artifactLocationSchema,
     contentHash: nonEmptyString.nullable(),

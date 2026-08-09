@@ -151,10 +151,13 @@ enable(entry: DisabledEntry): Promise<EnableResult>
 
 The module owns operating-system state paths, atomic no-clobber displacement,
 manifests, integrity, collision and Git-protection checks, transaction recovery,
-and exact restoration metadata for Suspended Disable. Entries never expire and
-the interface intentionally exposes no purge operation. `list()` and previews
-create no state. Native disabled state remains in Inventory and is never
-duplicated into Disabled Storage.
+and exact restoration metadata for Suspended Disable. One request may authorize
+one artifact or a complete nonempty artifact set; callers never sequence path
+moves themselves. Version 2 entries preserve that set as one Disabled operation,
+while version 1 single-artifact entries remain readable and enableable. Entries
+never expire and the interface intentionally exposes no purge operation.
+`list()` and previews create no state. Native disabled state remains in
+Inventory and is never duplicated into Disabled Storage.
 
 See [Disabled Storage](./disabled-storage.md) for the versioned manifest and
 failure behavior.

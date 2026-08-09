@@ -16,6 +16,7 @@ import type {
   NonInstallationFinding,
   PluginBoundary,
   RemovalPlan,
+  SuspensionEvidence,
 } from "../model/types.js";
 
 export type FixtureValue<T> =
@@ -73,6 +74,25 @@ export function buildInstallation(
         control: { kind: "unsupported", reason: "fixture harness" },
       },
     ],
+    suspension: {
+      kind: "available",
+      artifacts: [
+        {
+          location: {
+            path: "/fixtures/skills/example-skill",
+            canonicalPath: "/fixtures/skills/example-skill",
+            artifactType: { kind: "directory" },
+          },
+          protection: {
+            git: { kind: "outside-worktree" },
+            system: { kind: "none" },
+            filesystem: { kind: "writable" },
+          },
+        },
+      ],
+      managerRecord: "not-applicable",
+      managerMayRecreate: false,
+    } as SuspensionEvidence,
     scope: { kind: "user" },
     location: {
       path: "/fixtures/skills/example-skill",
@@ -107,6 +127,23 @@ export function buildInstallation(
         status: "enabled" as const,
         control: { kind: "unsupported" as const, reason: "fixture harness" },
       }));
+  }
+  if (overrides.suspension === undefined) {
+    value.suspension = (
+      value.ownership.kind === "filesystem"
+        ? {
+            kind: "available" as const,
+            artifacts: [
+              { location: value.location, protection: value.protection },
+            ],
+            managerRecord: "not-applicable" as const,
+            managerMayRecreate: false,
+          }
+        : {
+            kind: "unavailable" as const,
+            reason: "fixture ownership has no declared suspension authority",
+          }
+    ) as SuspensionEvidence;
   }
   return parseInstallation(value);
 }

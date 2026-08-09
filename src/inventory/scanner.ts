@@ -383,6 +383,10 @@ function blockForInvalidVercelLock(installation: Installation): Installation {
     adapterId: null,
     pluginBoundaryId: null,
     ownership: { kind: "unknown", confidence: "unknown" },
+    suspension: {
+      kind: "unavailable",
+      reason: "the Vercel skills lock is invalid or unsafe to read",
+    },
     removal: {
       managed: null,
       fallback: {
@@ -1159,6 +1163,8 @@ function createInstallation(
     { kind: "user" | "agent" | "workspace" | "plugin" }
   >;
   const plugin = root.kind === "plugin" ? root.plugin : null;
+  const ownership = ownershipForRoot(root);
+  const status = candidate.broken ? "broken" : metadata.status;
   return {
     id: stableId(
       "installation",
@@ -1170,7 +1176,7 @@ function createInstallation(
         : root.kind === "plugin"
           ? "managed-plugin-resource"
           : "active-installation",
-    status: candidate.broken ? "broken" : metadata.status,
+    status,
     skill: metadata.skill,
     identity,
     source: null,
@@ -1182,11 +1188,26 @@ function createInstallation(
     agentId: root.agentId,
     exposedTo: [root.agentId],
     harnessExposures: [],
+    suspension:
+      ownership.kind === "filesystem" && status === "active"
+        ? {
+            kind: "available",
+            artifacts: [{ location, protection }],
+            managerRecord: "not-applicable",
+            managerMayRecreate: false,
+          }
+        : {
+            kind: "unavailable",
+            reason:
+              ownership.kind === "filesystem"
+                ? "only a complete active Installation can be suspended"
+                : "this ownership boundary has no declared suspension authority",
+          },
     scope: scopeForInstallationRoot(root),
     location,
     contentHash,
     modifiedAt,
-    ownership: ownershipForRoot(root),
+    ownership,
     protection,
     removal: {
       managed: null,

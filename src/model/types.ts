@@ -280,6 +280,24 @@ export type InstallationClassification =
 
 export type InstallationStatus = "active" | "broken" | "unresolved";
 
+export interface SuspensionArtifactEvidence {
+  readonly location: ArtifactLocation;
+  readonly protection: ProtectionStatus;
+}
+
+/** Planner-ready Availability evidence; ownership alone never authorizes suspension. */
+export type SuspensionEvidence =
+  | {
+      readonly kind: "available";
+      readonly artifacts: readonly [
+        SuspensionArtifactEvidence,
+        ...SuspensionArtifactEvidence[],
+      ];
+      readonly managerRecord: "not-applicable" | "preserved";
+      readonly managerMayRecreate: boolean;
+    }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
 export interface Installation {
   readonly id: InstallationId;
   readonly classification: InstallationClassification;
@@ -307,6 +325,8 @@ export interface Installation {
   readonly exposedTo: readonly string[];
   /** Per-harness availability is independent from lifecycle ownership. */
   readonly harnessExposures: readonly HarnessExposure[];
+  /** Complete artifact-set authority for Suspended Disable. */
+  readonly suspension: SuspensionEvidence;
   readonly scope: Scope;
   readonly location: ArtifactLocation;
   readonly contentHash: string | null;

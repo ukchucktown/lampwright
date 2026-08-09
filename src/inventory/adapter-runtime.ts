@@ -437,6 +437,13 @@ function withOwnership(item: Installation, ownership: Ownership): Installation {
     // a physical plugin root is therefore not a valid installation mutation.
     pluginBoundaryId:
       ownership.kind === "plugin" ? item.pluginBoundaryId : null,
+    suspension:
+      ownership.kind === "filesystem"
+        ? item.suspension
+        : {
+            kind: "unavailable",
+            reason: "adapter ownership has no declared suspension authority",
+          },
     removal:
       ownership.kind === "filesystem"
         ? item.removal

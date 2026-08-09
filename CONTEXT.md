@@ -71,11 +71,11 @@ A reversible change through a harness-supported control that keeps the Installat
 _Avoid_: Remove, uninstall
 
 **Suspended Disable**:
-A reversible change that makes an independently filesystem-owned Installation unavailable by displacing it from every discovery location.
+A reversible change that makes an Installation unavailable by displacing its complete authorized artifact set from every discovery location while retaining its lifecycle identity.
 _Avoid_: Remove, quarantine
 
 **Disabled Storage**:
-Inert, non-expiring recoverable storage for Installations displaced by Suspended Disable.
+Inert, non-expiring recoverable storage for complete artifact sets displaced by Suspended Disable.
 _Avoid_: Quarantine, Trash
 
 **Enable**:

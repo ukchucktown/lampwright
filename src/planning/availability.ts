@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
 
 import { stringifyModel } from "../model/json.js";
-import { artifactPathKey, physicalPathKey } from "../model/paths.js";
+import {
+  artifactPathKey,
+  locationContains,
+  physicalPathKey,
+} from "../model/paths.js";
 import type {
   ApprovalRequirement,
+  ArtifactLocation,
   HardDependency,
   HarnessExposure,
   Installation,
@@ -284,7 +289,12 @@ function targetBlocks(
       entries.some(
         (entry) =>
           entry.installationIds.includes(installation.id) ||
-          sameArtifactPath(entry.originalLocation, installation.location),
+          entryLocations(entry).some((location) =>
+            installationArtifactLocations(installation).some(
+              (installationLocation) =>
+                sameArtifactPath(location, installationLocation),
+            ),
+          ),
       )
     )
       blocks.push(
@@ -345,42 +355,49 @@ function targetBlocks(
             "configuration-unsafe",
             resolved.target,
             "a Disabled Storage entry cannot be partially enabled",
-            entry.originalLocation.path,
+            entryLocations(entry)[0]!.path,
           ),
         );
     }
     for (const entry of selectedEntries) {
-      const key = physicalPathKey(entry.originalLocation);
-      if (
-        inventory.installations.some((installation) =>
-          sameArtifactPath(entry.originalLocation, installation.location),
+      for (const location of entryLocations(entry)) {
+        const key = physicalPathKey(location);
+        if (
+          inventory.installations.some((installation) =>
+            installationArtifactLocations(installation).some(
+              (installationLocation) =>
+                sameArtifactPath(location, installationLocation),
+            ),
+          )
         )
-      )
-        blocks.push(
-          absoluteBlock(
-            "configuration-unsafe",
-            resolved.target,
-            "a live Installation occupies the Disabled entry's original path",
-            entry.originalLocation.path,
-          ),
-        );
-      if (
-        entries.some(
-          (other) =>
-            other.id !== entry.id &&
-            (physicalPathKey(other.originalLocation) === key ||
-              artifactPathKey(other.originalLocation) ===
-                artifactPathKey(entry.originalLocation)),
+          blocks.push(
+            absoluteBlock(
+              "configuration-unsafe",
+              resolved.target,
+              "a live Installation occupies the Disabled entry's original path",
+              location.path,
+            ),
+          );
+        if (
+          entries.some(
+            (other) =>
+              other.id !== entry.id &&
+              entryLocations(other).some(
+                (otherLocation) =>
+                  physicalPathKey(otherLocation) === key ||
+                  artifactPathKey(otherLocation) === artifactPathKey(location),
+              ),
+          )
         )
-      )
-        blocks.push(
-          absoluteBlock(
-            "configuration-unsafe",
-            resolved.target,
-            "another Disabled Storage entry claims the same original path",
-            entry.originalLocation.path,
-          ),
-        );
+          blocks.push(
+            absoluteBlock(
+              "configuration-unsafe",
+              resolved.target,
+              "another Disabled Storage entry claims the same original path",
+              location.path,
+            ),
+          );
+      }
     }
   }
   for (const dependency of inventory.dependencies) {
@@ -431,33 +448,62 @@ function suspensionBlocks(
   installation: Installation,
 ): AvailabilityBlock[] {
   const blocks: AvailabilityBlock[] = [];
-  if (installation.ownership.kind !== "filesystem")
+  const evidence = installation.suspension;
+  if (evidence.kind === "unavailable") {
     blocks.push(
       absoluteBlock(
-        "ownership",
+        "configuration-unsafe",
         target,
-        "unsupported native control may fall back only for independently filesystem-owned Skills",
+        evidence.reason,
         installation.location.path,
       ),
     );
-  if (installation.protection.git.kind === "protected")
-    blocks.push(
-      absoluteBlock(
-        "git-protection",
-        target,
-        "Git-protected Skills cannot be suspended",
-        installation.location.path,
-      ),
-    );
-  if (installation.protection.filesystem.kind === "read-only")
-    blocks.push(
-      absoluteBlock(
-        "filesystem-permission",
-        target,
-        installation.protection.filesystem.reason,
-        installation.location.path,
-      ),
-    );
+    return blocks;
+  }
+  for (const artifact of evidence.artifacts) {
+    if (artifact.protection.system.kind === "system-skill")
+      blocks.push(
+        absoluteBlock(
+          "system-skill",
+          target,
+          "System Skill artifacts cannot be suspended",
+          artifact.location.path,
+        ),
+      );
+    if (artifact.protection.git.kind === "protected")
+      blocks.push(
+        absoluteBlock(
+          "git-protection",
+          target,
+          "Git-protected Skills cannot be suspended",
+          artifact.location.path,
+        ),
+      );
+    if (artifact.protection.filesystem.kind === "read-only")
+      blocks.push(
+        absoluteBlock(
+          "filesystem-permission",
+          target,
+          artifact.protection.filesystem.reason,
+          artifact.location.path,
+        ),
+      );
+  }
+  for (let index = 0; index < evidence.artifacts.length; index += 1) {
+    for (let other = index + 1; other < evidence.artifacts.length; other += 1) {
+      const left = evidence.artifacts[index]!.location;
+      const right = evidence.artifacts[other]!.location;
+      if (locationsOverlap(left, right))
+        blocks.push(
+          absoluteBlock(
+            "configuration-unsafe",
+            target,
+            "the complete suspension artifact set contains overlapping paths",
+            right.path,
+          ),
+        );
+    }
+  }
   if (installation.status !== "active")
     blocks.push(
       absoluteBlock(
@@ -531,6 +577,20 @@ function disableActions(
       (exposure) => exposure.control.kind === "unsupported",
     );
     if (needsSuspension) {
+      if (installation.suspension.kind !== "available") continue;
+      if (
+        installation.ownership.kind !== "filesystem" &&
+        installation.ownership.kind !== "manager"
+      )
+        continue;
+      const artifacts = [...installation.suspension.artifacts]
+        .sort((left, right) =>
+          compare(
+            artifactPathKey(left.location),
+            artifactPathKey(right.location),
+          ),
+        )
+        .map((artifact) => ({ location: artifact.location }));
       actions.push({
         id: stableId("availability-action", planId, installation.id, "suspend"),
         kind: "suspended-disable",
@@ -540,7 +600,11 @@ function disableActions(
         dependsOn: [],
         approvals,
         request: {
-          location: installation.location,
+          schemaVersion: 2,
+          artifacts: artifacts as [
+            (typeof artifacts)[number],
+            ...(typeof artifacts)[number][],
+          ],
           skillIdentity: installation.identity,
           installationIds: [installation.id],
           ownership: installation.ownership,
@@ -572,6 +636,32 @@ function disableActions(
     }
   }
   return actions;
+}
+
+function entryLocations(entry: DisabledEntry): readonly ArtifactLocation[] {
+  return entry.schemaVersion === 1
+    ? [entry.originalLocation]
+    : entry.artifacts.map((artifact) => artifact.originalLocation);
+}
+
+function installationArtifactLocations(
+  installation: Installation,
+): readonly ArtifactLocation[] {
+  return installation.suspension.kind === "available"
+    ? installation.suspension.artifacts.map((artifact) => artifact.location)
+    : [
+        installation.location,
+        ...(installation.removal.supplementalArtifacts ?? []).map(
+          (artifact) => artifact.location,
+        ),
+      ];
+}
+
+function locationsOverlap(
+  left: ArtifactLocation,
+  right: ArtifactLocation,
+): boolean {
+  return locationContains(left, right) || locationContains(right, left);
 }
 
 function enableActions(

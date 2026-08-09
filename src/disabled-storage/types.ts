@@ -38,7 +38,13 @@ export interface DisabledOperationProvenance {
  * This is intentionally not a Quarantine entry: it has no removal timestamp,
  * retention policy, or purge operation.
  */
-export interface DisabledEntry {
+export interface DisabledArtifact {
+  readonly originalLocation: ArtifactLocation;
+  readonly integrity: Sha256Digest;
+  readonly restoration: DisabledRestorationMetadata;
+}
+
+export interface DisabledEntryV1 {
   readonly schemaVersion: 1;
   readonly id: DisabledEntryId;
   readonly suspendedAt: string;
@@ -52,8 +58,26 @@ export interface DisabledEntry {
   readonly restoration: DisabledRestorationMetadata;
 }
 
+export interface DisabledEntryV2 {
+  readonly schemaVersion: 2;
+  readonly id: DisabledEntryId;
+  readonly suspendedAt: string;
+  readonly artifacts: readonly [DisabledArtifact, ...DisabledArtifact[]];
+  readonly skillIdentity: SkillIdentity;
+  readonly installationIds: readonly [InstallationId, ...InstallationId[]];
+  readonly ownership: Extract<Ownership, { kind: "filesystem" | "manager" }>;
+  readonly harnessExposures: readonly HarnessExposure[];
+  readonly operation: DisabledOperationProvenance;
+}
+
+export type DisabledEntry = DisabledEntryV1 | DisabledEntryV2;
+
+export interface SuspendArtifact {
+  readonly location: ArtifactLocation;
+}
+
 /** The complete planner-authorized evidence required to suspend an Installation. */
-export interface SuspendRequest {
+export interface SuspendRequestV1 {
   readonly location: ArtifactLocation;
   readonly skillIdentity: SkillIdentity;
   readonly installationIds: readonly [InstallationId, ...InstallationId[]];
@@ -61,6 +85,18 @@ export interface SuspendRequest {
   readonly harnessExposures: readonly HarnessExposure[];
   readonly operation: DisabledOperationProvenance;
 }
+
+export interface SuspendRequestV2 {
+  readonly schemaVersion: 2;
+  readonly artifacts: readonly [SuspendArtifact, ...SuspendArtifact[]];
+  readonly skillIdentity: SkillIdentity;
+  readonly installationIds: readonly [InstallationId, ...InstallationId[]];
+  readonly ownership: Extract<Ownership, { kind: "filesystem" | "manager" }>;
+  readonly harnessExposures: readonly HarnessExposure[];
+  readonly operation: DisabledOperationProvenance;
+}
+
+export type SuspendRequest = SuspendRequestV1 | SuspendRequestV2;
 
 export type DisabledBlockReason =
   | "destination-occupied"
@@ -85,6 +121,7 @@ export type EnablePreview =
       readonly status: "would-enable";
       readonly entryId: DisabledEntryId;
       readonly destination: string;
+      readonly destinations?: readonly [string, ...string[]];
     }
   | {
       readonly schemaVersion: 1;
@@ -99,6 +136,7 @@ export type EnableResult =
       readonly status: "enabled";
       readonly entryId: DisabledEntryId;
       readonly destination: string;
+      readonly destinations?: readonly [string, ...string[]];
       readonly enabledAt: string;
     }
   | {

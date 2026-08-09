@@ -11,7 +11,7 @@ confirmation, Availability Execution, and final verification.
 | --- | --- | --- | --- |
 | Enabled | Live `HarnessExposure.status` | Nothing; the target is already available | Rescan if the harness disagrees with Inventory. |
 | Native disabled | The applicable Codex, Claude Code, or Gemini configuration document | Applies an exact preimage-checked configuration mutation | Resolve a reported configuration race or protection, rescan, review a new Enable plan, and confirm it. |
-| Suspended | One non-expiring Disabled Storage entry containing the original path, integrity, identity, ownership, Harness Exposures, and operation provenance | Restores the stored artifact to its exact original path without overwrite | Remove or relocate an unrelated destination collision; never edit the manifest or payload. Run Enable again with `disabled-entry:<id>`. |
+| Suspended | One non-expiring Disabled Storage entry containing every original path, integrity value, identity, ownership, Harness Exposure, and operation provenance | Restores the complete stored artifact set to its exact original paths without overwrite | Remove or relocate unrelated destination collisions; never edit the manifest or payloads. Run Enable again with `disabled-entry:<id>`. |
 | Partially disabled | Different Harness Exposures have different live states | Plans every required exposure change; success requires every check | Read per-target and per-check report concerns, repair only the named harness/configuration, then replan. |
 | Unresolved | Inventory could not prove an effective control or safe filesystem operation | Fails closed | Repair malformed, linked, hard-linked, unreadable, trust-unresolved, or protected evidence and rescan. |
 
@@ -40,18 +40,28 @@ keys, comments, arrays, Skills, and configuration layers remain unchanged.
 
 ## Suspended lifecycle
 
-Suspension is eligible only for an independently filesystem-owned Installation
-when any represented Harness Exposure has no safe native control. Manager,
-Plugin, agent-runtime/System, Git-protected, read-only, unsafe-state, ancestor,
-and descendant paths are absolute blocks; `--force` cannot bypass them.
+Suspension is eligible when any represented Harness Exposure has no safe native
+control and Planning can authorize the complete Installation artifact set. A
+filesystem-owned Installation supplies one artifact. An explicitly supported
+Manager-owned Installation supplies its primary location plus every declared
+supplemental discovery artifact; the Manager record is preserved and no Manager
+command runs. Plugin, agent-runtime/System, Git-protected, read-only,
+incomplete, unsafe-state, duplicate, ancestor, and descendant paths are absolute
+blocks; `--force` cannot bypass them.
 
-Disabled Storage copies and verifies the artifact before atomically moving the
-source to a same-directory pending name. This avoids cross-device rename
-assumptions: state-volume transfer is a verified copy, while renames stay within
-one directory or state volume. Files, directories, symbolic links, Windows
-junctions, and broken links retain their artifact type and link target without
-following unexpected targets. Case collisions follow the host filesystem and
-are always treated as occupied rather than overwritten.
+One Disabled entry owns the complete set. Known destination collisions block
+Enable before any publication. A race after mutation begins is reported as
+partial, retains the Disabled payloads for recovery, and never overwrites an
+unclaimed path. Running a Manager while its Skill is suspended may recreate a
+declared path; Inventory and Enable surface that replacement as a conflict.
+
+Disabled Storage copies and verifies every artifact before moving each source to
+a same-directory pending name and committing the set as one entry. This avoids
+cross-device rename assumptions: state-volume transfers are verified copies,
+while renames stay within one directory or state volume. Files, directories,
+symbolic links, Windows junctions, and broken links retain their artifact type
+and link target without following unexpected targets. Case collisions follow
+the host filesystem and are always treated as occupied rather than overwritten.
 
 Mutation journals support stable retry after interruption. Recovery validates
 every path, entry identity, integrity digest, and directory claim. It can roll

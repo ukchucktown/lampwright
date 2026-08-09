@@ -336,6 +336,30 @@ async function materializeLockEntry(input: {
     // Every agent whose native location the Manager itself placed.
     exposedTo: agents,
     harnessExposures: [],
+    suspension:
+      artifactUnsafeReason === null && status === "active"
+        ? {
+            kind: "available",
+            artifacts: [
+              { location: primaryLocation, protection: primaryProtection },
+              ...supplementalArtifacts,
+            ].sort((left, right) =>
+              pathKey(left.location.path).localeCompare(
+                pathKey(right.location.path),
+              ),
+            ) as [
+              SupplementalRemovalArtifact,
+              ...SupplementalRemovalArtifact[],
+            ],
+            managerRecord: "preserved",
+            managerMayRecreate: true,
+          }
+        : {
+            kind: "unavailable",
+            reason:
+              artifactUnsafeReason ??
+              "only a complete active Vercel Installation can be suspended",
+          },
     scope: input.lock.scope,
     location: primaryLocation,
     contentHash,

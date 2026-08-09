@@ -7,7 +7,7 @@ Last updated: 2026-08-08
 
 `skill-cleaner` is a cross-platform terminal application that discovers, disables, enables, and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
 
-The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend an independently filesystem-owned Installation when no safe native control exists. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
+The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks the cleaner to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend a complete planner-authorized artifact set when no safe native control exists. For an explicitly supported Manager-owned Installation, suspension preserves the Manager record and displaces every declared discovery artifact. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
 
 The primary interface is an interactive terminal UI. Until an explicitly approved npm publication, it runs from a trusted checkout as `node dist/cli.js`. A compact non-interactive interface and JSON output support automation and future agent sessions.
 
@@ -18,7 +18,7 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 3. **Managed removal first.** Use an available owner's lifecycle operation before direct filesystem cleanup.
 4. **Explicit fallback.** Never silently replace a failed managed removal with brute-force deletion.
 5. **Recoverability.** Brute-force cleanup moves artifacts into quarantine instead of permanently deleting them.
-6. **Native disable before suspension.** Prefer a harness-supported availability control and displace only independently filesystem-owned Installations when no safe native control exists.
+6. **Native disable before suspension.** Prefer a harness-supported availability control and displace only a complete, planner-authorized artifact set when no safe native control exists.
 7. **Strong identity.** Skill names and content hashes alone never merge installations into one logical skill or authorize a name-wide availability change.
 8. **Project source is protected.** Files inside a Git worktree are immutable unless Git classifies them as ignored.
 9. **Pluggable support without executable extensions.** Tool support is described through local, versioned JSONC adapters.
@@ -31,7 +31,7 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 - Search installed skills by normalized and tool-specific metadata.
 - Distinguish logical skills from their physical installations.
 - Explain who owns each installation and what else would be affected by removal.
-- Disable unused standalone Skills without deleting their content, and enable them again.
+- Disable unused standalone and explicitly supported Manager-owned Skills without deleting their content, and enable them again.
 - Remove standalone, manager-owned, and independently selectable plugin-owned skills.
 - Explicitly uninstall non-default containing plugins when the user includes
   plugins in a CLI plan.
@@ -270,11 +270,16 @@ materializes the exact, fail-closed configuration evidence defined in
 Execution must not infer additional harness configuration conventions.
 
 When any exposure lacks a safe native control, Planning may choose one
-Suspended Disable for the complete Installation only when it is independently
-filesystem-owned, writable, outside Git protection, and outside Plugin or
-Manager ownership. Hard Dependencies block disabling by default. Force may
-override dependency or ambiguity safeguards, but never ownership, Git, System
-Skill, filesystem, integrity, or configuration-protection blocks.
+Suspended Disable for the complete Installation artifact set. An independently
+filesystem-owned Installation contributes its one artifact. An explicitly
+supported Manager-owned Installation contributes its primary location and every
+declared supplemental discovery artifact while its Manager record remains
+unchanged. The set must be complete, active, writable, outside Git protection,
+free of path overlap, and outside Plugin or System ownership. Hard Dependencies
+block disabling by default. Force may override dependency or ambiguity
+safeguards, but never ownership, completeness, Git, System Skill, filesystem,
+integrity, collision, or configuration-protection blocks. A Manager-created
+replacement at a displaced path is an Enable conflict and is never overwritten.
 
 ## 10. Removal execution
 
@@ -332,9 +337,10 @@ Quarantine entries record original path, link information, content hash, ownersh
 
 Restoration must not overwrite an occupied destination without an explicit conflict decision. Managed uninstalls are logged but are not represented as automatically reversible unless the Owner itself supports restoration.
 
-Disabled Storage is a separate, non-expiring lifecycle store. It records the
-original Artifact Location, integrity, affected Harness Exposures, Skill
-identity and ownership evidence, disable time, and exact re-enablement metadata.
+Disabled Storage is a separate, non-expiring lifecycle store. It records every
+original Artifact Location and integrity value in one suspended set, affected
+Harness Exposures, Skill identity and ownership evidence, disable time, and
+exact re-enablement metadata.
 It has no retention purge and never appears in Trash. Native disabled state
 remains live harness evidence and is not copied into Disabled Storage.
 
@@ -401,8 +407,10 @@ The v1 MVP is complete when:
 11. A final rescan verifies and reports the result of every removal.
 12. Tests demonstrate that unrelated installations, plugin resources, and project files remain untouched.
 13. Native and suspended disable operations can be enabled again without
-    deleting Skill content, while System, Plugin-owned, Manager-owned fallback,
-    ambiguous-name, and Git-protected cases remain untouched.
+    deleting Skill content. Complete explicitly supported Manager-owned artifact
+    sets may be suspended without changing Manager records, while System,
+    Plugin-owned, incomplete, ambiguous-name, and Git-protected cases remain
+    untouched.
 
 ## 16. Delivery sequence
 

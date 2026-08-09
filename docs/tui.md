@@ -22,8 +22,9 @@ Press `d` to review disabling selected Inventory rows. Disabled shows one row
 for every native-disabled Harness Exposure and one row for every Suspended
 Disabled entry, without merging identities. Selecting a native row may enable
 all disabled harnesses for that Installation; the row and review say so.
-Selecting one Suspended row restores its one stored artifact and may cover all
-recorded Installation targets. Press `e` to review enabling selected rows.
+Selecting one Suspended row restores its complete stored artifact set and may
+cover all recorded Installation targets. Press `e` to review enabling selected
+rows.
 Plugin and System rows remain visible and informational in both projections.
 The same name-only regular-expression search is available in Disabled; results
 come only from its per-exposure and per-entry projection, and applying or
@@ -31,11 +32,15 @@ cancelling search restores that view's independent position and selection.
 
 Availability review distinguishes **Native** configuration control from
 **Suspended** filesystem storage, names affected harnesses, and presents every
-block before confirmation. Suspended Disable moves content to non-expiring
-Disabled Storage, never Trash; Enable restores the exact original path without
-overwrite. Execution and final verification use injected Availability module
-interfaces. Details, paging, wheel scrolling, and resize clamping match Removal
-review/report behavior. Disabled has no expiry, purge, or Trash action.
+distinct block before confirmation. Repeated identical blocks are condensed in
+the ordinary review while technical details retain each affected target.
+Suspended Disable moves the complete declared artifact set to non-expiring
+Disabled Storage, never Trash; Enable restores every exact original path without
+overwrite. A Manager-owned review states that Manager records remain unchanged
+and warns that running the Manager can recreate displaced paths. Execution and
+final verification use injected Availability module interfaces. Details,
+paging, wheel scrolling, and resize clamping match Removal review/report
+behavior. Disabled has no expiry, purge, or Trash action.
 
 Trash browsing and previews are read-only presentations backed by
 Quarantine; a `y`-confirmed restore or purge mutates only through Quarantine's

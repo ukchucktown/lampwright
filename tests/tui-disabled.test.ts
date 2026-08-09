@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -5,7 +7,7 @@ import type {
   AvailabilityReport,
 } from "../src/availability/types.js";
 import type { DisabledEntry } from "../src/disabled-storage/types.js";
-import { plan } from "../src/planning/index.js";
+import { plan, planAvailability } from "../src/planning/index.js";
 import {
   buildInstallation,
   buildInventory,
@@ -29,6 +31,9 @@ import {
   parseRawTuiAction,
 } from "../src/tui/terminal.js";
 import type { TuiBrowseState, TuiState } from "../src/tui/types.js";
+import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
+
+const environmentFixture = createIsolatedTestEnvironmentFixture();
 
 function exposure(harnessId: string, status: "enabled" | "disabled") {
   return {
@@ -229,6 +234,223 @@ function availabilityReport(planValue: AvailabilityPlan): AvailabilityReport {
 }
 
 describe("Disabled TUI projection", () => {
+  it("condenses a 25-Skill Vercel suspension review without hiding Manager risk", async () => {
+    const environment = await environmentFixture();
+    const installations = Array.from({ length: 25 }, (_, index) => {
+      const id = `vercel-managed-${String(index + 1).padStart(2, "0")}`;
+      const path = join(environment.temporary, "vercel-source", id);
+      return buildInstallation({
+        id,
+        skill: { name: `Vercel Skill ${String(index + 1)}`, description: null },
+        manager: { id: "vercel-skills" },
+        adapterId: "vercel.skills",
+        agentId: "vercel-skills",
+        exposedTo: ["codex"],
+        harnessExposures: [exposure("codex", "enabled")],
+        location: {
+          path,
+          canonicalPath: path,
+          artifactType: { kind: "directory" },
+        },
+        ownership: {
+          kind: "manager",
+          managerId: "vercel-skills",
+          confidence: "declared",
+        },
+        suspension: {
+          kind: "available",
+          artifacts: [
+            {
+              location: {
+                path,
+                canonicalPath: path,
+                artifactType: { kind: "directory" },
+              },
+              protection: {
+                git: { kind: "outside-worktree" },
+                system: { kind: "none" },
+                filesystem: { kind: "writable" },
+              },
+            },
+          ],
+          managerRecord: "preserved",
+          managerMayRecreate: true,
+        },
+        removal: {
+          managed: null,
+          fallback: {
+            kind: "available",
+            requiresSeparateConfirmation: true,
+          },
+          primaryArtifactPresent: true,
+          supplementalArtifacts: [],
+          recordCleanups: [],
+        },
+      });
+    });
+    const groupId = "vercel-source-group";
+    const inventory = buildInventory({
+      installations,
+      groups: [
+        {
+          id: groupId,
+          label: "acme/review-suite",
+          tier: "declared",
+          evidence: {
+            tier: "declared",
+            kind: "manager-source",
+            managerId: "vercel-skills",
+            sourceId: "acme/review-suite",
+          },
+          scope: { kind: "user" },
+          installationIds: installations.map((installation) => installation.id),
+        },
+      ],
+    });
+    const availabilityPlan = planAvailability(inventory, [], {
+      operation: "disable",
+      targets: [{ kind: "source-group", groupId }],
+      force: false,
+    });
+    const rendered = renderTui(
+      {
+        screen: "availability-plan",
+        browse: {
+          inventory,
+          model: {
+            sections: createTuiSections(inventory),
+            viewport: { rows: 80, columns: 120 },
+            focus: "entries",
+            sectionIndex: 0,
+            entryIndex: 0,
+            sectionScroll: 0,
+            entryScroll: 0,
+            detailScroll: 0,
+            leftPercent: 35,
+            detailRows: 8,
+            query: "",
+            selected: new Set<string>(),
+            notice: null,
+          },
+          view: "inventory",
+          disabledEntries: [],
+        },
+        plan: availabilityPlan,
+        label: "25 selected Skills",
+        technicalDetails: false,
+        scrollOffset: 0,
+      },
+      plainTuiTheme,
+    );
+
+    expect(rendered.match(/Suspended:/gu) ?? []).toHaveLength(1);
+    expect(rendered).toContain("25");
+    expect(rendered).toContain("Manager records remain unchanged");
+    expect(rendered).toMatch(/recreate/iu);
+  });
+
+  it("condenses 25 incomplete Manager blocks while retaining exact technical targets", async () => {
+    const environment = await environmentFixture();
+    const installations = Array.from({ length: 25 }, (_, index) => {
+      const id = `incomplete-manager-${String(index + 1).padStart(2, "0")}`;
+      const path = join(environment.temporary, "incomplete-source", id);
+      return buildInstallation({
+        id,
+        skill: {
+          name: `Incomplete Skill ${String(index + 1)}`,
+          description: null,
+        },
+        manager: { id: "fixture-manager" },
+        agentId: "fixture-manager",
+        exposedTo: ["codex"],
+        harnessExposures: [exposure("codex", "enabled")],
+        location: {
+          path,
+          canonicalPath: path,
+          artifactType: { kind: "directory" },
+        },
+        ownership: {
+          kind: "manager",
+          managerId: "fixture-manager",
+          confidence: "declared",
+        },
+        suspension: {
+          kind: "unavailable",
+          reason: "Manager artifact set is incomplete",
+        },
+      });
+    });
+    const groupId = "incomplete-manager-group";
+    const inventory = buildInventory({
+      installations,
+      groups: [
+        {
+          id: groupId,
+          label: "Incomplete Manager group",
+          tier: "declared",
+          evidence: {
+            tier: "declared",
+            kind: "manager-source",
+            managerId: "fixture-manager",
+            sourceId: "fixture/incomplete",
+          },
+          scope: { kind: "user" },
+          installationIds: installations.map((installation) => installation.id),
+        },
+      ],
+    });
+    const availabilityPlan = planAvailability(inventory, [], {
+      operation: "disable",
+      targets: [{ kind: "source-group", groupId }],
+      force: false,
+    });
+    const review = {
+      screen: "availability-plan" as const,
+      browse: {
+        inventory,
+        model: {
+          sections: createTuiSections(inventory),
+          viewport: { rows: 180, columns: 120 },
+          focus: "entries" as const,
+          sectionIndex: 0,
+          entryIndex: 0,
+          sectionScroll: 0,
+          entryScroll: 0,
+          detailScroll: 0,
+          leftPercent: 35,
+          detailRows: 8,
+          query: "",
+          selected: new Set<string>(),
+          notice: null,
+        },
+        view: "inventory" as const,
+        disabledEntries: [],
+      },
+      plan: availabilityPlan,
+      label: "25 incomplete Skills",
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+
+    const ordinary = renderTui(review, plainTuiTheme);
+    expect(ordinary.match(/Blocked \(/gu) ?? []).toHaveLength(1);
+    expect(ordinary).toContain("25 block occurrences");
+    expect(ordinary).toContain("Manager artifact set is incomplete");
+
+    const technical = renderTui(
+      { ...review, technicalDetails: true },
+      plainTuiTheme,
+    );
+    expect(technical.match(/Block configuration-unsafe:/gu) ?? []).toHaveLength(
+      25,
+    );
+    expect(technical).toContain("incomplete-manager-01");
+    expect(technical).toContain("incomplete-manager-25");
+    expect(technical.replaceAll(/\s/gu, "")).toContain(
+      installations[24]!.location.path,
+    );
+  });
+
   it("hides only fully disabled ordinary Skills and preserves every Disabled identity", () => {
     const { inventory, enabled } = fixture();
     const entries = [

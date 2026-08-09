@@ -11,6 +11,7 @@ import {
 import { inspectGitProtection } from "../inventory/git-protection.js";
 import { systemCommandRunner } from "../inventory/process.js";
 import { stringifyModel } from "../model/json.js";
+import { locationContains } from "../model/paths.js";
 import type { ArtifactLocation, Sha256Digest } from "../model/types.js";
 import { defaultLocalStateRoot } from "../state/index.js";
 import { nodeArtifactFileSystem } from "../filesystem/artifact-filesystem.js";
@@ -26,12 +27,14 @@ import { parseDisabledEntry, parseSuspendRequest } from "./schema.js";
 import type {
   DisabledBlockReason,
   DisabledEntry,
+  DisabledEntryV2,
   DisabledEntryId,
   DisabledStorageModule,
   DisabledStorageModuleOptions,
   EnablePreview,
   EnableResult,
   SuspendRequest,
+  SuspendRequestV2,
   SuspendResult,
 } from "./types.js";
 
@@ -47,7 +50,7 @@ interface Layout {
   readonly staging: string;
 }
 
-interface Transaction {
+interface TransactionV1 {
   readonly schemaVersion: 1;
   readonly kind: "suspend" | "enable";
   readonly source: string;
@@ -57,6 +60,26 @@ interface Transaction {
   readonly transfer: "move" | "copy" | "restore";
   readonly integrity: Sha256Digest;
 }
+
+interface TransactionArtifactV2 {
+  readonly source: string;
+  readonly payload: string;
+  readonly destination: string;
+  readonly temporary: string;
+  readonly integrity: Sha256Digest;
+}
+
+interface TransactionV2 {
+  readonly schemaVersion: 2;
+  readonly kind: "suspend" | "enable";
+  readonly entryDestination: string;
+  readonly artifacts: readonly [
+    TransactionArtifactV2,
+    ...TransactionArtifactV2[],
+  ];
+}
+
+type Transaction = TransactionV1 | TransactionV2;
 
 interface LoadedEntry {
   readonly entry: DisabledEntry;
@@ -109,10 +132,11 @@ export function createDisabledStorageModule(
     } catch {
       return blockedPreview(
         entryInput.id,
-        entryInput.originalLocation.path,
+        entryPrimaryPath(entryInput),
         "integrity-failed",
       );
     }
+    if (entry.schemaVersion === 2) return previewSet(entry, entryInput);
     const loaded = await load(entry.id);
     if (loaded === null)
       return blockedPreview(
@@ -181,10 +205,11 @@ export function createDisabledStorageModule(
       } catch {
         return {
           status: "blocked",
-          path: input.location.path,
+          path: requestPrimaryPath(input),
           reason: "source-not-eligible",
         };
       }
+      if (isV2SuspendRequest(request)) return suspendSet(request);
       if (request.ownership.kind !== "filesystem") {
         return {
           status: "blocked",
@@ -285,7 +310,7 @@ export function createDisabledStorageModule(
           };
         }
         await fs.mkdir(stage);
-        const entry: DisabledEntry = parseDisabledEntry({
+        const entry = parseDisabledEntry({
           schemaVersion: 1,
           id,
           suspendedAt: now(options.now),
@@ -298,6 +323,7 @@ export function createDisabledStorageModule(
           operation: request.operation,
           restoration: current.restoration,
         });
+        if (entry.schemaVersion !== 1) throw new Error("invalid v1 entry");
         await writeJson(join(stage, manifestName), entry);
         try {
           await displace(stage, destination, entry);
@@ -324,7 +350,14 @@ export function createDisabledStorageModule(
           return {
             status: "enabled",
             entryId: entryInput.id,
-            destination: entryInput.originalLocation.path,
+            destination: entryPrimaryPath(entryInput),
+            ...(entryInput.schemaVersion === 2
+              ? {
+                  destinations: entryInput.artifacts.map(
+                    (artifact) => artifact.originalLocation.path,
+                  ) as [string, ...string[]],
+                }
+              : {}),
             enabledAt: now(options.now),
           };
         }
@@ -338,42 +371,380 @@ export function createDisabledStorageModule(
         if (loaded === null)
           return blockedResult(
             entryInput.id,
-            entryInput.originalLocation.path,
+            entryPrimaryPath(entryInput),
             "entry-not-found",
           );
-        if (!(await restore(loaded)))
+        const restored =
+          loaded.entry.schemaVersion === 1
+            ? await restore(
+                loaded as LoadedEntry & {
+                  readonly entry: Extract<DisabledEntry, { schemaVersion: 1 }>;
+                },
+              )
+            : await restoreSet(
+                loaded as LoadedEntry & { entry: DisabledEntryV2 },
+              );
+        if (!restored)
           return blockedResult(
             loaded.entry.id,
-            loaded.entry.originalLocation.path,
+            entryPrimaryPath(loaded.entry),
             "destination-occupied",
           );
         return {
           status: "enabled",
           entryId: loaded.entry.id,
-          destination: loaded.entry.originalLocation.path,
+          destination: entryPrimaryPath(loaded.entry),
+          ...(loaded.entry.schemaVersion === 2
+            ? {
+                destinations: loaded.entry.artifacts.map(
+                  (artifact) => artifact.originalLocation.path,
+                ) as [string, ...string[]],
+              }
+            : {}),
           enabledAt: now(options.now),
         };
       } catch {
         return blockedResult(
           entryInput.id,
-          entryInput.originalLocation.path,
+          entryPrimaryPath(entryInput),
           "state-unsafe",
         );
       }
     },
   };
 
+  async function previewSet(
+    entry: DisabledEntryV2,
+    entryInput: DisabledEntry,
+  ): Promise<EnablePreview> {
+    const primary = entry.artifacts[0]!.originalLocation.path;
+    const loaded = await load(entry.id);
+    if (loaded === null)
+      return blockedPreview(entry.id, primary, "entry-not-found");
+    if (
+      stringifyModel(loaded.entry, 0) !== stringifyModel(entryInput, 0) ||
+      !(await integrityMatches(loaded))
+    )
+      return blockedPreview(entry.id, primary, "integrity-failed");
+    for (const artifact of entry.artifacts) {
+      const destination = artifact.originalLocation.path;
+      if ((await available(destination)) !== null)
+        return blockedPreview(entry.id, destination, "destination-occupied");
+      if (!(await safeParent(destination)))
+        return blockedPreview(entry.id, dirname(destination), "state-unsafe");
+      if (
+        (await protection(destination, artifact.originalLocation.artifactType))
+          .kind === "protected"
+      )
+        return blockedPreview(entry.id, destination, "git-protected");
+      const temporary = restoreTemporaryPath(destination, entry.id);
+      if ((await available(temporary)) !== null)
+        return blockedPreview(entry.id, temporary, "state-unsafe");
+      if (
+        (await protection(temporary, artifact.originalLocation.artifactType))
+          .kind === "protected"
+      )
+        return blockedPreview(entry.id, temporary, "git-protected");
+    }
+    return {
+      schemaVersion: 1,
+      status: "would-enable",
+      entryId: entry.id,
+      destination: primary,
+      destinations: entry.artifacts.map(
+        (artifact) => artifact.originalLocation.path,
+      ) as [string, ...string[]],
+    };
+  }
+
+  async function suspendSet(request: SuspendRequestV2): Promise<SuspendResult> {
+    const locations = request.artifacts.map((artifact) => artifact.location);
+    const primary = locations[0]!.path;
+    if (
+      locations.some(
+        (location) =>
+          pathsOverlap(location.path, layout.base) ||
+          pathsOverlap(layout.base, location.path),
+      )
+    )
+      return { status: "blocked", path: primary, reason: "state-unsafe" };
+    for (let index = 0; index < locations.length; index += 1)
+      for (let other = index + 1; other < locations.length; other += 1) {
+        const left = locations[index]!;
+        const right = locations[other]!;
+        if (locationContains(left, right) || locationContains(right, left))
+          return {
+            status: "blocked",
+            path: right.path,
+            reason: "source-not-eligible",
+          };
+      }
+    const initial = [];
+    try {
+      for (const location of locations) {
+        if ((await available(location.path)) === null)
+          return {
+            status: "blocked",
+            path: location.path,
+            reason: "source-not-eligible",
+          };
+        if (
+          (await protection(location.path, location.artifactType)).kind ===
+          "protected"
+        )
+          return {
+            status: "blocked",
+            path: location.path,
+            reason: "git-protected",
+          };
+        initial.push(
+          await inspectArtifact(fs, location.path, location.artifactType),
+        );
+      }
+      await recover();
+      const current: Awaited<ReturnType<typeof inspectArtifact>>[] = [];
+      for (let index = 0; index < locations.length; index += 1) {
+        const location = locations[index]!;
+        if ((await available(location.path)) === null)
+          return {
+            status: "blocked",
+            path: location.path,
+            reason: "source-not-eligible",
+          };
+        const inspected = await inspectArtifact(
+          fs,
+          location.path,
+          location.artifactType,
+        );
+        if (!sameDigest(initial[index]!.integrity, inspected.integrity))
+          return {
+            status: "blocked",
+            path: location.path,
+            reason: "integrity-failed",
+          };
+        if (
+          (await protection(location.path, location.artifactType)).kind ===
+          "protected"
+        )
+          return {
+            status: "blocked",
+            path: location.path,
+            reason: "git-protected",
+          };
+        current.push(inspected);
+      }
+      if (!(await ensureLayout(true)))
+        return { status: "blocked", path: layout.base, reason: "state-unsafe" };
+      const id = readId(options.createId);
+      const stage = join(layout.staging, id);
+      const destination = entryPath(id);
+      if (
+        (await available(stage)) !== null ||
+        (await available(destination)) !== null
+      )
+        return { status: "blocked", path: destination, reason: "state-unsafe" };
+      await fs.mkdir(stage);
+      const entry = parseDisabledEntry({
+        schemaVersion: 2,
+        id,
+        suspendedAt: now(options.now),
+        artifacts: locations.map((location, index) => ({
+          originalLocation: location,
+          integrity: normalizeDigest(current[index]!.integrity),
+          restoration: current[index]!.restoration,
+        })),
+        skillIdentity: request.skillIdentity,
+        installationIds: request.installationIds,
+        ownership: request.ownership,
+        harnessExposures: request.harnessExposures,
+        operation: request.operation,
+      });
+      if (entry.schemaVersion !== 2) throw new Error("invalid v2 entry");
+      await writeJson(join(stage, manifestName), entry);
+      try {
+        await displaceSet(stage, destination, entry);
+      } catch (error: unknown) {
+        await recoverFailedSet(stage, destination, entry);
+        throw error;
+      }
+      return { status: "suspended", entry };
+    } catch {
+      return { status: "blocked", path: primary, reason: "state-unsafe" };
+    }
+  }
+
+  async function displaceSet(
+    stage: string,
+    destination: string,
+    entry: DisabledEntryV2,
+  ): Promise<void> {
+    const payloadDirectory = join(stage, "payloads");
+    await fs.mkdir(payloadDirectory);
+    const artifacts = entry.artifacts.map((artifact, index) => ({
+      source: artifact.originalLocation.path,
+      payload: payloadFor(stage, index),
+      destination: artifact.originalLocation.path,
+      temporary: pendingPath(artifact.originalLocation.path, entry.id),
+      integrity: artifact.integrity,
+    })) as [TransactionArtifactV2, ...TransactionArtifactV2[]];
+    for (const artifact of artifacts)
+      if ((await available(artifact.temporary)) !== null)
+        throw new Error("pending path occupied");
+    const transaction: TransactionV2 = {
+      schemaVersion: 2,
+      kind: "suspend",
+      entryDestination: destination,
+      artifacts,
+    };
+    await writeJson(join(stage, transactionName), transaction);
+    for (let index = 0; index < entry.artifacts.length; index += 1) {
+      const artifact = entry.artifacts[index]!;
+      const transactionArtifact = artifacts[index]!;
+      await copyArtifact(
+        fs,
+        transactionArtifact.source,
+        transactionArtifact.payload,
+        artifact.originalLocation.artifactType,
+      );
+      await requireArtifactDigest(transactionArtifact.payload, artifact);
+    }
+    for (let index = 0; index < entry.artifacts.length; index += 1) {
+      const artifact = entry.artifacts[index]!;
+      const transactionArtifact = artifacts[index]!;
+      await requireArtifactDigest(transactionArtifact.source, artifact);
+      if (
+        (
+          await protection(
+            transactionArtifact.source,
+            artifact.originalLocation.artifactType,
+          )
+        ).kind === "protected"
+      )
+        throw new Error("git protected");
+    }
+    for (let index = 0; index < entry.artifacts.length; index += 1) {
+      const artifact = entry.artifacts[index]!;
+      const transactionArtifact = artifacts[index]!;
+      await fs.rename(
+        transactionArtifact.source,
+        transactionArtifact.temporary,
+      );
+      await requireArtifactDigest(transactionArtifact.temporary, artifact);
+    }
+    await fs.syncDirectory(stage);
+    await fs.rename(stage, destination);
+    await fs.syncDirectory(layout.entries);
+    for (const artifact of artifacts)
+      if ((await available(artifact.temporary)) !== null)
+        await removeArtifact(fs, artifact.temporary);
+    await fs.unlink(join(destination, transactionName));
+    await fs.syncDirectory(destination);
+  }
+
+  async function restoreSet(
+    loaded: LoadedEntry & { readonly entry: DisabledEntryV2 },
+  ): Promise<boolean> {
+    const artifacts = loaded.entry.artifacts.map((artifact, index) => ({
+      source: payloadFor(loaded.directory, index),
+      payload: payloadFor(loaded.directory, index),
+      destination: artifact.originalLocation.path,
+      temporary: restoreTemporaryPath(
+        artifact.originalLocation.path,
+        loaded.entry.id,
+      ),
+      integrity: artifact.integrity,
+    })) as [TransactionArtifactV2, ...TransactionArtifactV2[]];
+    const transaction: TransactionV2 = {
+      schemaVersion: 2,
+      kind: "enable",
+      entryDestination: loaded.directory,
+      artifacts,
+    };
+    await writeJson(join(loaded.directory, restoreIntentName), {
+      schemaVersion: 2,
+      entryId: loaded.entry.id,
+      destinations: artifacts.map((artifact) => artifact.destination),
+    });
+    await writeJson(join(loaded.directory, transactionName), transaction);
+    for (let index = 0; index < artifacts.length; index += 1) {
+      const artifact = loaded.entry.artifacts[index]!;
+      const transactionArtifact = artifacts[index]!;
+      await copyArtifact(
+        fs,
+        transactionArtifact.payload,
+        transactionArtifact.temporary,
+        artifact.originalLocation.artifactType,
+      );
+      await requireArtifactDigest(transactionArtifact.temporary, artifact);
+    }
+    for (let index = 0; index < artifacts.length; index += 1) {
+      const artifact = loaded.entry.artifacts[index]!;
+      const transactionArtifact = artifacts[index]!;
+      if (
+        !(await publishArtifact(
+          transactionArtifact.temporary,
+          transactionArtifact.destination,
+          loaded.entry.id,
+          artifact,
+        ))
+      ) {
+        await abandonSetRestore(loaded.directory, artifacts);
+        return false;
+      }
+    }
+    for (let index = 0; index < artifacts.length; index += 1) {
+      const artifact = loaded.entry.artifacts[index]!;
+      await requireArtifactDigest(artifacts[index]!.destination, artifact);
+      await applyRestorationMetadata(
+        fs,
+        artifacts[index]!.destination,
+        artifact.restoration,
+      );
+    }
+    await removeArtifact(fs, loaded.directory);
+    await fs.syncDirectory(layout.entries);
+    return true;
+  }
+
+  async function recoverFailedSet(
+    stage: string,
+    destination: string,
+    entry: DisabledEntryV2,
+  ): Promise<void> {
+    const directory =
+      (await available(stage)) !== null
+        ? stage
+        : (await available(destination)) !== null
+          ? destination
+          : null;
+    if (directory === null) return;
+    const loaded = await loadAt(directory, entry.id);
+    if (loaded === null || loaded.entry.schemaVersion !== 2)
+      throw new Error("incomplete set suspension rollback");
+    const transaction = await readTransaction(join(directory, transactionName));
+    if (transaction.schemaVersion !== 2 || transaction.kind !== "suspend")
+      throw new Error("invalid set suspension journal");
+    validateTransactionSet(
+      transaction,
+      loaded.entry,
+      directory,
+      directory === stage ? layout.staging : layout.entries,
+      layout,
+    );
+    await recoverSuspendSet(directory, transaction, loaded.entry);
+  }
+
   async function displace(
     stage: string,
     destination: string,
-    entry: DisabledEntry,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
   ): Promise<void> {
     const payload = join(stage, payloadName);
     const source = entry.originalLocation.path;
     const pending = pendingPath(source, entry.id);
     if ((await available(pending)) !== null)
       throw new Error("pending path occupied");
-    const transaction: Transaction = {
+    const transaction: TransactionV1 = {
       schemaVersion: 1,
       kind: "suspend",
       source,
@@ -412,10 +783,14 @@ export function createDisabledStorageModule(
     await fs.syncDirectory(destination);
   }
 
-  async function restore(loaded: LoadedEntry): Promise<boolean> {
+  async function restore(
+    loaded: LoadedEntry & {
+      readonly entry: Extract<DisabledEntry, { schemaVersion: 1 }>;
+    },
+  ): Promise<boolean> {
     const destination = loaded.entry.originalLocation.path;
     const temporary = restoreTemporaryPath(destination, loaded.entry.id);
-    const transaction: Transaction = {
+    const transaction: TransactionV1 = {
       schemaVersion: 1,
       kind: "enable",
       source: loaded.payload,
@@ -461,17 +836,30 @@ export function createDisabledStorageModule(
   async function publish(
     temporary: string,
     destination: string,
-    entry: DisabledEntry,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
+  ): Promise<boolean> {
+    return publishArtifact(temporary, destination, entry.id, {
+      originalLocation: entry.originalLocation,
+      integrity: entry.integrity,
+      restoration: entry.restoration,
+    });
+  }
+
+  async function publishArtifact(
+    temporary: string,
+    destination: string,
+    entryId: DisabledEntryId,
+    artifact: DisabledEntryV2["artifacts"][number],
   ): Promise<boolean> {
     let claimedDirectory = false;
     try {
-      if (entry.originalLocation.artifactType.kind === "file") {
+      if (artifact.originalLocation.artifactType.kind === "file") {
         await fs.link(temporary, destination);
         await fs.unlink(temporary);
-      } else if (entry.originalLocation.artifactType.kind === "directory") {
-        const claim = `.skill-cleaner-${entry.id}.claim`;
+      } else if (artifact.originalLocation.artifactType.kind === "directory") {
+        const claim = `.skill-cleaner-${entryId}.claim`;
         const claimPath = join(destination, claim);
-        const expectedClaim = directoryClaim(entry);
+        const expectedClaim = directoryClaim(entryId, artifact.integrity);
         if ((await available(join(temporary, claim))) !== null)
           throw new Error("disabled payload conflicts with recovery claim");
         if ((await available(destination)) === null) {
@@ -501,7 +889,7 @@ export function createDisabledStorageModule(
           fs,
           temporary,
           destination,
-          entry.originalLocation.artifactType,
+          artifact.originalLocation.artifactType,
         );
         await removeArtifact(fs, temporary);
       }
@@ -551,7 +939,36 @@ export function createDisabledStorageModule(
         const loaded = await loadAt(directory, id as DisabledEntryId);
         if (loaded === null) throw new Error("incomplete transaction");
         const transaction = await readTransaction(journal);
-        validateTransaction(transaction, loaded, directory, root, layout);
+        if (transaction.schemaVersion === 2) {
+          if (loaded.entry.schemaVersion !== 2)
+            throw new Error("journal version does not match manifest");
+          validateTransactionSet(
+            transaction,
+            loaded.entry,
+            directory,
+            root,
+            layout,
+          );
+          if (transaction.kind === "suspend")
+            await recoverSuspendSet(directory, transaction, loaded.entry);
+          else {
+            await validateRestoreIntent(directory, loaded.entry);
+            if (await recoverEnableSet(directory, transaction, loaded.entry))
+              enabled.add(loaded.entry.id);
+          }
+          continue;
+        }
+        if (loaded.entry.schemaVersion !== 1)
+          throw new Error("journal version does not match manifest");
+        validateTransaction(
+          transaction,
+          loaded as LoadedEntry & {
+            readonly entry: Extract<DisabledEntry, { schemaVersion: 1 }>;
+          },
+          directory,
+          root,
+          layout,
+        );
         if (transaction.kind === "suspend")
           await rollbackSuspend(directory, transaction, loaded.entry);
         else {
@@ -564,10 +981,167 @@ export function createDisabledStorageModule(
     return enabled;
   }
 
+  async function recoverSuspendSet(
+    directory: string,
+    transaction: TransactionV2,
+    entry: DisabledEntryV2,
+  ): Promise<void> {
+    const committed = directory === entryPath(entry.id);
+    if (committed) {
+      const payloadsComplete = await allSetPathsMatch(
+        transaction.artifacts.map((_, index) => payloadFor(directory, index)),
+        entry,
+      );
+      const sourcesAbsent = (
+        await Promise.all(
+          transaction.artifacts.map((artifact) => available(artifact.source)),
+        )
+      ).every((value) => value === null);
+      if (payloadsComplete && sourcesAbsent) {
+        for (const artifact of transaction.artifacts) {
+          if ((await available(artifact.temporary)) !== null) {
+            const index = transaction.artifacts.indexOf(artifact);
+            await requireArtifactDigest(
+              artifact.temporary,
+              entry.artifacts[index]!,
+            );
+            await removeArtifact(fs, artifact.temporary);
+          }
+        }
+        await fs.unlink(join(directory, transactionName));
+        await fs.syncDirectory(directory);
+        return;
+      }
+    }
+
+    // Roll the whole set back. Exact already-restored sources are accepted;
+    // occupied mismatches stop recovery without deleting any source or payload.
+    for (let index = 0; index < transaction.artifacts.length; index += 1) {
+      const transactionArtifact = transaction.artifacts[index]!;
+      const artifact = entry.artifacts[index]!;
+      if ((await available(transactionArtifact.source)) !== null) {
+        if (!(await artifactHashMatches(transactionArtifact.source, artifact)))
+          throw new Error("source occupied during set suspension recovery");
+        if ((await available(transactionArtifact.temporary)) !== null)
+          await requireArtifactDigest(transactionArtifact.temporary, artifact);
+        continue;
+      }
+      const pendingPresent =
+        (await available(transactionArtifact.temporary)) !== null;
+      if (pendingPresent)
+        try {
+          await requireArtifactDigest(transactionArtifact.temporary, artifact);
+        } catch {
+          await returnChangedPendingArtifact(
+            transactionArtifact.temporary,
+            transactionArtifact.source,
+            artifact,
+          );
+          throw new Error("raced source returned from set pending");
+        }
+      const candidate = pendingPresent
+        ? transactionArtifact.temporary
+        : payloadFor(directory, index);
+      await requireArtifactDigest(candidate, artifact);
+      if (
+        (
+          await protection(
+            transactionArtifact.source,
+            artifact.originalLocation.artifactType,
+          )
+        ).kind === "protected"
+      )
+        throw new Error("git protected");
+      await copyArtifact(
+        fs,
+        candidate,
+        transactionArtifact.source,
+        artifact.originalLocation.artifactType,
+      );
+      await requireArtifactDigest(transactionArtifact.source, artifact);
+    }
+    for (const artifact of transaction.artifacts)
+      if ((await available(artifact.temporary)) !== null)
+        await removeArtifact(fs, artifact.temporary);
+    if ((await available(directory)) !== null)
+      await removeArtifact(fs, directory);
+  }
+
+  async function recoverEnableSet(
+    directory: string,
+    transaction: TransactionV2,
+    entry: DisabledEntryV2,
+  ): Promise<boolean> {
+    for (let index = 0; index < transaction.artifacts.length; index += 1) {
+      const transactionArtifact = transaction.artifacts[index]!;
+      const artifact = entry.artifacts[index]!;
+      const destinationPresent =
+        (await available(transactionArtifact.destination)) !== null;
+      if (destinationPresent) {
+        if (
+          await artifactHashMatches(transactionArtifact.destination, artifact)
+        ) {
+          if ((await available(transactionArtifact.temporary)) !== null)
+            await removeArtifact(fs, transactionArtifact.temporary);
+          continue;
+        }
+        if (artifact.originalLocation.artifactType.kind !== "directory")
+          throw new Error("destination occupied during set enable recovery");
+      }
+      if ((await available(transactionArtifact.temporary)) === null) {
+        await copyArtifact(
+          fs,
+          transactionArtifact.payload,
+          transactionArtifact.temporary,
+          artifact.originalLocation.artifactType,
+        );
+      }
+      await requireArtifactDigest(transactionArtifact.temporary, artifact);
+      if (
+        (
+          await protection(
+            transactionArtifact.destination,
+            artifact.originalLocation.artifactType,
+          )
+        ).kind === "protected"
+      )
+        throw new Error("git protected");
+      if (
+        !(await publishArtifact(
+          transactionArtifact.temporary,
+          transactionArtifact.destination,
+          entry.id,
+          artifact,
+        ))
+      ) {
+        await abandonSetRestore(directory, transaction.artifacts);
+        return false;
+      }
+    }
+    for (let index = 0; index < transaction.artifacts.length; index += 1) {
+      const artifact = entry.artifacts[index]!;
+      const destination = transaction.artifacts[index]!.destination;
+      await requireArtifactDigest(destination, artifact);
+      await applyRestorationMetadata(fs, destination, artifact.restoration);
+    }
+    await removeArtifact(fs, directory);
+    return true;
+  }
+
+  async function abandonSetRestore(
+    directory: string,
+    artifacts: readonly TransactionArtifactV2[],
+  ): Promise<void> {
+    for (const artifact of artifacts)
+      if ((await available(artifact.temporary)) !== null)
+        await removeArtifact(fs, artifact.temporary);
+    await clearJournal(directory);
+  }
+
   async function rollbackSuspend(
     directory: string,
-    transaction: Transaction,
-    entry: DisabledEntry,
+    transaction: TransactionV1,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
   ): Promise<void> {
     const payload = join(directory, payloadName);
     const sourceExists = (await available(transaction.source)) !== null;
@@ -629,7 +1203,7 @@ export function createDisabledStorageModule(
   async function recoverFailedDisplacement(
     stage: string,
     destination: string,
-    entry: DisabledEntry,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
   ): Promise<void> {
     const transactionDirectory =
       (await available(stage)) !== null
@@ -643,9 +1217,13 @@ export function createDisabledStorageModule(
       const transaction = await readTransaction(
         join(transactionDirectory, transactionName),
       );
+      if (transaction.schemaVersion !== 1)
+        throw new Error("legacy manifest has a non-legacy journal");
       validateTransaction(
         transaction,
-        loaded,
+        loaded as LoadedEntry & {
+          readonly entry: Extract<DisabledEntry, { schemaVersion: 1 }>;
+        },
         transactionDirectory,
         transactionDirectory === stage ? layout.staging : layout.entries,
         layout,
@@ -685,8 +1263,8 @@ export function createDisabledStorageModule(
 
   async function rollbackEnable(
     directory: string,
-    transaction: Transaction,
-    entry: DisabledEntry,
+    transaction: TransactionV1,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
   ): Promise<boolean> {
     // If publication succeeded before interruption, preservation wins: retain the
     // restored artifact and remove its consumed disabled entry. Existence alone
@@ -814,7 +1392,14 @@ export function createDisabledStorageModule(
 
   async function integrityMatches(loaded: LoadedEntry): Promise<boolean> {
     try {
-      await requireDigest(loaded.payload, loaded.entry);
+      if (loaded.entry.schemaVersion === 1)
+        await requireDigest(loaded.payload, loaded.entry);
+      else
+        for (let index = 0; index < loaded.entry.artifacts.length; index += 1)
+          await requireArtifactDigest(
+            payloadFor(loaded.directory, index),
+            loaded.entry.artifacts[index]!,
+          );
       return true;
     } catch {
       return false;
@@ -839,7 +1424,7 @@ export function createDisabledStorageModule(
   async function returnChangedPending(
     pending: string,
     source: string,
-    entry: DisabledEntry,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
   ): Promise<void> {
     const artifactType = entry.originalLocation.artifactType;
     if ((await protection(source, artifactType)).kind === "protected")
@@ -856,9 +1441,29 @@ export function createDisabledStorageModule(
     await removeArtifact(fs, pending);
   }
 
+  async function returnChangedPendingArtifact(
+    pending: string,
+    source: string,
+    artifact: DisabledEntryV2["artifacts"][number],
+  ): Promise<void> {
+    const artifactType = artifact.originalLocation.artifactType;
+    if ((await protection(source, artifactType)).kind === "protected")
+      throw new Error("git protected");
+    const changedDigest = await hashArtifact(fs, pending, artifactType);
+    if (artifactType.kind === "file") {
+      await fs.link(pending, source);
+      await fs.unlink(pending);
+      return;
+    }
+    await copyArtifact(fs, pending, source, artifactType);
+    if ((await hashArtifact(fs, source, artifactType)) !== changedDigest)
+      throw new Error("changed set pending recovery failed integrity");
+    await removeArtifact(fs, pending);
+  }
+
   async function requireDigest(
     path: string,
-    entry: DisabledEntry,
+    entry: Extract<DisabledEntry, { schemaVersion: 1 }>,
   ): Promise<void> {
     if (
       (
@@ -866,6 +1471,35 @@ export function createDisabledStorageModule(
       ).toLowerCase() !== entry.integrity.digest.toLowerCase()
     )
       throw new Error("integrity failed");
+  }
+  async function requireArtifactDigest(
+    path: string,
+    artifact: DisabledEntryV2["artifacts"][number],
+  ): Promise<void> {
+    if (!(await artifactHashMatches(path, artifact)))
+      throw new Error("integrity failed");
+  }
+  async function artifactHashMatches(
+    path: string,
+    artifact: DisabledEntryV2["artifacts"][number],
+  ): Promise<boolean> {
+    return hashMatches(
+      path,
+      artifact.originalLocation.artifactType,
+      artifact.integrity,
+    );
+  }
+  async function allSetPathsMatch(
+    paths: readonly string[],
+    entry: DisabledEntryV2,
+  ): Promise<boolean> {
+    if (paths.length !== entry.artifacts.length) return false;
+    const values = await Promise.all(
+      paths.map((path, index) =>
+        artifactHashMatches(path, entry.artifacts[index]!),
+      ),
+    );
+    return values.every(Boolean);
   }
 
   async function writeJson(path: string, value: unknown): Promise<void> {
@@ -880,6 +1514,28 @@ export function createDisabledStorageModule(
     if (value === null || typeof value !== "object")
       throw new Error("invalid journal");
     const transaction = value as Partial<Transaction>;
+    if (transaction.schemaVersion === 2) {
+      const candidate = value as Partial<TransactionV2>;
+      if (
+        (candidate.kind !== "suspend" && candidate.kind !== "enable") ||
+        typeof candidate.entryDestination !== "string" ||
+        !Array.isArray(candidate.artifacts) ||
+        candidate.artifacts.length === 0 ||
+        candidate.artifacts.some(
+          (artifact) =>
+            artifact === null ||
+            typeof artifact !== "object" ||
+            typeof artifact.source !== "string" ||
+            typeof artifact.payload !== "string" ||
+            typeof artifact.destination !== "string" ||
+            typeof artifact.temporary !== "string" ||
+            artifact.integrity?.algorithm !== "sha256" ||
+            typeof artifact.integrity.digest !== "string",
+        )
+      )
+        throw new Error("invalid set journal");
+      return candidate as TransactionV2;
+    }
     if (
       transaction.schemaVersion !== 1 ||
       (transaction.kind !== "suspend" && transaction.kind !== "enable") ||
@@ -907,6 +1563,24 @@ export function createDisabledStorageModule(
     const value: unknown = JSON.parse(
       (await fs.readFile(path)).toString("utf8"),
     );
+    if (entry.schemaVersion === 2) {
+      const destinations = entry.artifacts.map(
+        (artifact) => artifact.originalLocation.path,
+      );
+      if (
+        value === null ||
+        typeof value !== "object" ||
+        (value as Record<string, unknown>).schemaVersion !== 2 ||
+        (value as Record<string, unknown>).entryId !== entry.id ||
+        stringifyModel((value as Record<string, unknown>).destinations, 0) !==
+          stringifyModel(destinations, 0) ||
+        Object.keys(value).some(
+          (key) => !["schemaVersion", "entryId", "destinations"].includes(key),
+        )
+      )
+        throw new Error("invalid set restore intent");
+      return;
+    }
     if (
       value === null ||
       typeof value !== "object" ||
@@ -975,8 +1649,11 @@ function restoreTemporaryPath(destination: string, id: string): string {
     `.${basename(destination)}.skill-cleaner-${id}.restore`,
   );
 }
-function directoryClaim(entry: DisabledEntry): Buffer {
-  return Buffer.from(`${entry.id}\n${entry.integrity.digest}\n`, "utf8");
+function payloadFor(directory: string, index: number): string {
+  return join(directory, "payloads", String(index).padStart(4, "0"));
+}
+function directoryClaim(id: DisabledEntryId, integrity: Sha256Digest): Buffer {
+  return Buffer.from(`${id}\n${integrity.digest}\n`, "utf8");
 }
 function hasCode(error: unknown, code: string): boolean {
   return (
@@ -994,8 +1671,10 @@ function pathsOverlap(left: string, right: string): boolean {
   );
 }
 function validateTransaction(
-  transaction: Transaction,
-  loaded: LoadedEntry,
+  transaction: TransactionV1,
+  loaded: LoadedEntry & {
+    readonly entry: Extract<DisabledEntry, { schemaVersion: 1 }>;
+  },
   directory: string,
   root: string,
   layout: Layout,
@@ -1036,9 +1715,74 @@ function validateTransaction(
   )
     throw new Error("forged enable journal");
 }
+function validateTransactionSet(
+  transaction: TransactionV2,
+  entry: DisabledEntryV2,
+  directory: string,
+  root: string,
+  layout: Layout,
+): void {
+  if (
+    transaction.artifacts.length !== entry.artifacts.length ||
+    !pathsOverlap(root, directory) ||
+    !pathsOverlap(layout.base, directory) ||
+    (root !== layout.staging && root !== layout.entries)
+  )
+    throw new Error("invalid disabled-storage set journal");
+  const expectedEntryDestination = entryPathFor(layout, entry.id);
+  if (transaction.entryDestination !== expectedEntryDestination)
+    throw new Error("forged set entry destination");
+  for (let index = 0; index < entry.artifacts.length; index += 1) {
+    const artifact = entry.artifacts[index]!;
+    const transactionArtifact = transaction.artifacts[index]!;
+    const expectedPayload =
+      transaction.kind === "suspend"
+        ? payloadFor(join(layout.staging, entry.id), index)
+        : payloadFor(directory, index);
+    const expectedSource =
+      transaction.kind === "suspend"
+        ? artifact.originalLocation.path
+        : expectedPayload;
+    if (
+      !isAbsolute(transactionArtifact.source) ||
+      !isAbsolute(transactionArtifact.payload) ||
+      !isAbsolute(transactionArtifact.destination) ||
+      !isAbsolute(transactionArtifact.temporary) ||
+      transactionArtifact.source !== expectedSource ||
+      transactionArtifact.payload !== expectedPayload ||
+      transactionArtifact.destination !== artifact.originalLocation.path ||
+      transactionArtifact.temporary !==
+        (transaction.kind === "suspend"
+          ? pendingPath(artifact.originalLocation.path, entry.id)
+          : restoreTemporaryPath(artifact.originalLocation.path, entry.id)) ||
+      !sameDigest(transactionArtifact.integrity, artifact.integrity)
+    )
+      throw new Error("forged disabled-storage set journal");
+  }
+  if (transaction.kind === "enable" && root !== layout.entries)
+    throw new Error("enable journal cannot be staged");
+}
 function entryPathFor(layout: Layout, id: string): string {
   return join(layout.entries, id);
 }
 function compare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function entryPrimaryPath(entry: DisabledEntry): string {
+  return entry.schemaVersion === 1
+    ? entry.originalLocation.path
+    : entry.artifacts[0]!.originalLocation.path;
+}
+
+function requestPrimaryPath(request: SuspendRequest): string {
+  return isV2SuspendRequest(request)
+    ? request.artifacts[0]!.location.path
+    : request.location.path;
+}
+
+function isV2SuspendRequest(
+  request: SuspendRequest,
+): request is SuspendRequestV2 {
+  return "schemaVersion" in request && request.schemaVersion === 2;
 }

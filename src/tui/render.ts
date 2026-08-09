@@ -340,7 +340,50 @@ function availabilityPlanBodyLines(
       : style.error(`CANNOT ${operation.toUpperCase()}`),
     "",
   ];
+  const ordinaryActionGroups: Array<
+    Array<(typeof state.plan.actions)[number]>
+  > = [];
   for (const action of state.plan.actions) {
+    const previous = ordinaryActionGroups.at(-1);
+    const previousAction = previous?.[0];
+    const sameSuspensionOwner =
+      action.kind === "suspended-disable" &&
+      previousAction?.kind === "suspended-disable" &&
+      JSON.stringify(action.request.ownership) ===
+        JSON.stringify(previousAction.request.ownership);
+    if (sameSuspensionOwner) previous!.push(action);
+    else ordinaryActionGroups.push([action]);
+  }
+  for (const actions of ordinaryActionGroups) {
+    const action = actions[0]!;
+    if (actions.length > 1 && action.kind === "suspended-disable") {
+      const suspensionActions = actions as readonly Extract<
+        (typeof state.plan.actions)[number],
+        { kind: "suspended-disable" }
+      >[];
+      const artifactCount = suspensionActions.reduce(
+        (total, candidate) =>
+          total +
+          ("artifacts" in candidate.request
+            ? candidate.request.artifacts.length
+            : 1),
+        0,
+      );
+      lines.push(
+        ...wrapPlanLine(
+          `Suspended: move ${String(suspensionActions.length)} selected Skills (${String(artifactCount)} artifacts) to non-expiring Disabled Storage as separate recoverable operations.`,
+          width,
+        ).map(style.active),
+      );
+      if (action.request.ownership.kind === "manager")
+        lines.push(
+          ...wrapPlanLine(
+            "Manager records remain unchanged. Running the Manager may recreate displaced artifacts and block Enable until those conflicts are resolved.",
+            width,
+          ).map(style.warning),
+        );
+      continue;
+    }
     if (action.kind === "native-control") {
       const harnesses = [
         ...new Set(action.effects.map((effect) => effect.harnessId)),
@@ -362,25 +405,62 @@ function availabilityPlanBodyLines(
         ).map(style.active),
       );
     } else if (action.kind === "suspended-disable") {
+      const paths =
+        "artifacts" in action.request
+          ? action.request.artifacts.map((artifact) => artifact.location.path)
+          : [action.request.location.path];
+      const manager = action.request.ownership.kind === "manager";
       lines.push(
         ...wrapPlanLine(
-          `Suspended: move ${action.request.operation.displayNames.join(", ")} to non-expiring Disabled Storage. It does not enter Trash and can be restored to ${action.request.location.path}.`,
+          `Suspended: move ${action.request.operation.displayNames.join(", ")} (${String(paths.length)} artifact${paths.length === 1 ? "" : "s"}) to non-expiring Disabled Storage. It does not enter Trash and can be restored to ${paths.join(", ")}.`,
           width,
         ).map(style.active),
       );
+      if (manager)
+        lines.push(
+          ...wrapPlanLine(
+            "Manager records remain unchanged. Running the Manager may recreate a displaced artifact and block Enable until that conflict is resolved.",
+            width,
+          ).map(style.warning),
+        );
     } else {
+      const paths =
+        action.entry.schemaVersion === 1
+          ? [action.entry.originalLocation.path]
+          : action.entry.artifacts.map(
+              (artifact) => artifact.originalLocation.path,
+            );
       lines.push(
         ...wrapPlanLine(
-          `Suspended: restore ${action.entry.operation.displayNames.join(", ")} from Disabled Storage to its exact original path without overwriting anything. This enables ${[...new Set(action.entry.harnessExposures.map((x) => x.harnessId))].sort().join(", ") || "its recorded harnesses"}.`,
+          `Suspended: restore ${action.entry.operation.displayNames.join(", ")} from Disabled Storage to ${String(paths.length)} exact original path${paths.length === 1 ? "" : "s"} without overwriting anything. This enables ${[...new Set(action.entry.harnessExposures.map((x) => x.harnessId))].sort().join(", ") || "its recorded harnesses"}.`,
           width,
         ).map(style.active),
       );
     }
   }
-  for (const block of state.plan.blocks)
+  const blockGroups = new Map<
+    string,
+    {
+      readonly kind: (typeof state.plan.blocks)[number]["kind"];
+      readonly reason: string;
+      count: number;
+    }
+  >();
+  for (const block of state.plan.blocks) {
+    const reason = "reason" in block ? block.reason : block.dependency.reason;
+    const key = `${block.kind}\u0000${reason}`;
+    const group = blockGroups.get(key) ?? {
+      kind: block.kind,
+      reason,
+      count: 0,
+    };
+    group.count += 1;
+    blockGroups.set(key, group);
+  }
+  for (const group of blockGroups.values())
     lines.push(
       ...wrapPlanLine(
-        `Blocked: ${"reason" in block ? block.reason : block.dependency.reason}`,
+        `Blocked (${group.kind}, ${String(group.count)} block occurrence${group.count === 1 ? "" : "s"}): ${group.reason}`,
         width,
       ).map(style.error),
     );
@@ -402,6 +482,8 @@ function availabilityPlanBodyLines(
       technical(`Target: ${JSON.stringify(target)}`);
     for (const id of state.plan.disabledEntryIds)
       technical(`Disabled entry ID: ${id}`);
+    for (const block of state.plan.blocks)
+      technical(`Block ${block.kind}: ${JSON.stringify(block)}`);
     for (const action of state.plan.actions) {
       technical(`Action ${action.id}: ${action.kind}`);
       technical(`  Targets: ${JSON.stringify(action.targets)}`);
@@ -416,9 +498,22 @@ function availabilityPlanBodyLines(
           technical(
             `  Config: ${mutation.path} · ${mutation.format} · ${mutation.documentScope} · preimage ${mutation.expectedPreimageHash?.digest ?? "absent"}`,
           );
-      } else if (action.kind === "suspended-enable")
+      } else if (action.kind === "suspended-enable") {
         technical(`  Disabled entry ID: ${action.entry.id}`);
-      else technical(`  Original path: ${action.request.location.path}`);
+        const paths =
+          action.entry.schemaVersion === 1
+            ? [action.entry.originalLocation.path]
+            : action.entry.artifacts.map(
+                (artifact) => artifact.originalLocation.path,
+              );
+        for (const path of paths) technical(`  Stored path: ${path}`);
+      } else {
+        const paths =
+          "artifacts" in action.request
+            ? action.request.artifacts.map((artifact) => artifact.location.path)
+            : [action.request.location.path];
+        for (const path of paths) technical(`  Original path: ${path}`);
+      }
     }
     for (const check of state.plan.verificationChecks) {
       technical(`Check ${check.id}: ${check.kind}`);

@@ -161,12 +161,15 @@ plan is identified; partially overlapping boundaries are rejected.
 Every represented Harness Exposure must reach the requested state. Planning
 prefers its materialized native control. If any exposure lacks native control,
 Disable instead emits exactly one whole-Installation `suspended-disable`
-action, but only for a complete, active, independently filesystem-owned
-Installation. Enable may emit native actions for live disabled exposures and
-`suspended-enable` actions for exact Disabled Storage entries. Plugin-owned
-Installations, manager-owned suspension fallback, System Skills, unresolved
-exposures, name collisions across Skill Identities, unsafe configuration,
-Git-protected paths, and read-only paths are absolute blocks.
+action for a complete, active artifact set. A filesystem-owned Installation
+contributes its primary artifact. An explicitly supported Manager-owned
+Installation contributes the primary and every declared supplemental artifact
+without changing its Manager record. Enable may emit native actions for live
+disabled exposures and `suspended-enable` actions for exact Disabled Storage
+entries. Plugin-owned Installations, unsupported Manager evidence, incomplete
+or overlapping artifact sets, System Skills, unresolved exposures, name
+collisions across Skill Identities, unsafe configuration, Git-protected paths,
+and read-only paths are absolute blocks.
 Name collision checks include every Installation exposed to that harness,
 regardless of its control kind, plus harness-owned System Skill findings.
 

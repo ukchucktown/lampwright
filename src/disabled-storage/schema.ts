@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { posix, win32 } from "node:path";
 
 import { z } from "zod";
 
@@ -8,9 +8,13 @@ import {
   weakIdentityEvidenceSchema,
 } from "../model/schemas.js";
 import type { DisabledEntry, SuspendRequest } from "./types.js";
+import { artifactPathKey } from "../model/paths.js";
 
 const nonBlank = z.string().refine((value) => value.trim().length > 0);
-const absolutePath = nonBlank.refine(isAbsolute, "must be an absolute path");
+const absolutePath = nonBlank.refine(
+  (value) => posix.isAbsolute(value) || win32.isAbsolute(value),
+  "must be an absolute path",
+);
 const identifier = nonBlank.max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
 const timestamp = z.iso.datetime({ offset: true });
 const digest = z.strictObject({
@@ -62,6 +66,17 @@ const ownership = z.discriminatedUnion("kind", [
     confidence: z.literal("unknown"),
   }),
 ]);
+const suspendableOwnership = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("filesystem"),
+    confidence: z.enum(["declared", "inferred"]),
+  }),
+  z.strictObject({
+    kind: z.literal("manager"),
+    managerId: nonBlank,
+    confidence: z.enum(["declared", "inferred"]),
+  }),
+]);
 const identity = z.strictObject({
   strongEvidence: z.array(strongIdentityEvidenceSchema),
   weakEvidence: z.array(weakIdentityEvidenceSchema),
@@ -75,7 +90,15 @@ const restoration = z.strictObject({
   modifiedAt: timestamp.nullable(),
 });
 
-export const suspendRequestSchema = z
+const disabledArtifact = z.strictObject({
+  originalLocation: location,
+  integrity: digest,
+  restoration,
+});
+
+const suspendArtifact = z.strictObject({ location });
+
+const suspendRequestV1Schema = z
   .strictObject({
     location,
     skillIdentity: identity,
@@ -95,7 +118,31 @@ export const suspendRequestSchema = z
     validateExposures(value.harnessExposures, context);
   });
 
-export const disabledEntrySchema = z
+const suspendRequestV2Schema = z
+  .strictObject({
+    schemaVersion: z.literal(2),
+    artifacts: z.array(suspendArtifact).min(1),
+    skillIdentity: identity,
+    installationIds: z.array(nonBlank).min(1),
+    ownership: suspendableOwnership,
+    harnessExposures: z.array(harnessExposureSchema),
+    operation,
+  })
+  .superRefine((value, context) => {
+    validateIdsAndExposures(value, context);
+    validateSortedPaths(
+      value.artifacts.map((artifact) => artifact.location),
+      ["artifacts"],
+      context,
+    );
+  });
+
+export const suspendRequestSchema = z.union([
+  suspendRequestV1Schema,
+  suspendRequestV2Schema,
+]);
+
+const disabledEntryV1Schema = z
   .strictObject({
     schemaVersion: z.literal(1),
     id: identifier,
@@ -119,6 +166,66 @@ export const disabledEntrySchema = z
     }
     validateExposures(value.harnessExposures, context);
   });
+
+const disabledEntryV2Schema = z
+  .strictObject({
+    schemaVersion: z.literal(2),
+    id: identifier,
+    suspendedAt: timestamp,
+    artifacts: z.array(disabledArtifact).min(1),
+    skillIdentity: identity,
+    installationIds: z.array(nonBlank).min(1),
+    ownership: suspendableOwnership,
+    harnessExposures: z.array(harnessExposureSchema),
+    operation,
+  })
+  .superRefine((value, context) => {
+    validateIdsAndExposures(value, context);
+    validateSortedPaths(
+      value.artifacts.map((artifact) => artifact.originalLocation),
+      ["artifacts"],
+      context,
+    );
+  });
+
+export const disabledEntrySchema = z.union([
+  disabledEntryV1Schema,
+  disabledEntryV2Schema,
+]);
+
+function validateIdsAndExposures(
+  value: {
+    readonly installationIds: readonly string[];
+    readonly harnessExposures: readonly { readonly harnessId: string }[];
+  },
+  context: z.RefinementCtx,
+): void {
+  if (new Set(value.installationIds).size !== value.installationIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["installationIds"],
+      message: "installation IDs must be unique",
+    });
+  }
+  validateExposures(value.harnessExposures, context);
+}
+
+function validateSortedPaths(
+  locations: readonly z.infer<typeof location>[],
+  path: readonly (number | string)[],
+  context: z.RefinementCtx,
+): void {
+  const paths = locations.map(artifactPathKey);
+  if (
+    new Set(paths).size !== paths.length ||
+    paths.some((value, index) => index > 0 && paths[index - 1]! >= value)
+  )
+    context.addIssue({
+      code: "custom",
+      path: [...path],
+      message: "artifact paths must be nonempty, unique, and sorted",
+    });
+}
 
 function validateExposures(
   exposures: readonly { readonly harnessId: string }[],

@@ -300,6 +300,225 @@ describe("Availability Planning and Execution", () => {
     });
   }
 
+  it("plans one complete suspension for a Vercel-managed primary and two supplemental artifacts", async () => {
+    const environment = await environmentFixture();
+    const paths = ["a-primary", "b-claude-copy", "c-gemini-copy"].map((name) =>
+      join(environment.temporary, "vercel-managed", name),
+    );
+    const writableProtection = {
+      git: { kind: "outside-worktree" as const },
+      system: { kind: "none" as const },
+      filesystem: { kind: "writable" as const },
+    };
+    const installation = buildInstallation({
+      id: "vercel-managed-three-paths",
+      skill: { name: "review-suite", description: null },
+      manager: { id: "vercel-skills" },
+      adapterId: "vercel.skills",
+      agentId: "vercel-skills",
+      exposedTo: ["claude-code", "codex", "gemini-cli"],
+      harnessExposures: ["claude-code", "codex", "gemini-cli"].map(
+        (harnessId) => ({
+          harnessId,
+          status: "enabled" as const,
+          control: {
+            kind: "unsupported" as const,
+            reason: "Vercel placed this artifact outside native control",
+          },
+        }),
+      ),
+      location: {
+        path: paths[0]!,
+        canonicalPath: paths[0]!,
+        artifactType: { kind: "directory" },
+      },
+      ownership: {
+        kind: "manager",
+        managerId: "vercel-skills",
+        confidence: "declared",
+      },
+      protection: writableProtection,
+      suspension: {
+        kind: "available",
+        artifacts: paths.map((path) => ({
+          location: {
+            path,
+            canonicalPath: path,
+            artifactType: { kind: "directory" as const },
+          },
+          protection: writableProtection,
+        })),
+        managerRecord: "preserved",
+        managerMayRecreate: true,
+      },
+      removal: {
+        managed: null,
+        fallback: {
+          kind: "available",
+          requiresSeparateConfirmation: true,
+        },
+        primaryArtifactPresent: true,
+        supplementalArtifacts: paths.slice(1).map((path) => ({
+          location: {
+            path,
+            canonicalPath: path,
+            artifactType: { kind: "directory" as const },
+          },
+          protection: writableProtection,
+        })),
+        recordCleanups: [],
+      },
+    });
+
+    const availabilityPlan = planAvailability(
+      buildInventory({ installations: [installation] }),
+      [],
+      {
+        operation: "disable",
+        targets: [{ kind: "installation", installationId: installation.id }],
+        force: false,
+      },
+    );
+
+    expect(availabilityPlan.blocks).toEqual([]);
+    expect(availabilityPlan.actions).toHaveLength(1);
+    expect(availabilityPlan.actions[0]).toMatchObject({
+      kind: "suspended-disable",
+      installationId: installation.id,
+      affectedInstallationIds: [installation.id],
+    });
+    const serializedAction = JSON.stringify(availabilityPlan.actions[0]);
+    for (const path of paths) expect(serializedAction).toContain(path);
+  });
+
+  it("disables and enables a complete Vercel-managed set while preserving Manager state", async () => {
+    const environment = await environmentFixture();
+    const paths = ["a-primary", "b-claude-copy", "c-gemini-copy"].map((name) =>
+      join(environment.temporary, "vercel-round-trip", name),
+    );
+    const managerRecord = join(
+      environment.temporary,
+      "vercel-round-trip",
+      "manager-record.json",
+    );
+    await mkdir(join(environment.temporary, "vercel-round-trip"), {
+      recursive: true,
+    });
+    await Promise.all(
+      paths.map((path, index) => writeFile(path, `artifact-${index}`)),
+    );
+    await writeFile(managerRecord, '{"installed":true}\n');
+    const protection = {
+      git: { kind: "outside-worktree" as const },
+      system: { kind: "none" as const },
+      filesystem: { kind: "writable" as const },
+    };
+    const artifacts = paths.map((path) => ({
+      location: {
+        path,
+        canonicalPath: path,
+        artifactType: { kind: "file" as const },
+      },
+      protection,
+    }));
+    const installation = buildInstallation({
+      id: "vercel-round-trip",
+      skill: { name: "managed-review", description: null },
+      manager: { id: "vercel-skills" },
+      adapterId: "vercel.skills",
+      agentId: "vercel-skills",
+      exposedTo: ["codex"],
+      harnessExposures: [
+        {
+          harnessId: "codex",
+          status: "enabled",
+          control: { kind: "unsupported", reason: "fixture" },
+        },
+      ],
+      location: artifacts[0]!.location,
+      ownership: {
+        kind: "manager",
+        managerId: "vercel-skills",
+        confidence: "declared",
+      },
+      protection,
+      suspension: {
+        kind: "available",
+        artifacts,
+        managerRecord: "preserved",
+        managerMayRecreate: true,
+      },
+      removal: {
+        managed: null,
+        fallback: {
+          kind: "available",
+          requiresSeparateConfirmation: true,
+        },
+        primaryArtifactPresent: true,
+        supplementalArtifacts: artifacts.slice(1),
+        recordCleanups: [],
+      },
+    });
+    const scanLive = async () => {
+      const present = await Promise.all(
+        paths.map((path) =>
+          access(path).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      );
+      return buildInventory({
+        installations: present.every(Boolean) ? [installation] : [],
+      });
+    };
+    const target = {
+      kind: "installation" as const,
+      installationId: installation.id,
+    };
+    const audit: unknown[] = [];
+    const runner = execution(
+      join(environment.state, "vercel-round-trip"),
+      scanLive,
+      audit,
+    );
+    const disablePlan = planAvailability(await scanLive(), [], {
+      operation: "disable",
+      targets: [target],
+      force: false,
+    });
+    await expect(
+      runner.module.executeAvailability(disablePlan, {
+        grants: [{ kind: "confirmation" }],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    const entries = await runner.disabledStorage.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.schemaVersion).toBe(2);
+    await expect(readFile(managerRecord, "utf8")).resolves.toBe(
+      '{"installed":true}\n',
+    );
+    const enablePlan = planAvailability(await scanLive(), entries, {
+      operation: "enable",
+      targets: [target],
+      force: false,
+    });
+    await expect(
+      runner.module.executeAvailability(enablePlan, {
+        grants: [{ kind: "confirmation" }],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    for (let index = 0; index < paths.length; index += 1)
+      await expect(readFile(paths[index]!, "utf8")).resolves.toBe(
+        `artifact-${index}`,
+      );
+    await expect(readFile(managerRecord, "utf8")).resolves.toBe(
+      '{"installed":true}\n',
+    );
+    await expect(runner.disabledStorage.list()).resolves.toEqual([]);
+    expect(audit).toHaveLength(2);
+  });
+
   it("reports and audits a final Availability rescan failure without claiming verification", async () => {
     const fixture = await nativeFixture("codex", ["rescan-review"]);
     const inventory = await fixture.scanLive();
@@ -558,9 +777,15 @@ describe("Availability Planning and Execution", () => {
     const differentCanonicalOccupant = buildInstallation({
       id: "different-canonical-occupant",
       location: {
-        path: entries[0]!.originalLocation.path,
+        path:
+          entries[0]!.schemaVersion === 1
+            ? entries[0]!.originalLocation.path
+            : entries[0]!.artifacts[0]!.originalLocation.path,
         canonicalPath: join(environment.temporary, "different-target"),
-        artifactType: entries[0]!.originalLocation.artifactType,
+        artifactType:
+          entries[0]!.schemaVersion === 1
+            ? entries[0]!.originalLocation.artifactType
+            : entries[0]!.artifacts[0]!.originalLocation.artifactType,
       },
     });
     const pathAliasPlan = planAvailability(
