@@ -1,9 +1,7 @@
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
-// This persisted application identifier predates the Lampwright product name.
-// Changing it would hide existing Trash, Disabled Storage, trust, and audit data.
-const LOCAL_STATE_DIRECTORY = "skill-cleaner";
+const LOCAL_STATE_DIRECTORY = "lampwright";
 
 export interface LocalStateEnvironment {
   readonly platform: NodeJS.Platform;
@@ -42,13 +40,6 @@ export function defaultLocalStateRoot(
           environment.variables.LOCALAPPDATA,
           environment.variables.APPDATA,
         ) ?? path.join(home, "AppData", "Local"),
-        LOCAL_STATE_DIRECTORY,
-      );
-    case "darwin":
-      return path.join(
-        home,
-        "Library",
-        "Application Support",
         LOCAL_STATE_DIRECTORY,
       );
     default:

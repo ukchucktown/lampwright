@@ -1324,9 +1324,9 @@ describe("Quarantine module", () => {
     const source = join(environment.home, "directory-claim-gap");
     const temporaryPath = join(
       dirname(source),
-      `.${basename(source)}.skill-cleaner-entry-1.restore`,
+      `.${basename(source)}.lampwright-entry-1.restore`,
     );
-    const claimPath = join(source, ".skill-cleaner-entry-1.claim");
+    const claimPath = join(source, ".lampwright-entry-1.claim");
     await mkdir(source);
     await writeFile(join(source, "SKILL.md"), "# recoverable", "utf8");
     let interrupted = false;
@@ -1382,7 +1382,7 @@ describe("Quarantine module", () => {
     const source = join(environment.home, "partial.txt");
     const temporaryPath = join(
       dirname(source),
-      `.${basename(source)}.skill-cleaner-entry-1.restore`,
+      `.${basename(source)}.lampwright-entry-1.restore`,
     );
     await writeFile(source, "complete", "utf8");
     let interrupted = false;
@@ -1684,35 +1684,65 @@ describe("Quarantine module", () => {
 });
 
 describe("defaultLocalStateRoot", () => {
-  it("uses platform conventions and an explicit override", () => {
+  it("uses the same XDG state convention on Linux and macOS", () => {
     expect(
       defaultLocalStateRoot({
         platform: "linux",
         homeDirectory: "/home/tester",
         variables: { XDG_STATE_HOME: "/state" },
       }),
-    ).toBe(posix.join("/state", "skill-cleaner"));
+    ).toBe(posix.join("/state", "lampwright"));
+    expect(
+      defaultLocalStateRoot({
+        platform: "darwin",
+        homeDirectory: "/Users/tester",
+        variables: { XDG_STATE_HOME: "/state" },
+      }),
+    ).toBe(posix.join("/state", "lampwright"));
+    expect(
+      defaultLocalStateRoot({
+        platform: "linux",
+        homeDirectory: "/home/tester",
+        variables: {},
+      }),
+    ).toBe(posix.join("/home/tester", ".local", "state", "lampwright"));
     expect(
       defaultLocalStateRoot({
         platform: "darwin",
         homeDirectory: "/Users/tester",
         variables: {},
       }),
-    ).toBe(
-      posix.join(
-        "/Users/tester",
-        "Library",
-        "Application Support",
-        "skill-cleaner",
-      ),
-    );
+    ).toBe(posix.join("/Users/tester", ".local", "state", "lampwright"));
+  });
+
+  it("uses Windows state-directory precedence and the Lampwright name", () => {
     expect(
       defaultLocalStateRoot({
         platform: "win32",
         homeDirectory: "C:\\Users\\tester",
-        variables: { LOCALAPPDATA: "C:\\State" },
+        variables: {
+          LOCALAPPDATA: "C:\\State",
+          APPDATA: "C:\\Roaming",
+        },
       }),
-    ).toBe(win32.join("C:\\State", "skill-cleaner"));
+    ).toBe(win32.join("C:\\State", "lampwright"));
+    expect(
+      defaultLocalStateRoot({
+        platform: "win32",
+        homeDirectory: "C:\\Users\\tester",
+        variables: { APPDATA: "C:\\Roaming" },
+      }),
+    ).toBe(win32.join("C:\\Roaming", "lampwright"));
+    expect(
+      defaultLocalStateRoot({
+        platform: "win32",
+        homeDirectory: "C:\\Users\\tester",
+        variables: {},
+      }),
+    ).toBe(win32.join("C:\\Users\\tester", "AppData", "Local", "lampwright"));
+  });
+
+  it("uses an explicit absolute override", () => {
     expect(
       defaultLocalStateRoot({
         platform: process.platform,
