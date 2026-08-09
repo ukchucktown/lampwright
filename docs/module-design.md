@@ -156,6 +156,9 @@ the interface intentionally exposes no purge operation. `list()` and previews
 create no state. Native disabled state remains in Inventory and is never
 duplicated into Disabled Storage.
 
+See [Disabled Storage](./disabled-storage.md) for the versioned manifest and
+failure behavior.
+
 ## Quarantine module
 
 Interface:

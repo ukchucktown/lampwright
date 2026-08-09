@@ -394,7 +394,8 @@ const removalEvidenceSchema = z.strictObject({
   recordCleanups: z.array(declarativeRecordCleanupSchema),
 });
 
-const harnessExposureSchema = z
+/** Canonical persisted shape for Harness Exposure evidence. */
+export const harnessExposureSchema = z
   .strictObject({
     harnessId: nonEmptyString,
     status: z.enum(["enabled", "disabled", "unresolved"]),
