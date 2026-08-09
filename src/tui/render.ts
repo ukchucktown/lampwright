@@ -27,6 +27,8 @@ import {
 } from "./theme.js";
 import type {
   TuiBrowseState,
+  TuiAvailabilityPlanState,
+  TuiAvailabilityReportState,
   TuiExecutingState,
   TuiEntry,
   TuiPaneView,
@@ -51,6 +53,12 @@ export function renderTui(
   if (state.screen === "search") return renderSearch(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
   if (state.screen === "executing") return renderExecuting(state, style);
+  if (state.screen === "availability-plan")
+    return renderAvailabilityPlan(state, style);
+  if (state.screen === "availability-executing")
+    return renderAvailabilityExecuting(state, style);
+  if (state.screen === "availability-report")
+    return renderAvailabilityReport(state, style);
   if (state.screen === "trash-review") return renderTrashReview(state, style);
   if (state.screen === "trash-executing")
     return `${style.title("skill-cleaner — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
@@ -298,6 +306,332 @@ function trashScrollMetricsFor(
   return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
 }
 
+function renderAvailabilityPlan(
+  state: TuiAvailabilityPlanState,
+  style: TuiPaint,
+): string {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return renderCompactAvailability(state.browse.model.viewport, style);
+  return renderTrashScrollable(
+    availabilityPlanBodyLines(state, style),
+    availabilityPlanFooterLines(state, style),
+    state.scrollOffset,
+    state.browse.model.viewport,
+  );
+}
+
+function availabilityPlanBodyLines(
+  state: TuiAvailabilityPlanState,
+  style: TuiPaint,
+): readonly string[] {
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const operation = state.plan.intent.operation;
+  const lines: string[] = [
+    style.title(`skill-cleaner — Review ${operation}`),
+    "",
+    style.title(
+      `${operation === "disable" ? "Disable" : "Enable"} ${state.label}?`,
+    ),
+    state.plan.blocks.length === 0
+      ? style.success(`READY TO ${operation.toUpperCase()}`)
+      : style.error(`CANNOT ${operation.toUpperCase()}`),
+    "",
+  ];
+  for (const action of state.plan.actions) {
+    if (action.kind === "native-control") {
+      const harnesses = [
+        ...new Set(action.effects.map((effect) => effect.harnessId)),
+      ].sort();
+      const skills = [
+        ...new Set(
+          action.affectedInstallationIds.map(
+            (id) =>
+              state.browse.inventory.installations.find(
+                (installation) => installation.id === id,
+              )?.skill.name ?? id,
+          ),
+        ),
+      ].sort();
+      lines.push(
+        ...wrapPlanLine(
+          `Native: ${operation === "disable" ? "hide" : "show"} ${skills.join(", ")} ${operation === "disable" ? "from" : "in"} ${harnesses.join(", ")} by changing harness configuration; the Skill remains installed.`,
+          width,
+        ).map(style.active),
+      );
+    } else if (action.kind === "suspended-disable") {
+      lines.push(
+        ...wrapPlanLine(
+          `Suspended: move ${action.request.operation.displayNames.join(", ")} to non-expiring Disabled Storage. It does not enter Trash and can be restored to ${action.request.location.path}.`,
+          width,
+        ).map(style.active),
+      );
+    } else {
+      lines.push(
+        ...wrapPlanLine(
+          `Suspended: restore ${action.entry.operation.displayNames.join(", ")} from Disabled Storage to its exact original path without overwriting anything. This enables ${[...new Set(action.entry.harnessExposures.map((x) => x.harnessId))].sort().join(", ") || "its recorded harnesses"}.`,
+          width,
+        ).map(style.active),
+      );
+    }
+  }
+  for (const block of state.plan.blocks)
+    lines.push(
+      ...wrapPlanLine(
+        `Blocked: ${"reason" in block ? block.reason : block.dependency.reason}`,
+        width,
+      ).map(style.error),
+    );
+  for (const warning of state.plan.warnings)
+    lines.push(
+      ...wrapPlanLine(`Warning: ${warning.reference.evidence}`, width).map(
+        style.warning,
+      ),
+    );
+  if (state.technicalDetails) {
+    const technical = (value: string): void => {
+      lines.push(...wrapPlanLine(value, width).map(style.muted));
+    };
+    lines.push("");
+    technical(`Plan ID: ${state.plan.id}`);
+    technical(`Inventory ID: ${state.plan.inventoryId}`);
+    technical(`Created: ${state.plan.createdAt}`);
+    for (const target of state.plan.targets)
+      technical(`Target: ${JSON.stringify(target)}`);
+    for (const id of state.plan.disabledEntryIds)
+      technical(`Disabled entry ID: ${id}`);
+    for (const action of state.plan.actions) {
+      technical(`Action ${action.id}: ${action.kind}`);
+      technical(`  Targets: ${JSON.stringify(action.targets)}`);
+      technical(`  Depends on: ${action.dependsOn.join(", ") || "none"}`);
+      technical(`  Approvals: ${JSON.stringify(action.approvals)}`);
+      if (action.kind === "native-control") {
+        for (const effect of action.effects)
+          technical(
+            `  Effect: ${effect.installationId} · ${effect.harnessId} · ${effect.operation}`,
+          );
+        for (const mutation of action.mutations)
+          technical(
+            `  Config: ${mutation.path} · ${mutation.format} · ${mutation.documentScope} · preimage ${mutation.expectedPreimageHash?.digest ?? "absent"}`,
+          );
+      } else if (action.kind === "suspended-enable")
+        technical(`  Disabled entry ID: ${action.entry.id}`);
+      else technical(`  Original path: ${action.request.location.path}`);
+    }
+    for (const check of state.plan.verificationChecks) {
+      technical(`Check ${check.id}: ${check.kind}`);
+      technical(`  Target: ${JSON.stringify(check.target)}`);
+      technical(`  Action: ${check.actionId ?? "none"}`);
+    }
+  }
+  return lines;
+}
+
+function availabilityPlanFooterLines(
+  state: TuiAvailabilityPlanState,
+  style: TuiPaint,
+): readonly string[] {
+  if (state.plan.blocks.some((block) => !block.overridable))
+    return [style.error("Blocked — Esc returns without changing anything.")];
+  if (state.plan.blocks.length > 0)
+    return [
+      style.muted(
+        "f force dependency risks · d technical details · Esc back · q quit",
+      ),
+    ];
+  return [style.muted("y confirm · d technical details · Esc back · q quit")];
+}
+
+export function availabilityPlanScrollMetrics(
+  state: TuiAvailabilityPlanState,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  const style = createPaint(plainTuiTheme);
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return { pageRows: 0, maximumOffset: 0 };
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    availabilityPlanBodyLines(state, style).length,
+    availabilityPlanFooterLines(state, style).length,
+  );
+}
+
+function renderAvailabilityExecuting(
+  state: Extract<TuiState, { screen: "availability-executing" }>,
+  style: TuiPaint,
+): string {
+  const verb =
+    state.plan.intent.operation === "disable" ? "Disabling" : "Enabling";
+  return `${style.title(`skill-cleaner — ${verb}`)}\n\n${style.info(`${verb} ${state.label}…`)}\n${style.muted(`${String(state.plan.targets.length)} approved target(s) · ${String(state.plan.actions.length)} approved action(s)`)}\n${style.muted("The final scan and verification must finish before results appear.")}\n`;
+}
+
+function renderAvailabilityReport(
+  state: TuiAvailabilityReportState,
+  style: TuiPaint,
+): string {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return renderCompactAvailability(state.browse.model.viewport, style);
+  return renderTrashScrollable(
+    availabilityReportBodyLines(state, style),
+    [
+      style.muted(
+        "d technical details · Esc returns to the previous view · q quits",
+      ),
+    ],
+    state.scrollOffset,
+    state.browse.model.viewport,
+    "report",
+  );
+}
+
+function availabilityReportBodyLines(
+  state: TuiAvailabilityReportState,
+  style: TuiPaint,
+): readonly string[] {
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const lines: string[] = [
+    style.title("skill-cleaner — Availability result"),
+    "",
+    state.report.status === "succeeded"
+      ? style.success(`${state.label}: completed`)
+      : state.report.status === "partial"
+        ? style.warning(`${state.label}: completed only in part`)
+        : style.error(`${state.label}: ${state.report.status}`),
+    "",
+  ];
+  for (const result of state.report.targetResults)
+    lines.push(
+      ...wrapPlanLine(
+        `${result.status === "enabled" || result.status === "disabled" ? "✓" : "!"} ${availabilityTargetLabel(state, result.target)}: ${result.status}${result.reason === null ? "" : ` — ${result.reason}`}`,
+        width,
+      ).map(
+        result.status === "enabled" || result.status === "disabled"
+          ? style.success
+          : style.warning,
+      ),
+    );
+  for (const result of state.report.actionResults) {
+    if (result.status !== "failed") continue;
+    lines.push(
+      ...wrapPlanLine(`Action failed: ${result.error.message}`, width).map(
+        style.error,
+      ),
+    );
+  }
+  for (const result of state.report.verificationResults) {
+    if (result.status !== "failed") continue;
+    lines.push(
+      ...wrapPlanLine(
+        `Verification failed: ${result.error.message}`,
+        width,
+      ).map(style.error),
+    );
+  }
+  if (state.technicalDetails) {
+    const technical = (value: string): void => {
+      lines.push(...wrapPlanLine(value, width).map(style.muted));
+    };
+    lines.push(
+      "",
+      style.muted(`Plan ID: ${state.report.planId}`),
+      style.muted(`Inventory ID: ${state.report.inventoryId}`),
+      style.muted(
+        `Final Inventory ID: ${state.report.finalInventoryId ?? "unavailable"}`,
+      ),
+      style.muted(`Started: ${state.report.startedAt}`),
+      style.muted(`Completed: ${state.report.completedAt}`),
+    );
+    for (const result of state.report.actionResults) {
+      technical(`Action ${result.actionId}: ${result.status}`);
+      if (result.status === "failed")
+        technical(
+          `Raw error ${result.error.code}: ${result.error.message} ${JSON.stringify(result.error.details)}`,
+        );
+    }
+    for (const result of state.report.verificationResults) {
+      technical(`Check ${result.checkId}: ${result.status}`);
+      if (result.status === "failed")
+        technical(
+          `Raw error ${result.error.code}: ${result.error.message} ${JSON.stringify(result.error.details)}`,
+        );
+    }
+    if (state.report.rescanError !== null)
+      technical(
+        `Rescan error ${state.report.rescanError.code}: ${state.report.rescanError.message} ${JSON.stringify(state.report.rescanError.details)}`,
+      );
+  }
+  return lines;
+}
+
+function availabilityTargetLabel(
+  state: TuiAvailabilityReportState,
+  target: import("../availability/types.js").AvailabilityTarget,
+): string {
+  if (target.kind === "installation") {
+    const installation = state.browse.inventory.installations.find(
+      (x) => x.id === target.installationId,
+    );
+    if (installation === undefined) {
+      const stored = state.browse.disabledEntries?.find((entry) =>
+        entry.installationIds.includes(target.installationId),
+      );
+      return stored?.operation.displayNames.join(", ") ?? target.installationId;
+    }
+    const harnesses = installation.harnessExposures
+      .map((exposure) => exposure.harnessId)
+      .sort();
+    return `${installation.skill.name}${harnesses.length === 0 ? "" : ` (${harnesses.join(", ")})`}`;
+  }
+  if (target.kind === "logical-skill")
+    return (
+      state.browse.inventory.logicalSkills.find(
+        (x) => x.id === target.logicalSkillId,
+      )?.skill.name ?? target.logicalSkillId
+    );
+  return (
+    state.browse.inventory.groups.find((x) => x.id === target.groupId)?.label ??
+    target.groupId
+  );
+}
+
+export function availabilityReportScrollMetrics(
+  state: TuiAvailabilityReportState,
+): { readonly pageRows: number; readonly maximumOffset: number } {
+  const style = createPaint(plainTuiTheme);
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return { pageRows: 0, maximumOffset: 0 };
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    availabilityReportBodyLines(state, style).length,
+    1,
+  );
+}
+
+function renderCompactAvailability(
+  viewport: TuiBrowseState["model"]["viewport"],
+  style: TuiPaint,
+): string {
+  const width = Math.max(0, viewport.columns - 1);
+  return `${[
+    style.title("skill-cleaner"),
+    style.warning("Resize the terminal"),
+    style.muted("q quit"),
+  ]
+    .slice(0, Math.max(0, viewport.rows - 1))
+    .map((line) => fit(line, width))
+    .join("\n")}\n`;
+}
+
 function renderExecuting(state: TuiExecutingState, style: TuiPaint): string {
   const width = Math.max(0, state.browse.model.viewport.columns - 1);
   const rows = Math.max(0, state.browse.model.viewport.rows - 1);
@@ -471,15 +805,20 @@ function renderBrowse(state: TuiBrowseState, theme: TuiTheme): string {
 /** 1-based columns for pointer handling, derived from the rendered header. */
 export function browseTabHitboxes(state: TuiBrowseState): {
   readonly inventory: readonly [number, number];
+  readonly disabled: readonly [number, number];
   readonly trash: readonly [number, number];
 } {
   const inventoryStart = "skill-cleaner ".length + 1;
   const inventoryEnd = inventoryStart + "Inventory".length - 1;
-  const trashStart = inventoryEnd + 4; // " | " separates the labels.
+  const disabledStart = inventoryEnd + 4;
+  const disabledEnd =
+    disabledStart + `Disabled (${String(disabledCount(state))})`.length - 1;
+  const trashStart = disabledEnd + 4; // " | " separates the labels.
   const trashEnd =
     trashStart + `Trash (${String(state.operations?.size ?? 0)})`.length - 1;
   return {
     inventory: [inventoryStart, inventoryEnd],
+    disabled: [disabledStart, disabledEnd],
     trash: [trashStart, trashEnd],
   };
 }
@@ -498,11 +837,12 @@ export function renderBrowseLines(
   const section = currentSection(model);
   const out: string[] = [];
   const isTrash = state.view === "trash";
+  const isDisabled = state.view === "disabled";
 
   const selected = model.selected.size;
   const trashCount = state.operations?.size ?? 0;
   out.push(
-    `${style.title("skill-cleaner")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+    `${style.title("skill-cleaner")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.title(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -574,6 +914,15 @@ export function renderBrowseLines(
       : model.query === ""
         ? fitStyledSegments(
             [
+              ...(isDisabled
+                ? [
+                    { text: "e", paint: style.title },
+                    { text: " review enable · ", paint: style.muted },
+                  ]
+                : [
+                    { text: "d", paint: style.title },
+                    { text: " review disable · ", paint: style.muted },
+                  ]),
               { text: "/ or type", paint: style.title },
               { text: " search names by regex · ", paint: style.muted },
               { text: "ctrl-u", paint: style.title },
@@ -707,9 +1056,10 @@ function entryCell(
   if (entry === undefined) return " ".repeat(width);
   const index = view.offset + row - 1;
   const focused = index === model.entryIndex && model.focus === "entries";
+  const selectable = entry.selectable ?? entry.target !== null;
   const marker = isTrash
     ? " • "
-    : section !== null && !section.selectable
+    : section !== null && (!section.selectable || !selectable)
       ? " - "
       : model.selected.has(entry.key)
         ? "[x]"
@@ -738,6 +1088,27 @@ function entryCell(
     ? style.selected(fit(head, nameWidth + 5))
     : fit(head, nameWidth + 5);
   return `${styledHead}${style.muted(tail)}`;
+}
+
+function disabledCount(state: TuiBrowseState): number {
+  if (state.view === "disabled") return disabledRows(state.model.sections);
+  const snapshot = state.viewSnapshots?.disabled;
+  if (snapshot !== undefined) return disabledRows(snapshot.model.sections);
+  const native = state.inventory.installations.reduce(
+    (count, installation) =>
+      count +
+      installation.harnessExposures.filter(
+        (exposure) => exposure.status === "disabled",
+      ).length,
+    0,
+  );
+  return native + (state.disabledEntries?.length ?? 0);
+}
+
+function disabledRows(sections: readonly TuiSection[]): number {
+  return sections
+    .filter((section) => section.key.startsWith("disabled-"))
+    .reduce((count, section) => count + section.entries.length, 0);
 }
 
 function renderCompactBrowse(

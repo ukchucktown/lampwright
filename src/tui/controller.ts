@@ -1,5 +1,9 @@
 import { stringifyModel } from "../model/json.js";
 import type {
+  AvailabilityPlan,
+  AvailabilityTarget,
+} from "../availability/types.js";
+import type {
   ApprovalRequirement,
   RemovalPlan,
   RemovalPlanIntent,
@@ -17,16 +21,24 @@ import {
   type TuiBrowseCommand,
 } from "./browse.js";
 import {
+  availabilityPlanScrollMetrics,
+  availabilityReportScrollMetrics,
   planScrollMetrics,
   reportScrollMetrics,
   trashReportScrollMetrics,
   trashReviewScrollMetrics,
 } from "./render.js";
+import {
+  createDisabledSections,
+  disabledSelectionTargets,
+} from "./disabled.js";
 import { createTuiSections, selectionTargets } from "./sections.js";
 import { createTrashSections, type TrashRestoreReadiness } from "./trash.js";
 import { createSearchModel, reduceSearch } from "./search.js";
 import type {
   TuiAction,
+  TuiAvailabilityPlanState,
+  TuiAvailabilityReportState,
   TuiBrowseState,
   TuiBrowseSnapshot,
   TuiDependencies,
@@ -36,12 +48,14 @@ import type {
   TuiTrashReviewState,
   TuiSearchState,
   TuiState,
+  TuiViewSnapshot,
 } from "./types.js";
 
 export class TuiController {
   private stateValue: TuiState = { screen: "loading" };
   private execution: Promise<void> | null = null;
   private trashExecution: Promise<void> | null = null;
+  private availabilityExecution: Promise<void> | null = null;
 
   constructor(
     private readonly dependencies: TuiDependencies,
@@ -56,12 +70,22 @@ export class TuiController {
     try {
       const inventory = await this.dependencies.scan();
       let operations: readonly QuarantineOperation[] | undefined;
+      let disabledEntries =
+        [] as readonly import("../disabled-storage/types.js").DisabledEntry[];
       let notice: string | null = null;
       if (this.dependencies.quarantine !== undefined) {
         try {
           operations = await this.dependencies.quarantine.listOperations();
         } catch {
           notice = "Trash is unavailable until its local state is repaired.";
+        }
+      }
+      if (this.dependencies.listDisabled !== undefined) {
+        try {
+          disabledEntries = await this.dependencies.listDisabled();
+        } catch {
+          notice =
+            "Disabled Storage is unavailable until its local state is repaired.";
         }
       }
       this.stateValue = {
@@ -72,6 +96,7 @@ export class TuiController {
           notice,
         },
         view: "inventory",
+        disabledEntries,
         ...(operations === undefined
           ? {}
           : {
@@ -100,7 +125,8 @@ export class TuiController {
       if (
         state.screen === "trash-review" ||
         state.screen === "trash-report" ||
-        state.screen === "trash-executing"
+        state.screen === "trash-executing" ||
+        state.screen === "availability-executing"
       ) {
         const resized = {
           ...state,
@@ -134,11 +160,16 @@ export class TuiController {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "search") this.searchAction(state, action);
       else if (state.screen === "plan") await this.planAction(state, action);
+      else if (state.screen === "availability-plan")
+        await this.availabilityPlanAction(state, action);
+      else if (state.screen === "availability-report")
+        await this.availabilityReportAction(state, action);
       else if (state.screen === "trash-review")
         await this.trashReviewAction(state, action);
       else if (state.screen === "trash-report")
         await this.trashReportAction(state, action);
-      else await this.reportAction(state, action);
+      else if (state.screen === "report")
+        await this.reportAction(state, action);
     } catch (error: unknown) {
       this.fail(error);
     }
@@ -207,6 +238,33 @@ export class TuiController {
     await this.trashExecution;
   }
 
+  async waitForAvailabilityExecution(): Promise<void> {
+    if (
+      this.availabilityExecution === null &&
+      this.stateValue.screen === "availability-executing"
+    ) {
+      const state = this.stateValue;
+      const execute = this.dependencies.executeAvailability;
+      if (execute === undefined) return;
+      this.availabilityExecution = execute(
+        state.plan,
+        availabilityApprovalGrants(state.plan),
+      )
+        .then((report) => {
+          this.stateValue = {
+            screen: "availability-report",
+            browse: state.browse,
+            report,
+            label: state.label,
+            technicalDetails: false,
+            scrollOffset: 0,
+          };
+        })
+        .catch((error: unknown) => this.fail(error));
+    }
+    await this.availabilityExecution;
+  }
+
   private async browseAction(
     state: TuiBrowseState,
     action: TuiAction,
@@ -217,24 +275,7 @@ export class TuiController {
     }
     if (action.kind === "switch-view") {
       if (action.view === (state.view ?? "inventory")) return;
-      if (action.view === "inventory") {
-        if (state.view === "trash" && state.returnBrowse !== undefined) {
-          this.stateValue = { screen: "browse", ...state.returnBrowse };
-          return;
-        }
-        this.stateValue = {
-          screen: "browse",
-          inventory: state.inventory,
-          model: createBrowseModel(
-            createTuiSections(state.inventory),
-            state.model.viewport,
-          ),
-          view: "inventory",
-          ...(state.operations === undefined
-            ? {}
-            : { operations: state.operations }),
-        };
-      } else await this.openTrash(state);
+      await this.openView(state, action.view);
       return;
     }
     if (
@@ -289,11 +330,12 @@ export class TuiController {
       return;
     }
     if (action.kind === "cancel") {
+      if (state.view === "disabled") {
+        await this.openView(state, "inventory");
+        return;
+      }
       if (state.view === "trash") {
-        this.stateValue =
-          state.returnBrowse === undefined
-            ? state
-            : { screen: "browse", ...state.returnBrowse };
+        await this.openView(state, "inventory");
         return;
       }
       // Escape unwinds the narrowest thing first, and only leaves as a last
@@ -346,10 +388,36 @@ export class TuiController {
 
     const command = browseCommand(action);
     if (command !== null) {
-      this.stateValue = { ...state, model: reduceBrowse(state.model, command) };
+      const model = reduceBrowse(state.model, command);
+      this.stateValue = {
+        ...state,
+        model:
+          state.view === "disabled" &&
+          model.notice?.endsWith(" cannot be removed here.") === true
+            ? {
+                ...model,
+                notice: model.notice.replace(
+                  " cannot be removed here.",
+                  " cannot be enabled here.",
+                ),
+              }
+            : model,
+      };
       return;
     }
 
+    if (
+      action.kind === "disable-review" &&
+      (state.view ?? "inventory") === "inventory"
+    ) {
+      await this.openAvailabilityReview(state, "disable");
+      return;
+    }
+    if (action.kind === "enable-review" && state.view === "disabled") {
+      await this.openAvailabilityReview(state, "enable");
+      return;
+    }
+    if (state.view !== "inventory") return;
     if (action.kind !== "select" && action.kind !== "confirm") return;
     const targets = this.targetsFor(state);
     if (targets.length === 0) {
@@ -373,6 +441,56 @@ export class TuiController {
       scrollOffset: 0,
       returnReport: null,
     };
+  }
+
+  private async openAvailabilityReview(
+    state: TuiBrowseState,
+    operation: "disable" | "enable",
+  ): Promise<void> {
+    const planner = this.dependencies.planAvailability;
+    if (planner === undefined) {
+      this.stateValue = {
+        ...state,
+        model: {
+          ...state.model,
+          notice: "Availability is unavailable in this host.",
+        },
+      };
+      return;
+    }
+    const targets =
+      operation === "enable"
+        ? this.availabilityTargetsFor(state)
+        : (this.targetsFor(state) as readonly AvailabilityTarget[]);
+    if (targets.length === 0) {
+      this.stateValue = {
+        ...state,
+        model: { ...state.model, notice: "Nothing eligible is selected." },
+      };
+      return;
+    }
+    const plan = planner(state.inventory, state.disabledEntries ?? [], {
+      operation,
+      targets,
+      force: false,
+    });
+    this.stateValue = {
+      screen: "availability-plan",
+      browse: browseSnapshot(state),
+      plan,
+      label: planLabel(state),
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+  }
+
+  private availabilityTargetsFor(state: TuiBrowseState) {
+    const selected = disabledSelectionTargets(
+      state.model.sections,
+      state.model.selected,
+    );
+    if (selected.length > 0) return selected;
+    return currentEntry(state.model)?.availabilityTargets ?? [];
   }
 
   private searchAction(state: TuiSearchState, action: TuiAction): void {
@@ -411,6 +529,65 @@ export class TuiController {
       ...state,
       model: reduceSearch(state.model, state.browse.model.sections, command),
     };
+  }
+
+  private async refreshAfterAvailability(
+    state: TuiAvailabilityReportState,
+  ): Promise<void> {
+    try {
+      const inventory = await this.dependencies.scan();
+      const disabledEntries =
+        this.dependencies.listDisabled === undefined
+          ? []
+          : await this.dependencies.listDisabled();
+      const oldSnapshots = state.browse.viewSnapshots ?? {};
+      const inventoryOld =
+        state.browse.view === "inventory"
+          ? state.browse
+          : oldSnapshots.inventory;
+      const disabledOld =
+        state.browse.view === "disabled" ? state.browse : oldSnapshots.disabled;
+      const inventorySnapshot: TuiViewSnapshot = {
+        inventory,
+        model: preserveBrowseModel(
+          inventoryOld?.model ?? state.browse.model,
+          createTuiSections(inventory),
+        ),
+        view: "inventory",
+        disabledEntries,
+        ...(state.browse.operations === undefined
+          ? {}
+          : { operations: state.browse.operations }),
+      };
+      const disabledSnapshot: TuiViewSnapshot = {
+        inventory,
+        model: preserveBrowseModel(
+          disabledOld?.model ?? state.browse.model,
+          createDisabledSections(inventory, disabledEntries),
+        ),
+        view: "disabled",
+        disabledEntries,
+        ...(state.browse.operations === undefined
+          ? {}
+          : { operations: state.browse.operations }),
+      };
+      const viewSnapshots = {
+        ...Object.fromEntries(
+          Object.entries(oldSnapshots).map(([view, snapshot]) => [
+            view,
+            snapshot === undefined ? snapshot : { ...snapshot, inventory },
+          ]),
+        ),
+        inventory: inventorySnapshot,
+        disabled: disabledSnapshot,
+      };
+      const active =
+        state.browse.view === "disabled" ? disabledSnapshot : inventorySnapshot;
+      this.stateValue = { screen: "browse", ...active, viewSnapshots };
+    } catch {
+      // A successful mutation must never lead back to a stale live projection.
+      this.stateValue = { screen: "done", report: state.report };
+    }
   }
 
   /** An explicit selection, or the row under the cursor when there is none. */
@@ -487,6 +664,147 @@ export class TuiController {
       browse: state.browse,
       plan: state.plan,
       label: state.label,
+    };
+  }
+
+  private async availabilityPlanAction(
+    state: TuiAvailabilityPlanState,
+    action: TuiAction,
+  ): Promise<void> {
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: null };
+      return;
+    }
+    if (action.kind === "cancel") {
+      this.stateValue = { screen: "browse", ...state.browse };
+      return;
+    }
+    if (action.kind === "toggle-details") {
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const metrics = availabilityPlanScrollMetrics(state);
+      const distance =
+        action.kind === "page" ? Math.max(1, metrics.pageRows) : 1;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + action.delta * distance),
+        ),
+      };
+      return;
+    }
+    if (action.kind === "force") {
+      if (
+        state.plan.intent.operation !== "disable" ||
+        state.plan.blocks.length === 0 ||
+        state.plan.blocks.some((block) => !block.overridable) ||
+        this.dependencies.planAvailability === undefined
+      )
+        return;
+      this.stateValue = {
+        ...state,
+        plan: this.dependencies.planAvailability(
+          state.browse.inventory,
+          state.browse.disabledEntries ?? [],
+          { ...state.plan.intent, force: true },
+        ),
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (
+      action.kind !== "confirm" ||
+      state.plan.blocks.length > 0 ||
+      this.dependencies.executeAvailability === undefined
+    )
+      return;
+    this.availabilityExecution = null;
+    this.stateValue = {
+      screen: "availability-executing",
+      browse: state.browse,
+      plan: state.plan,
+      label: state.label,
+    };
+  }
+
+  private async availabilityReportAction(
+    state: TuiAvailabilityReportState,
+    action: TuiAction,
+  ): Promise<void> {
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: state.report };
+      return;
+    }
+    if (action.kind === "cancel") {
+      await this.refreshAfterAvailability(state);
+      return;
+    }
+    if (action.kind === "toggle-details") {
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const metrics = availabilityReportScrollMetrics(state);
+      const distance =
+        action.kind === "page" ? Math.max(1, metrics.pageRows) : 1;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + action.delta * distance),
+        ),
+      };
+    }
+  }
+
+  private async openView(
+    state: TuiBrowseState,
+    view: import("./types.js").TuiBrowseView,
+  ): Promise<void> {
+    const snapshots = {
+      ...(state.viewSnapshots ?? {}),
+      [state.view ?? "inventory"]: viewSnapshot(state),
+    };
+    const existing = snapshots[view];
+    if (existing !== undefined) {
+      this.stateValue = {
+        screen: "browse",
+        ...existing,
+        viewSnapshots: snapshots,
+      };
+      return;
+    }
+    if (view === "trash") {
+      await this.openTrash({ ...state, viewSnapshots: snapshots });
+      return;
+    }
+    const entries = state.disabledEntries ?? [];
+    this.stateValue = {
+      screen: "browse",
+      inventory: state.inventory,
+      model: createBrowseModel(
+        view === "disabled"
+          ? createDisabledSections(state.inventory, entries)
+          : createTuiSections(state.inventory),
+        state.model.viewport,
+      ),
+      view,
+      disabledEntries: entries,
+      ...(state.operations === undefined
+        ? {}
+        : { operations: state.operations }),
+      viewSnapshots: snapshots,
     };
   }
 
@@ -601,19 +919,11 @@ export class TuiController {
           operation,
         ]),
       ),
-      ...((state.view === "trash" ? state.returnBrowse : undefined) ===
-      undefined
-        ? {
-            returnBrowse: {
-              inventory: state.inventory,
-              model: state.model,
-              view: "inventory" as const,
-              ...(state.operations === undefined
-                ? {}
-                : { operations: state.operations }),
-            },
-          }
-        : { returnBrowse: state.returnBrowse! }),
+      disabledEntries: state.disabledEntries ?? [],
+      viewSnapshots: {
+        ...(state.viewSnapshots ?? {}),
+        [state.view ?? "inventory"]: viewSnapshot(state),
+      },
     };
   }
 
@@ -724,7 +1034,39 @@ function browseSnapshot(state: TuiBrowseState): TuiBrowseSnapshot {
     model: state.model,
     ...(state.view === undefined ? {} : { view: state.view }),
     ...(state.operations === undefined ? {} : { operations: state.operations }),
+    ...(state.disabledEntries === undefined
+      ? {}
+      : { disabledEntries: state.disabledEntries }),
+    ...(state.viewSnapshots === undefined
+      ? {}
+      : { viewSnapshots: state.viewSnapshots }),
   };
+}
+
+function viewSnapshot(state: TuiBrowseState): TuiViewSnapshot {
+  return {
+    inventory: state.inventory,
+    model: state.model,
+    ...(state.view === undefined ? {} : { view: state.view }),
+    ...(state.operations === undefined ? {} : { operations: state.operations }),
+    ...(state.disabledEntries === undefined
+      ? {}
+      : { disabledEntries: state.disabledEntries }),
+  };
+}
+
+function preserveBrowseModel(
+  old: TuiBrowseState["model"],
+  sections: TuiBrowseState["model"]["sections"],
+): TuiBrowseState["model"] {
+  const keys = new Set(
+    sections.flatMap((section) => section.entries.map((entry) => entry.key)),
+  );
+  const selected = new Set([...old.selected].filter((key) => keys.has(key)));
+  return reduceBrowse(
+    { ...old, sections, selected, notice: null },
+    { kind: "viewport", viewport: old.viewport },
+  );
 }
 
 async function previewOperationRestore(
@@ -747,19 +1089,22 @@ function resizeState(
     | TuiSearchState
     | TuiPlanState
     | TuiExecutingState
-    | TuiReportState,
+    | TuiReportState
+    | TuiAvailabilityPlanState
+    | TuiAvailabilityReportState
+    | import("./types.js").TuiAvailabilityExecutingState,
   viewport: TuiBrowseState["model"]["viewport"],
 ):
   | TuiBrowseState
   | TuiSearchState
   | TuiPlanState
   | TuiExecutingState
-  | TuiReportState {
+  | TuiReportState
+  | TuiAvailabilityPlanState
+  | TuiAvailabilityReportState
+  | import("./types.js").TuiAvailabilityExecutingState {
   if (state.screen === "browse")
-    return {
-      ...state,
-      model: reduceBrowse(state.model, { kind: "viewport", viewport }),
-    };
+    return { screen: "browse", ...resizeBrowse(state, viewport) };
   if (state.screen === "search")
     return {
       ...state,
@@ -779,6 +1124,28 @@ function resizeState(
       ),
     };
   }
+  if (state.screen === "availability-report") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        availabilityReportScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
+  if (state.screen === "availability-plan") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        availabilityPlanScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
+  if (state.screen === "availability-executing")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   return {
@@ -792,6 +1159,20 @@ function resizeState(
             browse: resizeBrowse(state.returnReport.browse, viewport),
           },
   };
+}
+
+export function availabilityApprovalGrants(
+  availabilityPlan: AvailabilityPlan,
+): readonly ApprovalRequirement[] {
+  return availabilityPlan.actions
+    .flatMap((action) => action.approvals)
+    .filter(
+      (approval, index, approvals) =>
+        approvals.findIndex(
+          (candidate) =>
+            stringifyModel(candidate, 0) === stringifyModel(approval, 0),
+        ) === index,
+    );
 }
 
 function searchCommand(action: TuiAction) {
@@ -830,6 +1211,24 @@ function resizeBrowse(
   return {
     ...browse,
     model: reduceBrowse(browse.model, { kind: "viewport", viewport }),
+    ...(browse.viewSnapshots === undefined
+      ? {}
+      : {
+          viewSnapshots: Object.fromEntries(
+            Object.entries(browse.viewSnapshots).map(([view, snapshot]) => [
+              view,
+              snapshot === undefined
+                ? snapshot
+                : {
+                    ...snapshot,
+                    model: reduceBrowse(snapshot.model, {
+                      kind: "viewport",
+                      viewport,
+                    }),
+                  },
+            ]),
+          ),
+        }),
   };
 }
 

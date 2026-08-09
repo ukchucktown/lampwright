@@ -18,6 +18,13 @@ import type {
   RestoreOperationPreview,
   RestoreOperationResult,
 } from "../quarantine/types.js";
+import type {
+  AvailabilityIntent,
+  AvailabilityPlan,
+  AvailabilityReport,
+  AvailabilityTarget,
+} from "../availability/types.js";
+import type { DisabledEntry } from "../disabled-storage/types.js";
 
 export interface TuiDependencies {
   readonly scan: () => Promise<Inventory>;
@@ -31,6 +38,17 @@ export interface TuiDependencies {
   ) => Promise<ExecutionReport>;
   /** Optional to preserve embedding hosts that only provide Inventory. */
   readonly quarantine?: QuarantineModule;
+  /** Availability values are optional for source compatibility with embedders. */
+  readonly listDisabled?: () => Promise<readonly DisabledEntry[]>;
+  readonly planAvailability?: (
+    inventory: Inventory,
+    disabledEntries: readonly DisabledEntry[],
+    intent: AvailabilityIntent,
+  ) => AvailabilityPlan;
+  readonly executeAvailability?: (
+    plan: AvailabilityPlan,
+    approvals: readonly ApprovalRequirement[],
+  ) => Promise<AvailabilityReport>;
   /** Injected for deterministic retention display and expiry classification. */
   readonly now?: () => Date;
 }
@@ -70,6 +88,10 @@ export interface TuiEntry {
   /** Supplemental row context, such as protection or a Plugin's harness. */
   readonly note: string | null;
   readonly target: RemovalTarget | null;
+  /** Targets used only by the Disabled/Availability workflow. */
+  readonly availabilityTargets?: readonly AvailabilityTarget[];
+  /** Overrides target-based selectability for non-removal projections. */
+  readonly selectable?: boolean;
 }
 
 export interface TuiSection {
@@ -140,11 +162,19 @@ export interface TuiVisibleRow extends TuiRow {
   readonly expanded: boolean;
 }
 
-export interface TuiBrowseSnapshot {
+export type TuiBrowseView = "inventory" | "disabled" | "trash";
+
+export interface TuiViewSnapshot {
   readonly inventory: Inventory;
   readonly model: TuiBrowseModel;
-  readonly view?: "inventory" | "trash";
+  readonly view?: TuiBrowseView;
   readonly operations?: ReadonlyMap<string, QuarantineOperation>;
+  readonly disabledEntries?: readonly DisabledEntry[];
+}
+
+export interface TuiBrowseSnapshot extends TuiViewSnapshot {
+  /** Independent browse state for peer tabs; values never contain snapshots. */
+  readonly viewSnapshots?: Partial<Record<TuiBrowseView, TuiViewSnapshot>>;
 }
 
 export interface TuiLoadingState {
@@ -247,6 +277,31 @@ export interface TuiReportState {
   readonly scrollOffset: number;
 }
 
+export interface TuiAvailabilityPlanState {
+  readonly screen: "availability-plan";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: AvailabilityPlan;
+  readonly label: string;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+}
+
+export interface TuiAvailabilityExecutingState {
+  readonly screen: "availability-executing";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: AvailabilityPlan;
+  readonly label: string;
+}
+
+export interface TuiAvailabilityReportState {
+  readonly screen: "availability-report";
+  readonly browse: TuiBrowseSnapshot;
+  readonly report: AvailabilityReport;
+  readonly label: string;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+}
+
 export interface TuiErrorState {
   readonly screen: "error";
   readonly message: string;
@@ -254,7 +309,7 @@ export interface TuiErrorState {
 
 export interface TuiDoneState {
   readonly screen: "done";
-  readonly report: ExecutionReport | null;
+  readonly report: ExecutionReport | AvailabilityReport | null;
 }
 
 export type TuiState =
@@ -264,6 +319,9 @@ export type TuiState =
   | TuiPlanState
   | TuiExecutingState
   | TuiReportState
+  | TuiAvailabilityPlanState
+  | TuiAvailabilityExecutingState
+  | TuiAvailabilityReportState
   | TuiTrashReviewState
   | TuiTrashExecutingState
   | TuiTrashReportState
@@ -310,14 +368,22 @@ export type TuiAction =
   | { readonly kind: "force" }
   | { readonly kind: "fallback" }
   | { readonly kind: "select-fallback"; readonly delta: number }
-  | { readonly kind: "switch-view"; readonly view: "inventory" | "trash" }
+  | { readonly kind: "switch-view"; readonly view: TuiBrowseView }
+  | { readonly kind: "disable-review" }
+  | { readonly kind: "enable-review" }
   | { readonly kind: "restore-review" }
   | { readonly kind: "purge-review" }
   | { readonly kind: "quit" };
 
 export type TuiOutcome =
-  | { readonly status: "completed"; readonly report: ExecutionReport }
-  | { readonly status: "cancelled"; readonly report: ExecutionReport | null }
+  | {
+      readonly status: "completed";
+      readonly report: ExecutionReport | AvailabilityReport;
+    }
+  | {
+      readonly status: "cancelled";
+      readonly report: ExecutionReport | AvailabilityReport | null;
+    }
   | { readonly status: "failed"; readonly message: string };
 
 export interface TuiTerminal {

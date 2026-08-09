@@ -150,7 +150,7 @@ describe("Trash projection", () => {
       },
       plainTuiTheme,
     );
-    expect(trashFrame).toContain("Inventory | Trash (1)");
+    expect(trashFrame).toContain("Inventory | Disabled (0) | Trash (1)");
     expect(trashFrame).toContain("enter/dbl-click restore");
     expect(trashFrame).toContain("p purge");
     expect(trashFrame).toContain("esc Inventory");
@@ -229,7 +229,7 @@ describe("Trash projection", () => {
     expect(
       mouseAction(
         { screen: "browse", ...browse },
-        { button: 0, column: 27, row: 1, pressed: true },
+        { button: 0, column: 42, row: 1, pressed: true },
         { dragging: false, doubleClick: false },
       ),
     ).toEqual({ kind: "switch-view", view: "trash" });
@@ -289,7 +289,12 @@ describe("Trash projection", () => {
     if (controller.state.screen !== "browse")
       throw new Error("expected inventory");
     expect(controller.state.view).toBe("inventory");
-    expect(controller.state).toEqual(original);
+    if (controller.state.screen !== "browse")
+      throw new Error("expected browse");
+    if (original.screen !== "browse")
+      throw new Error("expected original browse");
+    expect(controller.state.model).toEqual(original.model);
+    expect(controller.state.inventory).toEqual(original.inventory);
   });
 
   it("keeps a blocked restore review non-mutating when y is pressed", async () => {
@@ -391,7 +396,12 @@ describe("Trash projection", () => {
     ).toContain("Restored with concerns");
     await controller.dispatch({ kind: "cancel" });
     await controller.dispatch({ kind: "cancel" });
-    expect(controller.state).toEqual(original);
+    if (controller.state.screen !== "browse")
+      throw new Error("expected browse");
+    if (original.screen !== "browse")
+      throw new Error("expected original browse");
+    expect(controller.state.model).toEqual(original.model);
+    expect(controller.state.inventory).toEqual(original.inventory);
   });
 
   it("keeps the current position and selection when clicking the active tab", async () => {

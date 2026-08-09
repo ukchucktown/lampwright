@@ -912,6 +912,7 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.length === 0) {
     const quarantine = createQuarantineModule();
+    const disabledStorage = createProductionDisabledStorage();
     const outcome = await runTui(
       {
         scan: async () => (await scanWithContext([], [], {})).inventory,
@@ -919,6 +920,17 @@ async function main(): Promise<void> {
         execute: (removalPlan, approvals) =>
           productionExecute(removalPlan, [], [], [], approvals),
         quarantine,
+        listDisabled: () => disabledStorage.list(),
+        planAvailability,
+        executeAvailability: (availabilityPlan, approvals) =>
+          productionExecuteAvailability(
+            availabilityPlan,
+            [],
+            [],
+            [],
+            approvals,
+            disabledStorage,
+          ),
       },
       createNodeTuiTerminal(),
     );
