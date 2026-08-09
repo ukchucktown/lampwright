@@ -62,6 +62,7 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
 - [Release readiness](./docs/release.md)
+- [Product ideas](./docs/ideas.md) — unapproved directions under consideration
 - [Architectural decisions](./docs/adr/)
 - [Contributing](./CONTRIBUTING.md) and [security policy](./SECURITY.md)
 
