@@ -106,3 +106,44 @@ content-addressed file per exact runner/package/version/Adapter-hash tuple.
 execution, Git inspection, audit writing, package trust, clock, and concurrency
 behind injected seams. Tests can therefore prove scheduling and safety without
 touching real installations or invoking real managers.
+
+## Availability execution
+
+The same module exposes reviewed reversible changes:
+
+```ts
+const report = await execution.executeAvailability(plan, { grants });
+```
+
+Availability Execution performs a fresh Inventory scan, lists Disabled
+Storage, and calls the injected pure Availability planner before using an
+approval or opening a mutation path. It compares the complete semantic plan,
+excluding only `createdAt`; stale or caller-modified plans return `blocked`
+without configuration, Disabled Storage, or audit writes.
+
+For native controls, Execution verifies the exact regular, single-link file
+preimage and immediately rechecks Git protection. It applies every grouped
+selector mutation to one in-memory postimage and commits the document once.
+Codex TOML receives an exact-path `skills.config` rule; Claude JSON changes the
+exact `skillOverrides` member; Gemini JSONC changes exact membership in
+`skills.disabled`. Existing comments and unrelated values are retained.
+Existing line-ending style is retained, including CRLF Codex TOML documents.
+Malformed or duplicate-key documents, links, hard links, occupied missing-file
+paths, changed hashes, and replacement races fail closed. Suspended Disable and
+Enable call only the Disabled Storage module; Execution never moves those
+payloads itself.
+
+Actions run only after their `dependsOn` actions succeed or remain unchanged.
+A failed branch blocks its dependents while independent branches continue.
+Afterward, Execution rescans Inventory, relists Disabled Storage, and evaluates
+every planned Harness Exposure and entry check. A multi-exposure target is
+successful only if every check passes. Version-1 reports retain plan and
+Inventory IDs, timestamps, final-scan errors, per-action results, per-target
+`disabled | enabled | unchanged | partial | failed | blocked` status, and
+per-check results; top-level status is `succeeded | partial | failed |
+blocked`.
+
+Availability audit records contain the approved plan, exact grants, and full
+report. They are written lazily only when a native commit or Disabled Storage
+operation is actually attempted. Freshness rejection, missing approval, and a
+live protection failure therefore create no local state.

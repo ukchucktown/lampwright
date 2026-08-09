@@ -10,11 +10,21 @@ import type {
   RemovalPlanIntent,
 } from "../model/types.js";
 import type { QuarantineModule } from "../quarantine/types.js";
+import type { DisabledStorageModule } from "../disabled-storage/types.js";
+import type {
+  AvailabilityIntent,
+  AvailabilityPlan,
+  AvailabilityReport,
+} from "../availability/types.js";
 
 export type Approvals = ExecutionApprovals;
 
 export interface ExecutionModule {
   execute(plan: RemovalPlan, approvals: Approvals): Promise<ExecutionReport>;
+  executeAvailability(
+    plan: AvailabilityPlan,
+    approvals: Approvals,
+  ): Promise<AvailabilityReport>;
 }
 
 export interface ExecutionProcessRequest {
@@ -49,6 +59,17 @@ export interface ExecutionAuditWriter {
   write(record: ExecutionAuditRecord): Promise<void>;
 }
 
+export interface AvailabilityExecutionAuditRecord {
+  readonly schemaVersion: 1;
+  readonly plan: AvailabilityPlan;
+  readonly approvals: ExecutionApprovals;
+  readonly report: AvailabilityReport;
+}
+
+export interface AvailabilityExecutionAuditWriter {
+  write(record: AvailabilityExecutionAuditRecord): Promise<void>;
+}
+
 export type PackageTrustDecision = Omit<
   Extract<ApprovalRequirement, { kind: "package-trust" }>,
   "kind"
@@ -73,6 +94,13 @@ export interface ExecutionModuleOptions {
   readonly now: () => Date;
   readonly stateRoot: string;
   readonly maxConcurrency?: number;
+  readonly disabledStorage?: DisabledStorageModule;
+  readonly replanAvailability?: (
+    inventory: Inventory,
+    disabledEntries: Awaited<ReturnType<DisabledStorageModule["list"]>>,
+    intent: AvailabilityIntent,
+  ) => AvailabilityPlan;
+  readonly availabilityAuditWriter?: AvailabilityExecutionAuditWriter;
 }
 
 export type ExecutionErrorCode =

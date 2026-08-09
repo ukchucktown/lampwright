@@ -167,7 +167,7 @@ const filesystemProtectionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("read-only"), reason: nonEmptyString }),
 ]);
 
-const protectionStatusSchema = z.strictObject({
+export const protectionStatusSchema = z.strictObject({
   git: gitProtectionSchema,
   system: systemProtectionSchema,
   filesystem: filesystemProtectionSchema,
@@ -226,7 +226,7 @@ const dependencySourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("adapter"), adapterId: nonEmptyString }),
 ]);
 
-const hardDependencySchema = z.strictObject({
+export const hardDependencySchema = z.strictObject({
   kind: z.literal("hard"),
   dependentInstallationId: modelId,
   target: removalTargetSchema,
@@ -234,7 +234,7 @@ const hardDependencySchema = z.strictObject({
   reason: nonEmptyString,
 });
 
-const softReferenceSchema = z.strictObject({
+export const softReferenceSchema = z.strictObject({
   kind: z.literal("soft"),
   referringRecord: inventoryRecordReferenceSchema,
   target: removalTargetSchema,
@@ -303,7 +303,7 @@ const managedRemovalInvocationSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const sha256DigestSchema = z.strictObject({
+export const sha256DigestSchema = z.strictObject({
   algorithm: z.literal("sha256"),
   digest: z.string().regex(/^[a-f\d]{64}$/i, "expected a SHA-256 digest"),
 });

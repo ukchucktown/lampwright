@@ -75,7 +75,7 @@ const restoration = z.strictObject({
   modifiedAt: timestamp.nullable(),
 });
 
-const requestSchema = z
+export const suspendRequestSchema = z
   .strictObject({
     location,
     skillIdentity: identity,
@@ -95,7 +95,7 @@ const requestSchema = z
     validateExposures(value.harnessExposures, context);
   });
 
-const entrySchema = z
+export const disabledEntrySchema = z
   .strictObject({
     schemaVersion: z.literal(1),
     id: identifier,
@@ -156,7 +156,7 @@ function parse<T>(schema: z.ZodType<T>, value: unknown, label: string): T {
 
 export function parseSuspendRequest(value: unknown): SuspendRequest {
   return parse(
-    requestSchema,
+    suspendRequestSchema,
     value,
     "invalid disabled-storage suspend request",
   ) as unknown as SuspendRequest;
@@ -164,7 +164,7 @@ export function parseSuspendRequest(value: unknown): SuspendRequest {
 
 export function parseDisabledEntry(value: unknown): DisabledEntry {
   return parse(
-    entrySchema,
+    disabledEntrySchema,
     value,
     "invalid disabled-storage manifest",
   ) as unknown as DisabledEntry;

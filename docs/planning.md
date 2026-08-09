@@ -6,6 +6,16 @@ The Planning module exposes one side-effect-free interface:
 plan(inventory: Inventory, intent: RemovalIntent): RemovalPlan
 ```
 
+It also exposes the reversible Availability planner:
+
+```ts
+planAvailability(
+  inventory: Inventory,
+  disabledEntries: readonly DisabledEntry[],
+  intent: AvailabilityIntent,
+): AvailabilityPlan
+```
+
 `RemovalIntent` either selects explicit Installation, Logical Skill, or Plugin
 boundary targets, or requests remove-all. Ordinary remove-all includes Plugin
 children only when their boundary declares them independently selectable. It
@@ -139,6 +149,51 @@ intra-component back-edges are omitted because the lexical chain replaces them;
 all external component edges remain. Every affected action requires dependency
 force.
 Soft References are warnings only.
+
+## Availability planning
+
+`AvailabilityIntent` selects one or more Installation, Logical Skill, or
+declared Installation Group targets and requests `disable` or `enable`.
+Planning is pure: both live Inventory and the current Disabled Storage entries
+are explicit immutable inputs. Target containment is normalized before the
+plan is identified; partially overlapping boundaries are rejected.
+
+Every represented Harness Exposure must reach the requested state. Planning
+prefers its materialized native control. If any exposure lacks native control,
+Disable instead emits exactly one whole-Installation `suspended-disable`
+action, but only for a complete, active, independently filesystem-owned
+Installation. Enable may emit native actions for live disabled exposures and
+`suspended-enable` actions for exact Disabled Storage entries. Plugin-owned
+Installations, manager-owned suspension fallback, System Skills, unresolved
+exposures, name collisions across Skill Identities, unsafe configuration,
+Git-protected paths, and read-only paths are absolute blocks.
+Name collision checks include every Installation exposed to that harness,
+regardless of its control kind, plus harness-owned System Skill findings.
+
+Disabled Storage paths are exclusive claims. Disable is blocked while a
+matching entry exists. Enable is blocked if a selected entry's original
+mutation or canonical physical path is occupied by a live Installation, if
+another entry claims that path, or if only part of a multi-Installation entry
+was selected. `force` cannot override these conflicts.
+
+Native mutations sharing one configuration document are one atomic
+`native-control` action. The action retains every target, affected
+Installation, Harness Exposure effect, exact document scope and format,
+existence, SHA-256 preimage, protection evidence, and requested selector
+mutation. This prevents a batch from reusing one stale preimage for several
+separate actions. Hard Dependencies block when an installed dependent is
+outside the selection. `force` adds an exact dependency approval and changes
+ordering only; it never bypasses an absolute block. Selected Disable actions
+run dependents before prerequisites, while Enable reverses that order. Soft
+References remain warnings.
+
+The version-1 `AvailabilityPlan` schema contains `id`, `inventoryId`,
+`createdAt`, normalized `intent` and `targets`, sorted `disabledEntryIds`,
+`actions`, `blocks`, `warnings`, and `verificationChecks`. Actions are the
+closed union `native-control | suspended-disable | suspended-enable`; checks
+are `harness-exposure-state | disabled-entry-state`. All intent, plan, action,
+check, and report values have exported TypeScript types and Zod parsers through
+the Availability module.
 
 Git-protected paths, System Skill protection, read-only filesystem evidence,
 Plugin boundary restrictions, unavailable required Owner operations, and
