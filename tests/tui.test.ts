@@ -1058,16 +1058,18 @@ describe("terminal pane navigation", () => {
     model = reduceBrowse(model, { kind: "focus", pane: "detail" });
     model = reduceBrowse(model, { kind: "move", delta: 2 });
 
-    const rendered = renderBrowseLines(
-      { screen: "browse", inventory, model },
-      plainTuiTheme,
-    ).join("\n");
+    const state: TuiState = { screen: "browse", inventory, model };
+    const rendered = renderBrowseLines(state, plainTuiTheme).join("\n");
+    const theme = createNightfallTheme("truecolor");
+    const colored = renderBrowseLines(state, theme).join("\n");
 
     expect(rendered).toContain("/detail/path-1");
     expect(rendered).toContain("/detail/path-6");
     expect(rendered).not.toContain("/detail/path-7");
     expect(rendered).toContain("detail=3-8/12");
-    expect(rendered).toContain("█");
+    expect(rendered).toContain("▕");
+    expect(rendered).not.toContain("█");
+    expect(colored).toContain(styleTui(theme, "path", "▕"));
   });
 
   it("keeps the detail pane read-only and backs out to entries", async () => {

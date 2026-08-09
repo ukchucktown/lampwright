@@ -73,10 +73,11 @@ results/preview split and shows the active regular expression in the theme's
 active-input color. Match status follows the panes, so typed input cannot be
 mistaken for header status or help text.
 
-When detail content overflows, its right edge draws a scrollbar and the status
-row reports the visible range. Moving to another entry resets detail scrolling
-to the top. Resizing the window or detail pane clamps the range to the content,
-so an old offset can never leave the pane blank.
+When detail content overflows, its right edge draws a thin, non-bold cyan
+scrollbar over the muted border track and the status row reports the visible
+range. Moving to another entry resets detail scrolling to the top. Resizing the
+window or detail pane clamps the range to the content, so an old offset can
+never leave the pane blank.
 
 Two rules keep the frame still, and both are covered by tests. Every line is
 clipped one column short of the terminal width, because writing into the last
