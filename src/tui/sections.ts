@@ -49,8 +49,17 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     };
   };
 
-  const skills = inventory.logicalSkills.filter(
+  const visibleInstallation = (item: Installation): boolean =>
+    item.harnessExposures.length === 0 ||
+    item.harnessExposures.some((exposure) => exposure.status !== "disabled");
+  const ordinarySkills = inventory.logicalSkills.filter(
     (logical) => !logical.installationIds.some((id) => pluginOwned.has(id)),
+  );
+  const skills = ordinarySkills.filter((logical) =>
+    logical.installationIds
+      .map((id) => installations.get(id))
+      .filter((item): item is Installation => item !== undefined)
+      .some(visibleInstallation),
   );
   // An Installation with no strong identity evidence belongs to no Logical
   // Skill. Listing only Logical Skills would make it invisible, so it stands
@@ -59,7 +68,12 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     inventory.logicalSkills.flatMap((logical) => logical.installationIds),
   );
   const loneEntries = inventory.installations
-    .filter((item) => !covered.has(item.id) && !pluginOwned.has(item.id))
+    .filter(
+      (item) =>
+        !covered.has(item.id) &&
+        !pluginOwned.has(item.id) &&
+        visibleInstallation(item),
+    )
     .map((item): TuiEntry => ({
       key: `installation:${item.id}`,
       name: item.skill.name,
@@ -81,13 +95,21 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     (left, right) => memberCount(right, skills) - memberCount(left, skills),
   )) {
     const members = skills.filter((logical) => logical.groupId === group.id);
+    const allMembers = ordinarySkills.filter(
+      (logical) => logical.groupId === group.id,
+    );
     if (members.length === 0) continue;
     sections.push({
       key: `group:${group.id}`,
       label: group.label,
       detail: `${evidenceLabel(group)} · ${group.scope.kind}`,
       selectable: true,
-      target: { kind: "source-group", groupId: group.id },
+      // A hidden fully disabled member must not ride along in a Removal Group
+      // target merely because every visible row was selected.
+      target:
+        members.length === allMembers.length
+          ? { kind: "source-group", groupId: group.id }
+          : null,
       entries: sorted(members.map(entryFor)),
     });
   }
@@ -177,7 +199,36 @@ function entryNote(
   logical: LogicalSkill | null,
   members: readonly Installation[],
 ): string | null {
-  if (logical?.spansGroups === true) return "spans groups";
+  const notes: string[] = [];
+  if (logical?.spansGroups === true) notes.push("spans groups");
+  const exposures = members.flatMap((item) => item.harnessExposures);
+  const disabled = [
+    ...new Set(
+      exposures
+        .filter((exposure) => exposure.status === "disabled")
+        .map((exposure) => exposure.harnessId),
+    ),
+  ].sort(compare);
+  const enabled = [
+    ...new Set(
+      exposures
+        .filter((exposure) => exposure.status === "enabled")
+        .map((exposure) => exposure.harnessId),
+    ),
+  ].sort(compare);
+  const unresolved = [
+    ...new Set(
+      exposures
+        .filter((exposure) => exposure.status === "unresolved")
+        .map((exposure) => exposure.harnessId),
+    ),
+  ].sort(compare);
+  if (disabled.length > 0 && enabled.length + unresolved.length > 0) {
+    notes.push(`disabled in ${disabled.join(", ")}`);
+    if (enabled.length > 0) notes.push(`enabled in ${enabled.join(", ")}`);
+    if (unresolved.length > 0)
+      notes.push(`unresolved in ${unresolved.join(", ")}`);
+  }
   if (
     members.some(
       (item) =>
@@ -186,9 +237,9 @@ function entryNote(
         item.protection.filesystem.kind === "read-only",
     )
   )
-    return "protected";
-  if (members.some((item) => item.status === "broken")) return "broken";
-  return null;
+    notes.push("protected");
+  if (members.some((item) => item.status === "broken")) notes.push("broken");
+  return notes.length === 0 ? null : notes.join(" · ");
 }
 
 function ownerLabel(members: readonly Installation[]): string {

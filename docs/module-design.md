@@ -30,10 +30,17 @@ The module owns:
   resolved direct or ephemeral-package invocations, protected managed effects,
   concrete verification checks, exact declarative record cleanup, and physical
   Plugin boundaries from compiled Adapters
+- Materialization of per-harness availability status, safe native enablement
+  controls, exact configuration evidence, and availability verification
 - Semantic Inventory fingerprinting over normalized evidence, excluding scan
   time
 
 The returned Inventory is immutable and disposable. Tests exercise the module through `scan` against temporary filesystem fixtures and fake command execution.
+
+The normalized Harness Exposure and native evidence contract is defined in
+[Native Skill availability controls](./availability-controls.md). Status and
+control support are independent; malformed or ambiguous configuration is
+unresolved rather than silently treated as an enabled default.
 
 ## Planning module
 
@@ -41,6 +48,11 @@ Interface:
 
 ```ts
 plan(inventory: Inventory, intent: RemovalIntent): RemovalPlan
+planAvailability(
+  inventory: Inventory,
+  disabledEntries: readonly DisabledEntry[],
+  intent: AvailabilityIntent,
+): AvailabilityPlan
 ```
 
 This is an in-process module with no side effects. It owns:
@@ -53,6 +65,8 @@ This is an in-process module with no side effects. It owns:
 - Confirmation and package-trust requirements
 - Verification expectations
 - Normalized intent materialization for fresh-scan/replan validation
+- Harness Exposure expansion, Native Disable selection, Suspended Disable
+  eligibility, name-control ambiguity, and enablement ordering
 
 Planning consumes only materialized Inventory evidence. It does not load or
 interpret Adapter catalogs and does not probe the live machine. This preserves
@@ -72,6 +86,10 @@ Interface:
 ```ts
 const execution = createExecutionModule(options)
 execution.execute(plan: RemovalPlan, approvals: Approvals): Promise<ExecutionReport>
+execution.executeAvailability(
+  plan: AvailabilityPlan,
+  approvals: Approvals,
+): Promise<AvailabilityReport>
 ```
 
 The module owns:
@@ -84,6 +102,8 @@ The module owns:
 - Dependency-aware continuation
 - Final rescans and verification
 - Audit reporting
+- Exact native availability configuration mutation and verification
+- Suspended Disable and Enable through the Disabled Storage module
 
 `ExecutionModuleOptions` injects a fresh Inventory scan closure, pure replanner,
 Quarantine module, structured process runner, live Git inspector, package-trust
@@ -112,6 +132,35 @@ are written lazily. See [Execution](./execution.md) and
 [ADR 0005](./adr/0005-treat-owner-processes-as-declared-mutation-boundaries.md).
 
 The external interface does not expose process spawning or filesystem primitives. Those are internal seams with production and test adapters.
+
+Availability execution uses the same freshness, protection, exact-preimage,
+dependency, audit, rescan, and typed-report rules as removal. It does not turn a
+name match into identity authority, construct a harness command in the
+presentation layer, or move a fallback artifact outside Disabled Storage.
+
+## Disabled Storage module
+
+Interface:
+
+```ts
+list(): Promise<readonly DisabledEntry[]>
+suspend(request: SuspendRequest): Promise<SuspendResult>
+previewEnable(entry: DisabledEntry): Promise<EnablePreview>
+enable(entry: DisabledEntry): Promise<EnableResult>
+```
+
+The module owns operating-system state paths, atomic no-clobber displacement,
+manifests, integrity, collision and Git-protection checks, transaction recovery,
+and exact restoration metadata for Suspended Disable. One request may authorize
+one artifact or a complete nonempty artifact set; callers never sequence path
+moves themselves. Version 2 entries preserve that set as one Disabled operation,
+while version 1 single-artifact entries remain readable and enableable. Entries
+never expire and the interface intentionally exposes no purge operation.
+`list()` and previews create no state. Native disabled state remains in
+Inventory and is never duplicated into Disabled Storage.
+
+See [Disabled Storage](./disabled-storage.md) for the versioned manifest and
+failure behavior.
 
 ## Quarantine module
 
@@ -179,6 +228,7 @@ The terminal UI and CLI format Inventory, RemovalPlan, and ExecutionReport value
 - Infer ownership or identity
 - Invoke managers
 - Delete, quarantine, or restore files
+- Edit harness availability settings or manipulate Disabled Storage directly
 - Reimplement dependency or protection rules
 
 This keeps interactive and automated behavior equivalent and allows both presentation modules to be built in parallel after the core value types stabilize.

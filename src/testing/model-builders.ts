@@ -16,6 +16,7 @@ import type {
   NonInstallationFinding,
   PluginBoundary,
   RemovalPlan,
+  SuspensionEvidence,
 } from "../model/types.js";
 
 export type FixtureValue<T> =
@@ -42,7 +43,7 @@ export type ExecutionReportFixtureOverrides = FixtureOverrides<ExecutionReport>;
 export function buildInstallation(
   overrides: InstallationFixtureOverrides = {},
 ): Installation {
-  return parseInstallation({
+  const value = {
     id: "installation-1",
     classification: "active-installation",
     status: "active",
@@ -66,6 +67,32 @@ export function buildInstallation(
     pluginBoundaryId: null,
     agentId: "fixture-agent",
     exposedTo: ["fixture-agent"],
+    harnessExposures: [
+      {
+        harnessId: "fixture-agent",
+        status: "enabled",
+        control: { kind: "unsupported", reason: "fixture harness" },
+      },
+    ],
+    suspension: {
+      kind: "available",
+      artifacts: [
+        {
+          location: {
+            path: "/fixtures/skills/example-skill",
+            canonicalPath: "/fixtures/skills/example-skill",
+            artifactType: { kind: "directory" },
+          },
+          protection: {
+            git: { kind: "outside-worktree" },
+            system: { kind: "none" },
+            filesystem: { kind: "writable" },
+          },
+        },
+      ],
+      managerRecord: "not-applicable",
+      managerMayRecreate: false,
+    } as SuspensionEvidence,
     scope: { kind: "user" },
     location: {
       path: "/fixtures/skills/example-skill",
@@ -91,7 +118,34 @@ export function buildInstallation(
     tags: [],
     metadata: {},
     ...overrides,
-  });
+  };
+  if (overrides.harnessExposures === undefined) {
+    value.harnessExposures = [...new Set(value.exposedTo)]
+      .sort()
+      .map((harnessId) => ({
+        harnessId,
+        status: "enabled" as const,
+        control: { kind: "unsupported" as const, reason: "fixture harness" },
+      }));
+  }
+  if (overrides.suspension === undefined) {
+    value.suspension = (
+      value.ownership.kind === "filesystem"
+        ? {
+            kind: "available" as const,
+            artifacts: [
+              { location: value.location, protection: value.protection },
+            ],
+            managerRecord: "not-applicable" as const,
+            managerMayRecreate: false,
+          }
+        : {
+            kind: "unavailable" as const,
+            reason: "fixture ownership has no declared suspension authority",
+          }
+    ) as SuspensionEvidence;
+  }
+  return parseInstallation(value);
 }
 
 export function buildSystemSkillFinding(

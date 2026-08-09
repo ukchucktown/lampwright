@@ -10,7 +10,7 @@ import {
   removalPlanSchema,
 } from "./schemas.js";
 import { stringifyModel } from "./json.js";
-import { artifactPathKey, physicalPathKey } from "./paths.js";
+import { artifactPathKey, locationContains, physicalPathKey } from "./paths.js";
 import type {
   ApprovalRequirement,
   ExecutionReport,
@@ -189,6 +189,85 @@ function validateInstallation(
   issues: MutableIssue[],
 ): void {
   const ownership = installation.ownership;
+  const suspension = installation.suspension;
+
+  if (suspension.kind === "available") {
+    if (ownership.kind !== "filesystem" && ownership.kind !== "manager")
+      addIssue(
+        issues,
+        [...path, "suspension"],
+        "only filesystem or explicitly supported Manager ownership may authorize suspension",
+      );
+    if (
+      ownership.kind === "filesystem" &&
+      (suspension.managerRecord !== "not-applicable" ||
+        suspension.managerMayRecreate)
+    )
+      addIssue(
+        issues,
+        [...path, "suspension"],
+        "filesystem suspension cannot claim Manager preservation or recreation risk",
+      );
+    if (
+      ownership.kind === "manager" &&
+      (suspension.managerRecord !== "preserved" ||
+        !suspension.managerMayRecreate)
+    )
+      addIssue(
+        issues,
+        [...path, "suspension"],
+        "Manager suspension must preserve its record and disclose recreation risk",
+      );
+    const expected = [
+      { location: installation.location, protection: installation.protection },
+      ...(installation.removal.supplementalArtifacts ?? []),
+    ].sort((left, right) =>
+      artifactPathKey(left.location).localeCompare(
+        artifactPathKey(right.location),
+      ),
+    );
+    const artifactKeys = suspension.artifacts.map((artifact) =>
+      artifactPathKey(artifact.location),
+    );
+    if (
+      artifactKeys.some(
+        (key, index) =>
+          index > 0 && artifactKeys[index - 1]!.localeCompare(key) >= 0,
+      )
+    )
+      addIssue(
+        issues,
+        [...path, "suspension", "artifacts"],
+        "available suspension artifacts must be unique and sorted by physical path",
+      );
+    const actual = suspension.artifacts
+      .map((artifact) => ({
+        location: artifact.location,
+        protection: artifact.protection,
+      }))
+      .sort((left, right) =>
+        artifactPathKey(left.location).localeCompare(
+          artifactPathKey(right.location),
+        ),
+      );
+    if (stringifyModel(actual, 0) !== stringifyModel(expected, 0))
+      addIssue(
+        issues,
+        [...path, "suspension", "artifacts"],
+        "available suspension evidence must exactly match primary and supplemental artifacts",
+      );
+    for (let index = 0; index < actual.length; index += 1)
+      for (let other = index + 1; other < actual.length; other += 1) {
+        const left = actual[index]!.location;
+        const right = actual[other]!.location;
+        if (locationContains(left, right) || locationContains(right, left))
+          addIssue(
+            issues,
+            [...path, "suspension", "artifacts", other],
+            "available suspension artifacts must be unique and non-overlapping",
+          );
+      }
+  }
 
   if (
     installation.scope.kind === "agent" &&

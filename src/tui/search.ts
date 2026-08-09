@@ -79,7 +79,8 @@ function projectResults(
       .map((entry) => ({
         entry,
         category: section.label,
-        selectable: section.selectable && entry.target !== null,
+        selectable:
+          section.selectable && (entry.selectable ?? entry.target !== null),
         existing: existing.has(entry.key),
       })),
   );

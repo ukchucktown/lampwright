@@ -201,6 +201,27 @@ describe("Vercel skills adapter", () => {
         }),
       }),
     ]);
+    expect(installation.suspension).toMatchObject({
+      kind: "available",
+      managerRecord: "preserved",
+      managerMayRecreate: true,
+    });
+    if (installation.suspension.kind !== "available")
+      throw new Error("expected complete Vercel suspension evidence");
+    const expectedArtifacts = [
+      { location: installation.location, protection: installation.protection },
+      ...(installation.removal.supplementalArtifacts ?? []),
+    ].sort((left, right) =>
+      left.location.path
+        .toLocaleLowerCase()
+        .localeCompare(right.location.path.toLocaleLowerCase()),
+    );
+    expect(installation.suspension.artifacts).toEqual(expectedArtifacts);
+    expect(
+      installation.suspension.artifacts.map(
+        (artifact) => artifact.location.path,
+      ),
+    ).toEqual(expectedArtifacts.map((artifact) => artifact.location.path));
     expect(installation.removal.managed).toMatchObject({
       availability: { kind: "available" },
       invocation: {
@@ -608,6 +629,10 @@ describe("Vercel skills adapter", () => {
         status: "unresolved",
         skill: { name: "expected-skill", description: null },
         contentHash: null,
+        suspension: expect.objectContaining({
+          kind: "unavailable",
+          reason: expect.any(String),
+        }),
         removal: expect.objectContaining({
           managed: expect.objectContaining({
             availability: expect.objectContaining({ kind: "unavailable" }),

@@ -82,6 +82,22 @@ provenance. It has no automatic push, tag, or release trigger.
 | 10. Stable non-interactive JSON | Schema validation and deterministic snapshots in [`tests/cli.test.ts`](../tests/cli.test.ts). |
 | 11. Final rescan verification | Fresh-plan, rescan-error, and verification branches in [`tests/execution.test.ts`](../tests/execution.test.ts). |
 | 12. Unrelated artifacts untouched | Adapter safety suites and the overlapping dry-run, managed, and fallback snapshots in [`tests/end-to-end.test.ts`](../tests/end-to-end.test.ts). |
+| 13. Native and suspended Disable can be enabled | User and workspace Codex/Claude/Gemini round-trips and generic suspension in [`tests/availability-planning-execution.test.ts`](../tests/availability-planning-execution.test.ts); artifact types and recovery in [`tests/disabled-storage.test.ts`](../tests/disabled-storage.test.ts). |
+
+## Availability evidence matrix
+
+| Availability risk or outcome | Evidence |
+| --- | --- |
+| User and workspace Native round-trip | Codex, Claude Code, and Gemini loops in [`tests/availability-planning-execution.test.ts`](../tests/availability-planning-execution.test.ts), preserving comments, CRLF, unrelated values, and applicable document scope. |
+| Suspended file, directory, link, broken link, and junction | Real temporary filesystem and neutral Windows-junction seam cases in [`tests/disabled-storage.test.ts`](../tests/disabled-storage.test.ts). |
+| Case and cross-volume behavior | Host-sensitive case collision plus verified-copy/no-cross-volume-rename cases in [`tests/disabled-storage.test.ts`](../tests/disabled-storage.test.ts). |
+| Zero-footprint scan, browse, plan, and dry run | Inventory zero-footprint in [`tests/inventory.test.ts`](../tests/inventory.test.ts), Disabled list/preview in [`tests/disabled-storage.test.ts`](../tests/disabled-storage.test.ts), TUI browse/review in [`tests/tui-disabled.test.ts`](../tests/tui-disabled.test.ts), and CLI dry run in [`tests/cli-availability.test.ts`](../tests/cli-availability.test.ts). |
+| Absolute force-resistant protection | Ownership, Plugin/System, Git/configuration protection, reoccupied paths, same-name collisions, and dependency force boundaries in [`tests/availability-planning-execution.test.ts`](../tests/availability-planning-execution.test.ts). |
+| Unrelated settings and owned state | Native round-trips preserve comments and unrelated settings; force-resistant fixtures keep unrelated Skills, Plugin/System identities, Manager ownership, occupied replacements, and protected configuration untouched in [`tests/availability-planning-execution.test.ts`](../tests/availability-planning-execution.test.ts). |
+| Races, stale/forged plans, collisions, integrity | Availability execution and Disabled recovery suites in [`tests/availability-planning-execution.test.ts`](../tests/availability-planning-execution.test.ts) and [`tests/disabled-storage.test.ts`](../tests/disabled-storage.test.ts). |
+| Partial branches and final rescan failure | Independent/dependent action scheduling and typed rescan failure reports in [`tests/availability-planning-execution.test.ts`](../tests/availability-planning-execution.test.ts). |
+| CLI JSON and every TUI state | Schema/envelope/exit-code coverage in [`tests/cli-availability.test.ts`](../tests/cli-availability.test.ts) and Disabled browse/review/execution/report/navigation in [`tests/tui-disabled.test.ts`](../tests/tui-disabled.test.ts). |
+| Public exports, package, schemas, platform matrix | `pack:check`, [`tests/release-readiness.test.ts`](../tests/release-readiness.test.ts), and Node 20/22/24 on Ubuntu/macOS/Windows in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). |
 
 The issue #15 fixture additionally exercises same-name generic, Manager-owned,
 and Plugin-owned Installations; missing Manager/ephemeral acquisition; managed

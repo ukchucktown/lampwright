@@ -15,6 +15,10 @@ export {
 export { createTuiSections, selectionTargets } from "./sections.js";
 export { createTrashSections } from "./trash.js";
 export {
+  createDisabledSections,
+  disabledSelectionTargets,
+} from "./disabled.js";
+export {
   createSearchModel,
   reduceSearch,
   searchError,
@@ -23,7 +27,13 @@ export {
   searchRows,
 } from "./search.js";
 export { approvalGrants, TuiController } from "./controller.js";
-export { browseTabHitboxes, renderTui, renderBrowseLines } from "./render.js";
+export {
+  availabilityPlanScrollMetrics,
+  availabilityReportScrollMetrics,
+  browseTabHitboxes,
+  renderTui,
+  renderBrowseLines,
+} from "./render.js";
 export { runTui } from "./runtime.js";
 export {
   createNightfallTheme,

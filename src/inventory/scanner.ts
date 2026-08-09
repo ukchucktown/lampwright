@@ -43,6 +43,10 @@ import type {
 import { parseInventory } from "../model/validation.js";
 import { hashSkillDirectory } from "./content-hash.js";
 import { applyAdapterManifests } from "./adapter-runtime.js";
+import {
+  createAvailabilityDocumentReader,
+  materializeHarnessExposures,
+} from "./availability.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
   assignGroupsToLogicalSkills,
@@ -282,7 +286,42 @@ async function scanWithOptions(
     adapterRoots.probes,
     adapterRoots.rootIds,
   );
-  const installations = adapterEvidence.installations;
+  const readAvailabilityDocument = createAvailabilityDocumentReader(
+    options.commandRunner,
+  );
+  const installations = await Promise.all(
+    adapterEvidence.installations.map(async (rawInstallation) => {
+      const installation = {
+        ...rawInstallation,
+        exposedTo: [...new Set(rawInstallation.exposedTo)].sort(compareText),
+      };
+      const harnessExposures = await materializeHarnessExposures(
+        installation,
+        options.environment,
+        options.commandRunner,
+        readAvailabilityDocument,
+      );
+      const geminiExposure = harnessExposures.find(
+        (exposure) => exposure.harnessId === "gemini-cli",
+      );
+      return {
+        ...installation,
+        harnessExposures,
+        metadata:
+          geminiExposure === undefined || installation.agentId !== "gemini-cli"
+            ? installation.metadata
+            : {
+                ...installation.metadata,
+                "gemini-cli": {
+                  ...(installation.metadata["gemini-cli"] as object),
+                  // Namespaced convenience metadata mirrors, but never replaces,
+                  // the canonical Harness Exposure authority.
+                  disabled: geminiExposure.status === "disabled",
+                },
+              },
+      };
+    }),
+  );
   const groups = buildInstallationGroups(installations);
   const logicalSkills = assignGroupsToLogicalSkills(
     groupInstallations(installations),
@@ -344,6 +383,10 @@ function blockForInvalidVercelLock(installation: Installation): Installation {
     adapterId: null,
     pluginBoundaryId: null,
     ownership: { kind: "unknown", confidence: "unknown" },
+    suspension: {
+      kind: "unavailable",
+      reason: "the Vercel skills lock is invalid or unsafe to read",
+    },
     removal: {
       managed: null,
       fallback: {
@@ -1120,6 +1163,8 @@ function createInstallation(
     { kind: "user" | "agent" | "workspace" | "plugin" }
   >;
   const plugin = root.kind === "plugin" ? root.plugin : null;
+  const ownership = ownershipForRoot(root);
+  const status = candidate.broken ? "broken" : metadata.status;
   return {
     id: stableId(
       "installation",
@@ -1131,7 +1176,7 @@ function createInstallation(
         : root.kind === "plugin"
           ? "managed-plugin-resource"
           : "active-installation",
-    status: candidate.broken ? "broken" : metadata.status,
+    status,
     skill: metadata.skill,
     identity,
     source: null,
@@ -1142,11 +1187,27 @@ function createInstallation(
       root.kind === "plugin" ? pluginBoundaryIdForRoot(root) : null,
     agentId: root.agentId,
     exposedTo: [root.agentId],
+    harnessExposures: [],
+    suspension:
+      ownership.kind === "filesystem" && status === "active"
+        ? {
+            kind: "available",
+            artifacts: [{ location, protection }],
+            managerRecord: "not-applicable",
+            managerMayRecreate: false,
+          }
+        : {
+            kind: "unavailable",
+            reason:
+              ownership.kind === "filesystem"
+                ? "only a complete active Installation can be suspended"
+                : "this ownership boundary has no declared suspension authority",
+          },
     scope: scopeForInstallationRoot(root),
     location,
     contentHash,
     modifiedAt,
-    ownership: ownershipForRoot(root),
+    ownership,
     protection,
     removal: {
       managed: null,

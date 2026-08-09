@@ -554,6 +554,11 @@ async function materializeSkill(input: {
     pluginBoundaryId: input.boundaryId,
     agentId,
     exposedTo: [agentId],
+    harnessExposures: [],
+    suspension: {
+      kind: "unavailable",
+      reason: "Plugin-owned Skills cannot be suspended independently",
+    },
     scope: { kind: "user" },
     location: input.skill.location,
     contentHash,

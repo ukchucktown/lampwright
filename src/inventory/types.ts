@@ -89,6 +89,8 @@ export interface InventoryScanEnvironment {
   readonly cacheDirectory?: string;
   readonly nodeVersion?: string;
   readonly agentHomeDirectories?: Readonly<Record<string, string>>;
+  /** Durable Gemini folder-trust evidence for this workspace, when available. */
+  readonly geminiWorkspaceTrusted?: boolean | null;
 }
 
 export interface InventoryCommand {

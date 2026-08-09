@@ -223,6 +223,13 @@ primary location is the canonical directory when present, otherwise the first
 exact copy; every other exact link or copy is retained as supplemental removal
 collateral. A lock-only record remains visible with `broken` status, marks its
 expected primary artifact absent, and can use record-only declarative fallback.
+For an active, complete, safe topology, the Vercel adapter also emits available
+top-level suspension evidence containing that primary plus every supplemental
+copy or link in deterministic physical-path order with each artifact's exact
+protection. It states that the Manager record is preserved and that running the
+Manager may recreate displaced paths. Missing, changed, ambiguous, overlapping,
+or otherwise unsafe topology emits unavailable suspension evidence with a
+reason; Planning never reconstructs the set from Vercel metadata.
 Namespaced
 `vercel-skills` metadata records the exact lock key, sanitized name, lock
 format/version, source type, source/plugin fields, agents, install mode, ref,

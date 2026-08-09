@@ -1,15 +1,48 @@
 # Terminal UI
 
 Running `skill-cleaner` with no arguments opens the interactive inventory. The
-terminal UI is a thin presentation layer over Inventory, Planning, and
-Execution: browsing reads an immutable Inventory, selecting a row requests a
-RemovalPlan, and confirming that complete plan passes its exact approval
-requirements to Execution.
+terminal UI is a thin presentation layer over Inventory, Planning, Execution,
+and Disabled Storage. Browsing reads immutable Inventory/Disabled values;
+reviews request complete Removal or Availability Plans; confirmation passes
+their exact approval requirements to Execution.
 
 ## Layout
 
-The header provides `Inventory | Trash (N)`. `ctrl-t` and either header label
-switch views. Trash browsing and previews are read-only presentations backed by
+The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl-t` cycles the
+three views and each header label is clickable. Each view retains its own
+cursor, panes, scrolling, search, and additive selection through search,
+review, report, resize, and tab round-trips.
+Embedding hosts receive the actual final report type: Removal completion returns
+an `ExecutionReport`, while disable/enable completion returns an
+`AvailabilityReport`.
+
+Inventory omits an ordinary Skill only when every Harness Exposure represented
+by its Installation is disabled; partially disabled Skills remain visible.
+Press `d` to review disabling selected Inventory rows. Disabled shows one row
+for every native-disabled Harness Exposure and one row for every Suspended
+Disabled entry, without merging identities. Selecting a native row may enable
+all disabled harnesses for that Installation; the row and review say so.
+Selecting one Suspended row restores its complete stored artifact set and may
+cover all recorded Installation targets. Press `e` to review enabling selected
+rows.
+Plugin and System rows remain visible and informational in both projections.
+The same name-only regular-expression search is available in Disabled; results
+come only from its per-exposure and per-entry projection, and applying or
+cancelling search restores that view's independent position and selection.
+
+Availability review distinguishes **Native** configuration control from
+**Suspended** filesystem storage, names affected harnesses, and presents every
+distinct block before confirmation. Repeated identical blocks are condensed in
+the ordinary review while technical details retain each affected target.
+Suspended Disable moves the complete declared artifact set to non-expiring
+Disabled Storage, never Trash; Enable restores every exact original path without
+overwrite. A Manager-owned review states that Manager records remain unchanged
+and warns that running the Manager can recreate displaced paths. Execution and
+final verification use injected Availability module interfaces. Details,
+paging, wheel scrolling, and resize clamping match Removal review/report
+behavior. Disabled has no expiry, purge, or Trash action.
+
+Trash browsing and previews are read-only presentations backed by
 Quarantine; a `y`-confirmed restore or purge mutates only through Quarantine's
 safety checks. Trash groups only entries with persisted approved-plan
 provenance, while legacy entries remain individually accessible. Its sections
@@ -242,11 +275,16 @@ actions, verification checks, identifiers, and approval boundary.
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
 `detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
-and `quit`. Search accepts a regex, `up`, `down`, `take`, `all`, `clear`, `done`,
-and `cancel`. Plan screens accept `yes`, `no`, `details`, `up`, `down`,
-`pageup`, `pagedown`, `force`, and `quit`; report screens accept `up`, `down`,
-`pageup`, `pagedown`, `details`, `previous`, `next`, `fallback`, and `quit`.
-End-of-input cancels safely.
+`disable`, `disabled`, `trash`, and `quit`. In Disabled, `enable` opens review;
+`inventory` and `trash` switch peer views, and navigation, selection, and
+`search <regex>` match Inventory. Search accepts a regex, `up`, `down`, `take`,
+`all`, `clear`, `done`, and `cancel`. Removal and Availability plan screens
+accept `yes`, `no`, `details`, `up`, `down`, `pageup`, `pagedown`, `force`, and
+`quit` (`force` has no effect where the plan does not permit it). Report screens
+accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`; Availability
+reports also accept `back` to refresh Inventory and Disabled before returning,
+while Removal reports add `previous`, `next`, and `fallback`. End-of-input
+cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 
@@ -257,9 +295,11 @@ ownership, invoke a manager, or mutate the filesystem itself.
 ## Embedding interface
 
 `runTui(dependencies, terminal?)` is exported for alternate presentation hosts
-and interaction tests. `TuiDependencies` requires `scan`, `plan`, and `execute`
-functions using the public Inventory, RemovalPlanIntent, RemovalPlan,
-ApprovalRequirement, and ExecutionReport values. `TuiTerminal` consumes
+and interaction tests. `TuiDependencies` requires Removal `scan`, `plan`, and
+`execute` functions and optionally accepts Availability `listDisabled`,
+`planAvailability`, and `executeAvailability` functions. These use the public
+Inventory, DisabledEntry, Removal/Availability Plan, ApprovalRequirement,
+ExecutionReport, and AvailabilityReport values. `TuiTerminal` consumes
 rendered state through `render`, supplies semantic `TuiAction` values through
 `readAction`, and is always closed when the session ends.
 

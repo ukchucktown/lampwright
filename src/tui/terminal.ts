@@ -131,7 +131,12 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
-  if (state.screen === "plan" || state.screen === "report")
+  if (
+    state.screen === "plan" ||
+    state.screen === "report" ||
+    state.screen === "availability-plan" ||
+    state.screen === "availability-report"
+  )
     return (report.button & 64) !== 0
       ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
       : { kind: "noop" };
@@ -170,6 +175,8 @@ export function mouseAction(
     const tabs = browseTabHitboxes(state);
     if (inColumns(report.column, tabs.inventory))
       return { kind: "switch-view", view: "inventory" };
+    if (inColumns(report.column, tabs.disabled))
+      return { kind: "switch-view", view: "disabled" };
     if (inColumns(report.column, tabs.trash))
       return { kind: "switch-view", view: "trash" };
   }
@@ -315,6 +322,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "select" || value === "open" || value === "review")
       return { kind: "select" };
     if (value === "trash") return { kind: "switch-view", view: "trash" };
+    if (value === "disabled") return { kind: "switch-view", view: "disabled" };
     if (value === "inventory")
       return { kind: "switch-view", view: "inventory" };
     if (value === "restore") return { kind: "restore-review" };
@@ -323,6 +331,14 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "backspace") return { kind: "delete-query" };
     if (value === "quit" || value === "q") return { kind: "quit" };
     if (state.view === "trash") return { kind: "noop" };
+    if (value === "disable" || value === "d")
+      return state.view === "inventory"
+        ? { kind: "disable-review" }
+        : { kind: "noop" };
+    if (value === "enable" || value === "e")
+      return state.view === "disabled"
+        ? { kind: "enable-review" }
+        : { kind: "noop" };
     if (value.startsWith("search "))
       return { kind: "append-query", value: value.slice("search ".length) };
     if (value.startsWith("/"))
@@ -339,7 +355,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "cancel") return { kind: "cancel" };
     return { kind: "append-query", value };
   }
-  if (state.screen === "plan") {
+  if (state.screen === "plan" || state.screen === "availability-plan") {
     if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
     if (value === "down" || value === "j") return { kind: "move", delta: 1 };
@@ -352,17 +368,23 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "cancel" };
     return { kind: "noop" };
   }
-  if (state.screen === "report") {
+  if (state.screen === "report" || state.screen === "availability-report") {
     if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
     if (value === "down" || value === "j") return { kind: "move", delta: 1 };
     if (value === "pageup") return { kind: "page", delta: -1 };
     if (value === "pagedown") return { kind: "page", delta: 1 };
-    if (value === "previous" || value === "left")
+    if (state.screen === "report" && (value === "previous" || value === "left"))
       return { kind: "select-fallback", delta: -1 };
-    if (value === "next" || value === "right")
+    if (state.screen === "report" && (value === "next" || value === "right"))
       return { kind: "select-fallback", delta: 1 };
-    if (value === "fallback" || value === "f") return { kind: "fallback" };
+    if (state.screen === "report" && (value === "fallback" || value === "f"))
+      return { kind: "fallback" };
+    if (
+      state.screen === "availability-report" &&
+      (value === "back" || value === "cancel")
+    )
+      return { kind: "cancel" };
     if (value === "quit" || value === "q" || value === "done")
       return { kind: "quit" };
     return { kind: "noop" };
@@ -587,7 +609,12 @@ export function parseRawTuiAction(
     if (key.ctrl && key.name === "t")
       return {
         kind: "switch-view",
-        view: state.view === "trash" ? "inventory" : "trash",
+        view:
+          state.view === "inventory" || state.view === undefined
+            ? "disabled"
+            : state.view === "disabled"
+              ? "trash"
+              : "inventory",
       };
     if (text === "p" && state.view === "trash") return { kind: "purge-review" };
     if (key.name === "return" || key.name === "enter")
@@ -622,6 +649,14 @@ export function parseRawTuiAction(
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
     if (state.view === "trash") return { kind: "noop" };
+    if (text === "d")
+      return state.view === "inventory"
+        ? { kind: "disable-review" }
+        : { kind: "noop" };
+    if (text === "e")
+      return state.view === "disabled"
+        ? { kind: "enable-review" }
+        : { kind: "noop" };
     if (!key.ctrl && !key.meta && text.length > 0)
       return { kind: "append-query", value: text };
     return { kind: "noop" };
@@ -640,7 +675,7 @@ export function parseRawTuiAction(
       return { kind: "append-query", value: text };
     return { kind: "noop" };
   }
-  if (state.screen === "plan") {
+  if (state.screen === "plan" || state.screen === "availability-plan") {
     if (key.name === "escape" || text === "n") return { kind: "cancel" };
     if (text === "d") return { kind: "toggle-details" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
@@ -649,14 +684,18 @@ export function parseRawTuiAction(
     if (text === "f") return { kind: "force" };
     return { kind: "noop" };
   }
-  if (state.screen === "report") {
+  if (state.screen === "report" || state.screen === "availability-report") {
+    if (state.screen === "availability-report" && key.name === "escape")
+      return { kind: "cancel" };
     if (key.name === "escape" || text === "q") return { kind: "quit" };
     if (text === "d") return { kind: "toggle-details" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
     if (key.name === "pagedown") return { kind: "page", delta: 1 };
-    if (key.name === "left") return { kind: "select-fallback", delta: -1 };
-    if (key.name === "right") return { kind: "select-fallback", delta: 1 };
-    if (text === "f") return { kind: "fallback" };
+    if (state.screen === "report" && key.name === "left")
+      return { kind: "select-fallback", delta: -1 };
+    if (state.screen === "report" && key.name === "right")
+      return { kind: "select-fallback", delta: 1 };
+    if (state.screen === "report" && text === "f") return { kind: "fallback" };
     return { kind: "noop" };
   }
   if (state.screen === "trash-review") {

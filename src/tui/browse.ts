@@ -408,11 +408,14 @@ function toggleSelect(model: TuiBrowseModel): TuiBrowseModel {
   const keys =
     model.focus === "sections"
       ? section.entries
-          .filter((entry) => entry.target !== null)
+          .filter((entry) => entry.selectable ?? entry.target !== null)
           .map((entry) => entry.key)
-      : [currentEntry(model)?.key].filter(
-          (key): key is string => key !== undefined,
-        );
+      : [currentEntry(model)]
+          .filter(
+            (entry): entry is TuiEntry =>
+              entry !== null && (entry.selectable ?? entry.target !== null),
+          )
+          .map((entry) => entry.key);
   if (keys.length === 0) return model;
 
   const selected = new Set(model.selected);

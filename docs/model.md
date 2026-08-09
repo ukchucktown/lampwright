@@ -75,6 +75,19 @@ primary path is already absent. It is valid only with exact record-cleanup
 evidence, allowing a stale lock record to be cleaned without inventing a
 Quarantine source.
 
+Each Installation also has top-level `suspension` evidence for Availability.
+This closed union is either `{ kind: "unavailable", reason }` or an `available`
+value with a nonempty, physical-path-sorted `artifacts` set. Every artifact
+contains its exact `ArtifactLocation` and `ProtectionStatus`; the set must equal
+the Installation's primary location plus all declared `removal.supplementalArtifacts`
+without duplicates or path overlap. Filesystem ownership uses
+`managerRecord: "not-applicable"` and `managerMayRecreate: false`. Explicitly
+supported Manager ownership uses `managerRecord: "preserved"` and
+`managerMayRecreate: true`. Plugin, System/runtime, incomplete, and unsupported
+Manager Installations expose only unavailable evidence. Planning consumes this
+materialized value and never infers suspension authority from ownership or an
+Adapter ID.
+
 An Installation owned by a Plugin carries a scan-unique `pluginBoundaryId`.
 `PluginBoundary.id` is that physical ownership identity, while
 `PluginBoundary.pluginId` is the external tool-supplied identifier. Plugin

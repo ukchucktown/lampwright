@@ -43,12 +43,16 @@ import type {
   ExecutionProcessResult,
 } from "./types.js";
 import { ExecutionModuleError } from "./types.js";
+import { executeAvailabilityPlan } from "./availability.js";
 
 export function createExecutionModule(
   options: ExecutionModuleOptions,
 ): ExecutionModule {
   validateOptions(options);
   return {
+    async executeAvailability(plan, approvals) {
+      return executeAvailabilityPlan(plan, approvals, options);
+    },
     async execute(planInput, approvalsInput) {
       const plan = parseRemovalPlan(planInput);
       const approvals = parseExecutionApprovals(approvalsInput);

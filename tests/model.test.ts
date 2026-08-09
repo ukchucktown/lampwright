@@ -134,12 +134,28 @@ describe("core model boundary validation", () => {
 
   it("preserves leading and trailing whitespace in filesystem paths", () => {
     const path = " /tmp/skill ";
+    const base = buildInstallation();
     const installation = parseInstallation({
-      ...buildInstallation(),
+      ...base,
       location: {
         path,
         canonicalPath: path,
         artifactType: { kind: "directory" },
+      },
+      suspension: {
+        kind: "available",
+        artifacts: [
+          {
+            location: {
+              path,
+              canonicalPath: path,
+              artifactType: { kind: "directory" },
+            },
+            protection: base.protection,
+          },
+        ],
+        managerRecord: "not-applicable",
+        managerMayRecreate: false,
       },
     });
 
@@ -429,6 +445,105 @@ describe("core model boundary validation", () => {
         },
       }),
     ).toThrow(/manager or plugin ownership/);
+  });
+
+  it("rejects forged suspension protection and duplicate or overlapping artifact authority", () => {
+    const installation = buildInstallation();
+    if (installation.suspension.kind !== "available")
+      throw new Error("expected available fixture suspension evidence");
+    const primarySuspensionArtifact = installation.suspension.artifacts[0];
+    expect(() =>
+      parseInstallation({
+        ...installation,
+        suspension: {
+          ...installation.suspension,
+          kind: "available",
+          artifacts: [
+            {
+              location: installation.location,
+              protection: {
+                ...installation.protection,
+                filesystem: { kind: "read-only", reason: "forged downgrade" },
+              },
+            },
+          ],
+        },
+      }),
+    ).toThrow(/exactly match primary and supplemental artifacts/);
+
+    expect(() =>
+      parseInstallation({
+        ...installation,
+        suspension: {
+          kind: "available",
+          artifacts: [primarySuspensionArtifact, primarySuspensionArtifact],
+          managerRecord: "not-applicable",
+          managerMayRecreate: false,
+        },
+      }),
+    ).toThrow(/unique and non-overlapping/);
+
+    const child = {
+      location: {
+        path: `${installation.location.path}/nested-copy`,
+        canonicalPath: `${installation.location.path}/nested-copy`,
+        artifactType: { kind: "directory" as const },
+      },
+      protection: installation.protection,
+    };
+    expect(() =>
+      parseInstallation({
+        ...installation,
+        removal: {
+          ...installation.removal,
+          supplementalArtifacts: [child],
+        },
+        suspension: {
+          kind: "available",
+          artifacts: [
+            {
+              location: installation.location,
+              protection: installation.protection,
+            },
+            child,
+          ],
+          managerRecord: "not-applicable",
+          managerMayRecreate: false,
+        },
+      }),
+    ).toThrow(/unique and non-overlapping/);
+
+    const low = {
+      location: {
+        path: "/fixtures/a-copy",
+        canonicalPath: "/fixtures/a-copy",
+        artifactType: { kind: "directory" as const },
+      },
+      protection: installation.protection,
+    };
+    const high = {
+      location: {
+        path: "/fixtures/z-copy",
+        canonicalPath: "/fixtures/z-copy",
+        artifactType: { kind: "directory" as const },
+      },
+      protection: installation.protection,
+    };
+    expect(() =>
+      parseInstallation({
+        ...installation,
+        removal: {
+          ...installation.removal,
+          supplementalArtifacts: [high, low],
+        },
+        suspension: {
+          kind: "available",
+          artifacts: [high, low, primarySuspensionArtifact],
+          managerRecord: "not-applicable",
+          managerMayRecreate: false,
+        },
+      }),
+    ).toThrow(/sorted by physical path/);
   });
 
   it("requires removal evidence to retain exact Adapter provenance", () => {
