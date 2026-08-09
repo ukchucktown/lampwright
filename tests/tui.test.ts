@@ -1066,10 +1066,27 @@ describe("terminal pane navigation", () => {
     expect(rendered).toContain("/detail/path-1");
     expect(rendered).toContain("/detail/path-6");
     expect(rendered).not.toContain("/detail/path-7");
-    expect(rendered).toContain("detail=3-8/12");
+    expect(rendered).toContain("detail 3–8 of 12");
+    expect(rendered).not.toContain("focus=");
+    expect(rendered).not.toContain("section=");
+    expect(rendered).not.toContain("entry=");
     expect(rendered).toContain("▕");
     expect(rendered).not.toContain("█");
     expect(colored).toContain(styleTui(theme, "path", "▕"));
+  });
+
+  it("leaves the browse status row blank when there is no notice or overflow", () => {
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "browse",
+      inventory,
+      model: createBrowseModel(createTuiSections(inventory), viewport),
+    };
+    const rendered = renderBrowseLines(state, plainTuiTheme).join("\n");
+
+    expect(rendered).not.toContain("focus=");
+    expect(rendered).not.toContain("section=");
+    expect(rendered).not.toContain("entry=");
   });
 
   it("keeps the detail pane read-only and backs out to entries", async () => {
