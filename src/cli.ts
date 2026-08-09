@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync, realpathSync } from "node:fs";
@@ -8,11 +9,23 @@ import { fileURLToPath } from "node:url";
 import { AdapterTrustRequiredError, loadAdapters } from "./adapter/index.js";
 import type { AdapterCatalog, AdapterTrustApproval } from "./adapter/types.js";
 import {
+  createFileAvailabilityExecutionAuditWriter,
   createExecutionModule,
   createFileExecutionAuditWriter,
   createFilePackageTrustStore,
   systemExecutionProcessRunner,
 } from "./execution/index.js";
+import type {
+  AvailabilityIntent,
+  AvailabilityPlan,
+  AvailabilityReport,
+} from "./availability/index.js";
+import {
+  createDisabledStorageModule,
+  type DisabledEntry,
+  type DisabledStorageModule,
+} from "./disabled-storage/index.js";
+import { nodeArtifactFileSystem } from "./filesystem/artifact-filesystem.js";
 import { inspectGitProtection } from "./inventory/git-protection.js";
 import {
   createInventoryScanner,
@@ -29,7 +42,9 @@ import type {
 import { parseExecutionApprovals } from "./model/validation.js";
 import {
   plan,
+  planAvailability,
   PlanningError,
+  resolveAvailabilitySelectors,
   resolveTargetSelectors,
 } from "./planning/index.js";
 import { createQuarantineModule } from "./quarantine/index.js";
@@ -55,6 +70,16 @@ export interface CliDependencies {
     approvals: readonly ApprovalRequirement[],
   ) => Promise<ExecutionReport>;
   readonly quarantine?: QuarantineModule;
+  readonly listDisabled?: () => Promise<readonly DisabledEntry[]>;
+  readonly planAvailability?: (
+    inventory: Inventory,
+    disabledEntries: readonly DisabledEntry[],
+    intent: AvailabilityIntent,
+  ) => AvailabilityPlan;
+  readonly executeAvailability?: (
+    plan: AvailabilityPlan,
+    approvals: readonly ApprovalRequirement[],
+  ) => Promise<AvailabilityReport>;
 }
 export interface CliResult {
   readonly exitCode: number;
@@ -77,19 +102,22 @@ function readPackageMetadata(): PackageMetadata {
 
 const help = `skill-cleaner ${readPackageMetadata().version}
 
-Discover and safely remove AI agent skills.
+Discover and safely manage AI agent skills.
 
 Usage:
   skill-cleaner
   skill-cleaner scan [--json] [--adapter <path>]
+  skill-cleaner disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
+  skill-cleaner enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
   skill-cleaner remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
   skill-cleaner restore <entry-id> [--dry-run] [--yes] [--json]
   skill-cleaner purge <entry-id...> [--dry-run] [--yes] [--json]
 
 Selectors:
-  installation:<installation-id>  logical-skill:<logical-skill-id>
-  source:<source-id>              plugin:<plugin-boundary-id>
-  group:<group-id>
+  Availability: installation:<installation-id>  logical-skill:<logical-skill-id>
+                group:<group-id>
+  Enable only:  disabled-entry:<entry-id>
+  Removal also: source:<source-id>  plugin:<plugin-boundary-id>
 
 Exit codes: 0 succeeded; 1 operational failure; 2 invalid usage; 3 blocked or confirmation required.
 
@@ -139,6 +167,8 @@ export async function runCli(
         0,
       );
     if (parsed.command === "remove") return await remove(parsed, dependencies);
+    if (parsed.command === "disable" || parsed.command === "enable")
+      return await availability(parsed, dependencies);
     if (parsed.command === "restore" || parsed.command === "purge")
       return await quarantineCommand(parsed, dependencies);
     return failure("invalid-usage", "unknown command", 2);
@@ -171,7 +201,14 @@ export async function runCli(
 
 type Parsed = {
   readonly command:
-    "help" | "version" | "scan" | "remove" | "restore" | "purge";
+    | "help"
+    | "version"
+    | "scan"
+    | "disable"
+    | "enable"
+    | "remove"
+    | "restore"
+    | "purge";
   readonly dryRun: boolean;
   readonly yes: boolean;
   readonly force: boolean;
@@ -230,7 +267,9 @@ function parseArguments(argv: readonly string[]): Parsed {
       values,
     };
   }
-  if (["scan", "remove", "restore", "purge"].includes(first))
+  if (
+    ["scan", "disable", "enable", "remove", "restore", "purge"].includes(first)
+  )
     command = first as Parsed["command"];
   else throw new Error(`unknown command: ${first}`);
   for (let index = 1; index < argv.length; index += 1) {
@@ -290,6 +329,15 @@ function parseArguments(argv: readonly string[]): Parsed {
     throw new Error("--include-plugins requires --all");
   if (bruteForce && command !== "remove")
     throw new Error("--brute-force is only valid for remove");
+  if ((command === "disable" || command === "enable") && values.length === 0)
+    throw new Error(`${command} requires at least one selector`);
+  if (
+    (command === "disable" || command === "enable") &&
+    (all || includePlugins || bruteForce || packageTrusts.length > 0)
+  )
+    throw new Error(`${command} does not accept removal-only options`);
+  if (command === "enable" && force)
+    throw new Error("enable does not accept --force");
   return {
     command,
     dryRun,
@@ -377,6 +425,143 @@ async function remove(
     { schemaVersion: 1, kind: "execution-report", report },
     executionExitCode(report),
   );
+}
+
+async function availability(
+  args: Parsed,
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const operation = args.command as "disable" | "enable";
+  const scanned = await scanWithContext(
+    args.adapters,
+    args.adapterTrusts,
+    dependencies,
+  );
+  const disabledStorage = availabilityStorage(dependencies);
+  const disabledEntries = await disabledStorage.list();
+  const targets = resolveAvailabilitySelectors(
+    scanned.inventory,
+    disabledEntries,
+    operation,
+    args.values,
+  );
+  const planner = dependencies.planAvailability ?? planAvailability;
+  const availabilityPlan = planner(scanned.inventory, disabledEntries, {
+    operation,
+    targets,
+    force: args.force,
+  });
+  const planEnvelope = {
+    schemaVersion: 1 as const,
+    kind: "availability-plan" as const,
+    plan: availabilityPlan,
+  };
+  if (args.dryRun || availabilityPlan.blocks.length > 0)
+    return result(planEnvelope, availabilityPlan.blocks.length === 0 ? 0 : 3);
+  if (!args.yes)
+    return result(
+      {
+        schemaVersion: 1,
+        kind: "confirmation-required",
+        operation,
+        plan: availabilityPlan,
+      },
+      3,
+    );
+  const approvals = [
+    ...availabilityGrants(availabilityPlan),
+    ...scanned.newAdapterTrusts.map((approval): ApprovalRequirement => ({
+      kind: "adapter-trust",
+      adapterId: approval.adapterId,
+      contentHash: approval.contentHash,
+    })),
+  ];
+  const report =
+    dependencies.executeAvailability === undefined
+      ? await productionExecuteAvailability(
+          availabilityPlan,
+          args.adapters,
+          args.adapterTrusts,
+          scanned.newAdapterTrusts,
+          approvals,
+          disabledStorage.module,
+        )
+      : await dependencies.executeAvailability(availabilityPlan, approvals);
+  return result(
+    {
+      schemaVersion: 1,
+      kind: "availability-report",
+      operation,
+      disabledEntryIds: suspendedEntryIds(availabilityPlan, report),
+      report,
+    },
+    executionExitCode(report),
+  );
+}
+
+function availabilityGrants(
+  availabilityPlan: AvailabilityPlan,
+): readonly ApprovalRequirement[] {
+  return availabilityPlan.actions
+    .flatMap((action) => action.approvals)
+    .filter(
+      (approval, index, all) =>
+        all.findIndex(
+          (candidate) =>
+            stringifyModel(candidate, 0) === stringifyModel(approval, 0),
+        ) === index,
+    );
+}
+
+function suspendedEntryIds(
+  availabilityPlan: AvailabilityPlan,
+  report: AvailabilityReport,
+): readonly string[] {
+  const successful = new Set(
+    report.actionResults
+      .filter(
+        (result) =>
+          result.status === "succeeded" || result.status === "unchanged",
+      )
+      .map((result) => result.actionId),
+  );
+  return [
+    ...new Set(
+      availabilityPlan.actions
+        .filter(
+          (action) =>
+            action.kind === "suspended-disable" && successful.has(action.id),
+        )
+        .flatMap((action) => {
+          const result = report.actionResults.find(
+            (candidate) => candidate.actionId === action.id,
+          );
+          return result !== undefined &&
+            (result.status === "succeeded" || result.status === "unchanged") &&
+            typeof result.details.entryId === "string"
+            ? [result.details.entryId]
+            : [];
+        }),
+    ),
+  ].sort();
+}
+
+function availabilityStorage(dependencies: CliDependencies): {
+  readonly list: () => Promise<readonly DisabledEntry[]>;
+  readonly module: DisabledStorageModule | undefined;
+} {
+  if (dependencies.listDisabled !== undefined)
+    return { list: dependencies.listDisabled, module: undefined };
+  if (
+    dependencies.scan !== undefined ||
+    dependencies.planAvailability !== undefined ||
+    dependencies.executeAvailability !== undefined
+  )
+    throw new Error(
+      "listDisabled must be injected with Availability CLI dependencies",
+    );
+  const module = createProductionDisabledStorage();
+  return { list: () => module.list(), module };
 }
 
 async function quarantineCommand(
@@ -563,6 +748,60 @@ async function productionExecute(
   }).execute(removalPlan, { grants: approvals });
   return report;
 }
+
+function createProductionDisabledStorage(): DisabledStorageModule {
+  const stateRoot = defaultLocalStateRoot();
+  return createDisabledStorageModule({
+    stateRoot,
+    now: () => new Date(),
+    createId: randomUUID,
+    fileSystem: nodeArtifactFileSystem,
+    inspectGitProtection: (path, artifactType) =>
+      inspectGitProtection(
+        path,
+        artifactType.kind === "directory",
+        systemCommandRunner,
+      ),
+  });
+}
+
+async function productionExecuteAvailability(
+  availabilityPlan: AvailabilityPlan,
+  adapterPaths: readonly string[],
+  adapterTrusts: readonly AdapterTrustApproval[],
+  newAdapterTrusts: readonly AdapterTrustApproval[],
+  approvals: readonly ApprovalRequirement[],
+  providedStorage: DisabledStorageModule | undefined,
+): Promise<AvailabilityReport> {
+  if (providedStorage === undefined)
+    throw new Error(
+      "executeAvailability must be injected when listDisabled is injected",
+    );
+  const stateRoot = defaultLocalStateRoot();
+  const adapterTrustStore = createFileAdapterTrustStore(stateRoot);
+  for (const approval of newAdapterTrusts)
+    await adapterTrustStore.trust(approval);
+  return createExecutionModule({
+    scan: () => scan(adapterPaths, adapterTrusts),
+    replan: plan,
+    quarantine: createQuarantineModule(),
+    processRunner: systemExecutionProcessRunner,
+    inspectGitProtection: (path, artifactType) =>
+      inspectGitProtection(
+        path,
+        artifactType?.kind === "directory",
+        systemCommandRunner,
+      ),
+    auditWriter: createFileExecutionAuditWriter(stateRoot),
+    packageTrustStore: createFilePackageTrustStore(stateRoot),
+    now: () => new Date(),
+    stateRoot,
+    disabledStorage: providedStorage,
+    replanAvailability: planAvailability,
+    availabilityAuditWriter:
+      createFileAvailabilityExecutionAuditWriter(stateRoot),
+  }).executeAvailability(availabilityPlan, { grants: approvals });
+}
 function parseAdapterTrust(value: string | undefined): AdapterTrustApproval {
   const match = value?.match(/^([^\s]+):([a-f\d]{64})$/);
   if (match === undefined || match === null)
@@ -725,6 +964,8 @@ function human(output: unknown): string {
       )}\nReview the adapter, then re-run with --trust-adapter <id>:<sha256>.\n`;
   }
   if (output.kind === "removal-plan") return humanRemovalPlan(output.plan);
+  if (output.kind === "availability-plan")
+    return humanAvailabilityPlan(output.plan);
   if (output.kind === "confirmation-required")
     return `${humanPlan(output.plan)}Confirmation required for ${String(output.operation)}. ${output.operation === "remove" ? "Supply every approval flag shown above before executing." : "Re-run with --yes after reviewing this plan."}\n`;
   if (output.kind === "execution-report" && isRecord(output.report)) {
@@ -738,6 +979,12 @@ function human(output: unknown): string {
         )
       : [];
     return `Removal ${String(report.status)}.${fallbackCount > 0 ? ` ${fallbackCount} separately confirmed brute-force fallback plan(s) are available.` : ""}${skipped.length > 0 ? " Review the dry-run plan and supply its missing approval flags before retrying." : ""}\n`;
+  }
+  if (output.kind === "availability-report" && isRecord(output.report)) {
+    const entryIds = Array.isArray(output.disabledEntryIds)
+      ? output.disabledEntryIds.map(String)
+      : [];
+    return `Availability ${String(output.operation)} ${String(output.report.status)}.${entryIds.length > 0 ? ` Enable later with ${entryIds.map((id) => `disabled-entry:${id}`).join(", ")}.` : ""}\n`;
   }
   if (output.kind === "quarantine-plan") return humanQuarantinePlan(output);
   if (output.kind === "restore-result" && isRecord(output.result))
@@ -763,7 +1010,27 @@ function human(output: unknown): string {
 function humanPlan(plan: unknown): string {
   if (!isRecord(plan)) return "";
   if (plan.kind === "quarantine-plan") return humanQuarantinePlan(plan);
+  if (
+    isRecord(plan.intent) &&
+    (plan.intent.operation === "disable" || plan.intent.operation === "enable")
+  )
+    return humanAvailabilityPlan(plan);
   return humanRemovalPlan(plan);
+}
+
+function humanAvailabilityPlan(plan: unknown): string {
+  if (!isRecord(plan)) return "Availability plan unavailable.\n";
+  const operation = isRecord(plan.intent)
+    ? String(plan.intent.operation)
+    : "change";
+  const targets = Array.isArray(plan.targets) ? plan.targets.length : 0;
+  const actions = Array.isArray(plan.actions) ? plan.actions.length : 0;
+  const blocks = Array.isArray(plan.blocks) ? plan.blocks.filter(isRecord) : [];
+  const blockSummary =
+    blocks.length === 0
+      ? ""
+      : `${blocks.map((block) => `- ${describeBlock(block)}`).join("\n")}\nResolve the blocks or use --force only where the plan marks a block overridable.\n`;
+  return `Availability ${operation} plan: ${targets} target(s), ${actions} action(s), ${blocks.length} block(s).\n${blockSummary}${approvalGuidance(plan)}`;
 }
 
 function humanRemovalPlan(plan: unknown): string {

@@ -397,7 +397,7 @@ The v1 MVP is complete when:
 7. Brute-force removal quarantines artifacts and can restore them.
 8. Non-ignored Git worktree files and System Skills cannot be mutated, including with force.
 9. Local JSONC adapters can extend discovery and removal without changing application code.
-10. Non-interactive scan, dry-run, remove, restore, and purge workflows produce stable JSON.
+10. Non-interactive scan, disable, enable, dry-run, remove, restore, and purge workflows produce stable JSON.
 11. A final rescan verifies and reports the result of every removal.
 12. Tests demonstrate that unrelated installations, plugin resources, and project files remain untouched.
 13. Native and suspended disable operations can be enabled again without

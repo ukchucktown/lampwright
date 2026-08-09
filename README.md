@@ -33,6 +33,8 @@ paths, Inventory, metadata, or search queries.
 ```console
 skill-cleaner                  # interactive fuzzy-search UI
 skill-cleaner scan             # print the live Inventory
+skill-cleaner disable <target> # natively disable or safely suspend targets
+skill-cleaner enable <target>  # enable native or Disabled Storage targets
 skill-cleaner remove <target>  # review and remove selected target(s)
 skill-cleaner restore <entry>  # restore a Quarantine entry
 skill-cleaner purge <entry>    # permanently delete Quarantine entries

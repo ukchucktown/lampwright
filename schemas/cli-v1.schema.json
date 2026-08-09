@@ -4,6 +4,8 @@
   "title": "skill-cleaner CLI v1 output",
   "oneOf": [
     { "$ref": "#/$defs/inventory" },
+    { "$ref": "#/$defs/availabilityPlanEnvelope" },
+    { "$ref": "#/$defs/availabilityReportEnvelope" },
     { "$ref": "#/$defs/removalPlanEnvelope" },
     { "$ref": "#/$defs/confirmationEnvelope" },
     { "$ref": "#/$defs/executionReportEnvelope" },
@@ -73,6 +75,110 @@
       },
       "additionalProperties": false
     },
+    "availabilityPlan": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "id",
+        "inventoryId",
+        "createdAt",
+        "intent",
+        "targets",
+        "disabledEntryIds",
+        "actions",
+        "blocks",
+        "warnings",
+        "verificationChecks"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "minLength": 1 },
+        "intent": { "type": "object" },
+        "targets": { "type": "array", "items": { "type": "object" } },
+        "disabledEntryIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "actions": { "type": "array", "items": { "type": "object" } },
+        "blocks": { "type": "array", "items": { "type": "object" } },
+        "warnings": { "type": "array", "items": { "type": "object" } },
+        "verificationChecks": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "availabilityReport": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "planId",
+        "inventoryId",
+        "finalInventoryId",
+        "rescanError",
+        "startedAt",
+        "completedAt",
+        "status",
+        "actionResults",
+        "targetResults",
+        "verificationResults"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "planId": { "type": "string", "minLength": 1 },
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "finalInventoryId": { "type": ["string", "null"] },
+        "rescanError": { "type": ["object", "null"] },
+        "startedAt": { "type": "string", "minLength": 1 },
+        "completedAt": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["succeeded", "partial", "failed", "blocked"]
+        },
+        "actionResults": { "type": "array", "items": { "type": "object" } },
+        "targetResults": { "type": "array", "items": { "type": "object" } },
+        "verificationResults": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "availabilityPlanEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "availability-plan" },
+        "plan": { "$ref": "#/$defs/availabilityPlan" }
+      },
+      "additionalProperties": false
+    },
+    "availabilityReportEnvelope": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "kind",
+        "operation",
+        "disabledEntryIds",
+        "report"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "availability-report" },
+        "operation": { "enum": ["disable", "enable"] },
+        "disabledEntryIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "report": { "$ref": "#/$defs/availabilityReport" }
+      },
+      "additionalProperties": false
+    },
     "executionReport": {
       "type": "object",
       "required": [
@@ -129,10 +235,13 @@
       "properties": {
         "schemaVersion": { "const": 1 },
         "kind": { "const": "confirmation-required" },
-        "operation": { "enum": ["remove", "restore", "purge"] },
+        "operation": {
+          "enum": ["disable", "enable", "remove", "restore", "purge"]
+        },
         "plan": {
           "oneOf": [
             { "$ref": "#/$defs/removalPlan" },
+            { "$ref": "#/$defs/availabilityPlan" },
             { "$ref": "#/$defs/quarantinePlan" }
           ]
         }
