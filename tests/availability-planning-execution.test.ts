@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -149,6 +149,63 @@ async function nativeFixture(
   };
 }
 
+async function nativeWorkspaceFixture(
+  harness: "codex" | "claude-code" | "gemini-cli",
+) {
+  const environment = await environmentFixture();
+  const root = join(environment.workspace, `${harness}-skills`);
+  await createSkill(join(root, "workspace-review"), "workspace-review");
+  const workspaceConfigDirectory = join(
+    environment.workspace,
+    harness === "claude-code" ? ".claude" : ".gemini",
+  );
+  const agentHome =
+    harness === "codex"
+      ? join(environment.home, ".codex")
+      : join(environment.temporary, "missing-parent", `.${harness}`);
+  let config: string;
+  if (harness === "codex") {
+    await mkdir(agentHome, { recursive: true });
+    config = join(agentHome, "config.toml");
+    await writeFile(
+      config,
+      '# workspace fixture\n[terminal]\nlabel = "keep"\n',
+    );
+  } else {
+    await mkdir(workspaceConfigDirectory, { recursive: true });
+    config = join(
+      workspaceConfigDirectory,
+      harness === "claude-code" ? "settings.local.json" : "settings.json",
+    );
+    await writeFile(
+      config,
+      harness === "claude-code"
+        ? '{\n  "unrelated": "keep",\n  "skillOverrides": {}\n}\n'
+        : '{\n  // workspace fixture\n  "unrelated": true,\n  "skills": { "disabled": [] }\n}\n',
+    );
+  }
+  const scanEnvironment: InventoryScanEnvironment = {
+    homeDirectory: environment.home,
+    workspaceDirectory: environment.workspace,
+    agentHomeDirectories: { [harness]: agentHome },
+    ...(harness === "gemini-cli" ? { geminiWorkspaceTrusted: true } : {}),
+  };
+  const roots: readonly DiscoveryRoot[] = [
+    {
+      kind: "workspace",
+      path: root,
+      agentId: harness,
+      workspacePath: environment.workspace,
+      adapterId: null,
+    },
+  ];
+  return {
+    environment,
+    config,
+    scanLive: () => scan(scanEnvironment, roots),
+  };
+}
+
 describe("Availability Planning and Execution", () => {
   for (const harness of ["codex", "claude-code", "gemini-cli"] as const) {
     it(`disables and enables ${harness} through exact native configuration evidence`, async () => {
@@ -240,6 +297,119 @@ describe("Availability Planning and Execution", () => {
           (installation) => installation.harnessExposures[0]!.status,
         ),
       ).toEqual(["disabled", "disabled"]);
+    });
+  }
+
+  it("reports and audits a final Availability rescan failure without claiming verification", async () => {
+    const fixture = await nativeFixture("codex", ["rescan-review"]);
+    const inventory = await fixture.scanLive();
+    const target = {
+      kind: "installation" as const,
+      installationId: inventory.installations[0]!.id,
+    };
+    const availabilityPlan = planAvailability(inventory, [], {
+      operation: "disable",
+      targets: [target],
+      force: false,
+    });
+    let scans = 0;
+    const audit: unknown[] = [];
+    const runner = execution(
+      join(fixture.environment.state, "skill-cleaner"),
+      fixture.scanLive,
+      audit,
+      {
+        scan: async () => {
+          scans += 1;
+          if (scans === 1) return fixture.scanLive();
+          throw new Error("injected final rescan failure");
+        },
+      },
+    );
+    const report = await runner.module.executeAvailability(availabilityPlan, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(report.status).toBe("partial");
+    expect(report.finalInventoryId).toBeNull();
+    expect(report.rescanError).toMatchObject({ code: "final-rescan-failed" });
+    expect(report.verificationResults).toEqual([]);
+    expect(report.actionResults).toMatchObject([{ status: "succeeded" }]);
+    expect(report.targetResults).toMatchObject([{ status: "partial" }]);
+    expect(await readFile(fixture.config, "utf8")).toContain("enabled = false");
+    expect(audit).toHaveLength(1);
+  });
+
+  for (const harness of ["codex", "claude-code", "gemini-cli"] as const) {
+    it(`round-trips a workspace ${harness} Skill through its applicable native layer`, async () => {
+      const fixture = await nativeWorkspaceFixture(harness);
+      const audit: unknown[] = [];
+      const initial = await fixture.scanLive();
+      const installation = initial.installations[0]!;
+      expect(installation.scope).toMatchObject({ kind: "workspace" });
+      const target = {
+        kind: "installation" as const,
+        installationId: installation.id,
+      };
+      const preimage = await readFile(fixture.config, "utf8");
+      const disabledPlan = planAvailability(initial, [], {
+        operation: "disable",
+        targets: [target],
+        force: false,
+      });
+      expect(disabledPlan.blocks).toEqual([]);
+      expect(disabledPlan.actions).toHaveLength(1);
+      await expect(readFile(fixture.config, "utf8")).resolves.toBe(preimage);
+      await expect(
+        access(join(fixture.environment.state, "skill-cleaner")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      const action = disabledPlan.actions[0]!;
+      if (action.kind !== "native-control")
+        throw new Error("expected native control");
+      expect(
+        action.mutations.map((mutation) => mutation.documentScope),
+      ).toEqual([
+        harness === "codex"
+          ? "user"
+          : harness === "claude-code"
+            ? "local-workspace"
+            : "workspace",
+      ]);
+      const runner = execution(
+        join(fixture.environment.state, "skill-cleaner"),
+        fixture.scanLive,
+        audit,
+      );
+      const disabled = await runner.module.executeAvailability(disabledPlan, {
+        grants: [{ kind: "confirmation" }],
+      });
+      expect(disabled.status).toBe("succeeded");
+      expect(
+        (await fixture.scanLive()).installations[0]!.harnessExposures[0]!
+          .status,
+      ).toBe("disabled");
+      const changed = await readFile(fixture.config, "utf8");
+      expect(changed).toContain(
+        harness === "codex"
+          ? "workspace fixture"
+          : harness === "claude-code"
+            ? '"unrelated": "keep"'
+            : "workspace fixture",
+      );
+      const enablePlan = planAvailability(await fixture.scanLive(), [], {
+        operation: "enable",
+        targets: [target],
+        force: false,
+      });
+      const enabled = await runner.module.executeAvailability(enablePlan, {
+        grants: [{ kind: "confirmation" }],
+      });
+      expect(enabled.status).toBe("succeeded");
+      expect(
+        (await fixture.scanLive()).installations[0]!.harnessExposures[0]!
+          .status,
+      ).toBe("enabled");
+      await expect(runner.disabledStorage.list()).resolves.toEqual([]);
+      expect(audit).toHaveLength(2);
     });
   }
 

@@ -244,6 +244,87 @@ describe("Disabled Storage", () => {
     await expect(storage.list()).resolves.toEqual([]);
   });
 
+  it("round-trips across state volumes without attempting a cross-device rename", async () => {
+    const environment = await createEnvironment();
+    const source = join(environment.home, "cross-volume-skill");
+    const stateRoot = join(environment.state, "state");
+    await writeFile(source, "skill", "utf8");
+    let copiedIntoState = false;
+    const renamePairs: Array<readonly [string, string]> = [];
+    const fileSystem: ArtifactFileSystem = {
+      ...nodeArtifactFileSystem,
+      async writeFile(path, data, options) {
+        if (path.startsWith(stateRoot) && Buffer.isBuffer(data))
+          copiedIntoState = true;
+        await nodeArtifactFileSystem.writeFile(path, data, options);
+      },
+      async rename(from, to) {
+        renamePairs.push([from, to]);
+        const crossesBoundary =
+          from.startsWith(environment.home) !==
+            to.startsWith(environment.home) ||
+          from.startsWith(stateRoot) !== to.startsWith(stateRoot);
+        if (crossesBoundary) {
+          const error = new Error(
+            "cross-device fixture",
+          ) as NodeJS.ErrnoException;
+          error.code = "EXDEV";
+          throw error;
+        }
+        await nodeArtifactFileSystem.rename(from, to);
+      },
+    };
+    const storage = harness(stateRoot, fileSystem);
+    const entry = await suspendedEntry(storage, request(source));
+    expect(copiedIntoState).toBe(true);
+    expect(renamePairs.length).toBeGreaterThan(0);
+    expect(
+      renamePairs.every(([from, to]) => {
+        const bothHome =
+          from.startsWith(environment.home) && to.startsWith(environment.home);
+        const bothState =
+          from.startsWith(stateRoot) && to.startsWith(stateRoot);
+        return bothHome || bothState;
+      }),
+    ).toBe(true);
+    await expect(storage.enable(entry)).resolves.toMatchObject({
+      status: "enabled",
+    });
+    await expect(readFile(source, "utf8")).resolves.toBe("skill");
+  });
+
+  it("honors the host filesystem's case semantics without overwriting a case collision", async () => {
+    const environment = await createEnvironment();
+    const source = join(environment.home, "CaseSkill");
+    const differentlyCased = join(environment.home, "caseskill");
+    await writeFile(source, "original", "utf8");
+    const storage = harness(join(environment.state, "state"));
+    const entry = await suspendedEntry(storage, request(source));
+    await writeFile(differentlyCased, "replacement", "utf8");
+    const caseInsensitive = await access(source).then(
+      () => true,
+      () => false,
+    );
+    const result = await storage.enable(entry);
+    if (caseInsensitive) {
+      expect(result).toMatchObject({
+        status: "blocked",
+        reason: "destination-occupied",
+      });
+      await expect(readFile(differentlyCased, "utf8")).resolves.toBe(
+        "replacement",
+      );
+      await expect(storage.list()).resolves.toEqual([entry]);
+    } else {
+      expect(result).toMatchObject({ status: "enabled" });
+      await expect(readFile(source, "utf8")).resolves.toBe("original");
+      await expect(readFile(differentlyCased, "utf8")).resolves.toBe(
+        "replacement",
+      );
+      await expect(storage.list()).resolves.toEqual([]);
+    }
+  });
+
   it("preserves a destination that becomes occupied after preview", async () => {
     const environment = await createEnvironment();
     const source = join(environment.home, "race-skill");

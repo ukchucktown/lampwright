@@ -96,6 +96,118 @@ describe("release readiness", () => {
     expect(source).toContain('DISABLE_TELEMETRY: "1"');
     expect(source).toContain('DO_NOT_TRACK: "1"');
   });
+
+  it("uses platform-safe structured Docker commands for local Linux evidence", async () => {
+    const helpers =
+      // @ts-expect-error The exercised release helper is intentionally executable ESM.
+      await import("../scripts/test-linux.mjs");
+    const { copiedWorktreeFilter, linuxContainerCommands, runContainerSuite } =
+      helpers;
+    const commands = linuxContainerCommands(
+      "24",
+      join(repositoryRoot, "staged"),
+      "container-id",
+    );
+    expect(commands).toEqual({
+      create: [
+        "create",
+        "--workdir",
+        "/app",
+        "node:24",
+        "node",
+        "scripts/test-linux.mjs",
+        "--container",
+      ],
+      copy: [
+        "cp",
+        `${join(repositoryRoot, "staged")}${process.platform === "win32" ? "\\" : "/"}.`,
+        "container-id:/app",
+      ],
+      start: ["start", "--attach", "container-id"],
+      remove: ["rm", "--force", "container-id"],
+    });
+    expect(Object.values(commands).flat()).not.toContain("bash");
+    expect(Object.values(commands).flat()).not.toContain("-c");
+    expect(copiedWorktreeFilter(repositoryRoot, repositoryRoot)).toBe(true);
+    expect(
+      copiedWorktreeFilter(
+        repositoryRoot,
+        join(repositoryRoot, "node_modules"),
+      ),
+    ).toBe(false);
+    expect(
+      copiedWorktreeFilter(repositoryRoot, join(repositoryRoot, "dist")),
+    ).toBe(false);
+    expect(
+      copiedWorktreeFilter(repositoryRoot, join(repositoryRoot, ".git")),
+    ).toBe(false);
+    expect(
+      copiedWorktreeFilter(repositoryRoot, join(repositoryRoot, "src")),
+    ).toBe(true);
+    const invocations: { executable: string; arguments: readonly string[] }[] =
+      [];
+    expect(
+      runContainerSuite((executable: string, arguments_: readonly string[]) => {
+        invocations.push({ executable, arguments: arguments_ });
+        return { status: 0 };
+      }),
+    ).toBe(0);
+    expect(invocations).toEqual([
+      { executable: "npm", arguments: ["ci", "--silent"] },
+      { executable: "npm", arguments: ["test"] },
+    ]);
+  });
+
+  it("keeps the supported platform and Node matrix explicit", async () => {
+    const workflow = await readFile(
+      join(repositoryRoot, ".github", "workflows", "ci.yml"),
+      "utf8",
+    );
+    expect(workflow).toContain(
+      "os: [ubuntu-latest, macos-latest, windows-latest]",
+    );
+    expect(workflow).toContain("node: [20.x, 22.x, 24.x]");
+    expect(workflow).toContain("run: npm run pack:check");
+    expect(workflow).not.toMatch(/\brun:\s+(?:bash|sh|pwsh|cmd)\b/u);
+  });
+
+  it("describes reversible availability in package metadata", async () => {
+    const metadata = JSON.parse(
+      await readFile(join(repositoryRoot, "package.json"), "utf8"),
+    ) as { readonly description: string };
+    expect(metadata.description).toContain("reversibly disable");
+    expect(metadata.description).toContain("enable");
+  });
+
+  it("keeps Availability operator terminology aligned with the CLI schema", async () => {
+    const guide = await readFile(
+      join(repositoryRoot, "docs", "availability.md"),
+      "utf8",
+    );
+    const schema = JSON.parse(
+      await readFile(
+        join(repositoryRoot, "schemas", "cli-v1.schema.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly $defs: {
+        readonly confirmationEnvelope: {
+          readonly properties: {
+            readonly kind: { readonly const: string };
+            readonly operation: { readonly enum: readonly string[] };
+          };
+        };
+      };
+    };
+    expect(guide).toContain("`confirmation-required`");
+    expect(guide).not.toContain("availability-confirmation");
+    expect(schema.$defs.confirmationEnvelope.properties.kind.const).toBe(
+      "confirmation-required",
+    );
+    expect(schema.$defs.confirmationEnvelope.properties.operation.enum).toEqual(
+      expect.arrayContaining(["disable", "enable"]),
+    );
+  });
 });
 
 async function sourceFiles(root: string): Promise<readonly string[]> {

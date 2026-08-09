@@ -1,8 +1,9 @@
 # skill-cleaner
 
-`skill-cleaner` is a cross-platform terminal application for discovering and
-safely removing AI agent Skills whether they were installed as standalone
-files, by a Manager, or through a Plugin system.
+`skill-cleaner` is a cross-platform terminal application for discovering,
+reversibly disabling, enabling, and safely removing AI agent Skills whether
+they were installed as standalone files, by a Manager, or through a Plugin
+system.
 
 The primary interface is an interactive terminal inventory. Until publication, build and run it from a trusted checkout:
 
@@ -40,6 +41,9 @@ skill-cleaner restore <entry>  # restore a Quarantine entry
 skill-cleaner purge <entry>    # permanently delete Quarantine entries
 ```
 
+See [Reversible Skill availability](./docs/availability.md) for Native versus
+Suspended state, safe recovery, reports, and platform behavior.
+
 Use `skill-cleaner --help` for selectors, approvals, JSON output, dry-run, and
 stable exit statuses. See the [terminal UI](./docs/tui.md) and
 [non-interactive CLI](./docs/cli.md) guides for the complete behavior.
@@ -50,6 +54,7 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Domain language](./CONTEXT.md)
 - [Module design](./docs/module-design.md)
 - [Core model](./docs/model.md)
+- [Reversible Skill availability](./docs/availability.md)
 - [Inventory scanning](./docs/inventory.md)
 - [Adapter runtime](./docs/adapters.md)
 - [Removal planning](./docs/planning.md)

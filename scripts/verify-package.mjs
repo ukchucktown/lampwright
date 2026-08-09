@@ -18,6 +18,8 @@ if (!Array.isArray(packs) || packs.length !== 1)
 const pack = packs[0];
 if (pack.name !== packageJson.name || pack.version !== packageJson.version)
   throw new Error("packed name/version does not match package.json");
+if (!/\bdisable\b/u.test(packageJson.description))
+  throw new Error("packed description omits reversible disable behavior");
 if (!Array.isArray(pack.files) || pack.files.length === 0)
   throw new Error("npm pack returned no files");
 
@@ -57,14 +59,43 @@ for (const required of [
   "dist/cli.js",
   "dist/index.d.ts",
   "dist/index.js",
+  "dist/availability/types.d.ts",
+  "dist/disabled-storage/types.d.ts",
+  "dist/tui/types.d.ts",
   "dist/testing/index.d.ts",
   "dist/testing/index.js",
   "docs/release.md",
+  "docs/availability.md",
+  "docs/availability-controls.md",
+  "docs/disabled-storage.md",
+  "docs/execution.md",
+  "docs/planning.md",
+  "docs/cli.md",
+  "docs/tui.md",
   "schemas/adapter-v1.schema.json",
   "schemas/cli-v1.schema.json",
 ]) {
   if (!files.has(required))
     throw new Error(`required package file missing: ${required}`);
+}
+
+const cliSchema = JSON.parse(
+  readFileSync("schemas/cli-v1.schema.json", "utf8"),
+);
+for (const definition of [
+  "availabilityPlan",
+  "availabilityReport",
+  "availabilityPlanEnvelope",
+  "availabilityReportEnvelope",
+]) {
+  if (
+    cliSchema.$defs === null ||
+    typeof cliSchema.$defs !== "object" ||
+    !(definition in cliSchema.$defs)
+  )
+    throw new Error(
+      `Availability CLI schema definition missing: ${definition}`,
+    );
 }
 
 for (const target of exportedTargets(packageJson.exports)) {
