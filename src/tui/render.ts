@@ -1068,14 +1068,8 @@ export function renderBrowseLines(
     );
   }
 
-  const detailStatus =
-    detail.total > detail.height
-      ? `detail ${String(detail.offset + 1)}–${String(Math.min(detail.total, detail.offset + detail.height))} of ${String(detail.total)}`
-      : "";
   out.push(
-    model.notice === null
-      ? style.muted(fit(detailStatus, usable))
-      : style.info(fit(`! ${model.notice}`, usable)),
+    model.notice === null ? "" : style.info(fit(`! ${model.notice}`, usable)),
   );
 
   return out.map((line) => fit(line, usable));

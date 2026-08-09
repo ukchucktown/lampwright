@@ -1032,7 +1032,7 @@ describe("terminal pane navigation", () => {
     expect(keyboardChanged.detailScroll).toBe(0);
   });
 
-  it("renders the visible detail range and leaves later content reachable", () => {
+  it("renders the detail scrollbar and leaves later content reachable", () => {
     const inventory = groupedInventory();
     const sections = createTuiSections(inventory);
     const detailed = sections.map((section, sectionIndex) =>
@@ -1066,7 +1066,7 @@ describe("terminal pane navigation", () => {
     expect(rendered).toContain("/detail/path-1");
     expect(rendered).toContain("/detail/path-6");
     expect(rendered).not.toContain("/detail/path-7");
-    expect(rendered).toContain("detail 3–8 of 12");
+    expect(rendered).not.toContain("detail ");
     expect(rendered).not.toContain("focus=");
     expect(rendered).not.toContain("section=");
     expect(rendered).not.toContain("entry=");
@@ -1075,7 +1075,7 @@ describe("terminal pane navigation", () => {
     expect(colored).toContain(styleTui(theme, "path", "▕"));
   });
 
-  it("leaves the browse status row blank when there is no notice or overflow", () => {
+  it("leaves the browse status row free of navigation diagnostics", () => {
     const inventory = groupedInventory();
     const state: TuiState = {
       screen: "browse",
