@@ -1231,7 +1231,7 @@ function scrollMark(
   );
   const start = Math.round((pane.offset / pane.total) * pane.height);
   return row >= start && row < start + span
-    ? style.active("█")
+    ? style.path("▕")
     : style.border("│");
 }
 
