@@ -936,6 +936,20 @@ export function renderBrowseLines(
 
   const selected = model.selected.size;
   const trashCount = state.operations?.size ?? 0;
+  const paneControls = [
+    { text: "tab/shift+tab", paint: style.title },
+    { text: " pane · ", paint: style.muted },
+    { text: "shift+←→", paint: style.title },
+    { text: " resize width · ", paint: style.muted },
+    { text: "shift+↑↓", paint: style.title },
+    { text: " resize height · ", paint: style.muted },
+    { text: "ctrl-t", paint: style.title },
+    { text: " view · ", paint: style.muted },
+    { text: "esc", paint: style.title },
+    { text: " back · ", paint: style.muted },
+    { text: "q", paint: style.title },
+    { text: " quit", paint: style.muted },
+  ] as const;
   out.push(
     `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.title(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
       isTrash
@@ -970,16 +984,7 @@ export function renderBrowseLines(
               { text: " page · ", paint: style.muted },
               { text: "click", paint: style.title },
               { text: " focus · ", paint: style.muted },
-              { text: "tab/⇧tab", paint: style.title },
-              { text: " pane · ", paint: style.muted },
-              { text: "ctrl-t", paint: style.title },
-              { text: " view · ", paint: style.muted },
-              { text: "⇧↑↓", paint: style.title },
-              { text: " resize · ", paint: style.muted },
-              { text: "esc", paint: style.title },
-              { text: " back · ", paint: style.muted },
-              { text: "q", paint: style.title },
-              { text: " quit", paint: style.muted },
+              ...paneControls,
             ]
           : [
               { text: "↑↓/wheel", paint: style.title },
@@ -988,14 +993,7 @@ export function renderBrowseLines(
               { text: " focus · ", paint: style.muted },
               { text: "space/dbl-click", paint: style.title },
               { text: " select · ", paint: style.muted },
-              { text: "tab", paint: style.title },
-              { text: " pane · ", paint: style.muted },
-              { text: "ctrl-t", paint: style.title },
-              { text: " view · ", paint: style.muted },
-              { text: "esc", paint: style.title },
-              { text: " back · ", paint: style.muted },
-              { text: "q", paint: style.title },
-              { text: " quit", paint: style.muted },
+              ...paneControls,
             ],
       usable,
       style.muted,

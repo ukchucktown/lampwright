@@ -836,7 +836,7 @@ describe("terminal theme", () => {
     const inventory = groupedInventory();
     const model = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
-      columns: 100,
+      columns: 180,
     });
     const state: TuiState = { screen: "browse", inventory, model };
     const theme = createNightfallTheme("truecolor");
@@ -851,7 +851,7 @@ describe("terminal theme", () => {
     expect(plain).toContain("↑↓/wheel move · click focus");
     expect(plain).toContain("space/dbl-click select");
     expect(plain).toContain("q quit");
-    expect(visibleWidth(colored)).toBe(99);
+    expect(visibleWidth(colored)).toBe(179);
 
     const narrow = renderBrowseLines(
       {
@@ -872,7 +872,7 @@ describe("terminal theme", () => {
     const model = reduceBrowse(
       createBrowseModel(createTuiSections(inventory), {
         rows: 24,
-        columns: 100,
+        columns: 180,
       }),
       { kind: "focus", pane: "detail" },
     );
@@ -883,8 +883,40 @@ describe("terminal theme", () => {
 
     expect(line).toContain("↑↓/wheel scroll");
     expect(line).toContain("PgUp/PgDn page");
-    expect(line).toContain("⇧↑↓ resize");
-    expect(line).toContain("tab/⇧tab pane");
+    expect(line).toContain("shift+←→ resize width");
+    expect(line).toContain("shift+↑↓ resize height");
+    expect(line).toContain("tab/shift+tab pane");
+  });
+
+  it("keeps explicit pane and resize controls visible across browse focus", () => {
+    const inventory = groupedInventory();
+    const sections = createTuiSections(inventory);
+    const navigationModel = createBrowseModel(sections, {
+      rows: 24,
+      columns: 180,
+    });
+    const detailModel = reduceBrowse(navigationModel, {
+      kind: "focus",
+      pane: "detail",
+    });
+    const theme = createNightfallTheme("truecolor");
+    const lines = [
+      renderBrowseLines(
+        { screen: "browse", inventory, model: navigationModel },
+        theme,
+      )[1]!,
+      renderBrowseLines(
+        { screen: "browse", inventory, model: detailModel },
+        theme,
+      )[1]!,
+    ];
+
+    for (const line of lines) {
+      expect(line).toContain(styleTui(theme, "title", "tab/shift+tab"));
+      expect(line).toContain(styleTui(theme, "title", "shift+←→"));
+      expect(line).toContain(styleTui(theme, "title", "shift+↑↓"));
+      expect(line.replace(ansi, "")).not.toContain("⇧");
+    }
   });
 
   it("keeps line-oriented terminal output monochrome", () => {

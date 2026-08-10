@@ -98,12 +98,14 @@ The application never paints a base background, so terminal transparency and
 blur remain owned by the terminal.
 
 The inventory hint row presents each navigation or action key in bold cyan and
-its description in muted text. Its contents follow the active pane: navigation
-panes show movement and selection, while detail shows scrolling, paging, and
-resizing. Pointer focus, pane changes, review, back, and quit remain separate
-key/action pairs. Separators remain muted, so the row does not conflate
-navigation with selection. Segment styling is applied after clipping,
-preserving emphasis and reset boundaries on narrow terminals.
+its description in muted text. Pane controls remain stable as focus changes:
+`tab/shift+tab` cycles panes, `shift+←→` resizes pane width, and
+`shift+↑↓` resizes detail height. Navigation panes show movement and
+selection, while detail shows scrolling and paging. Pointer focus, view changes,
+review, back, and quit remain separate key/action pairs. Separators remain muted,
+so the row does not conflate navigation with selection. Segment styling is
+applied after clipping, preserving emphasis and reset boundaries on narrow
+terminals.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
