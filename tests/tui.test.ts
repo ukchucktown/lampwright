@@ -207,16 +207,21 @@ describe("Trash projection", () => {
     );
   });
 
-  it("uses cyan title styling for the active tab and maps tabs plus Trash keys", () => {
+  it("uses gold selection styling for the active view and maps Trash keys", () => {
     const operation = trashOperation(["entry-1"]);
     const browse = trashBrowse(operation, { rows: 20, columns: 100 });
-    const themed = renderTui(
-      { screen: "browse", ...browse },
-      createNightfallTheme("truecolor"),
-    );
-    expect(themed).toContain(
-      styleTui(createNightfallTheme("truecolor"), "title", "Trash (1)"),
-    );
+    const theme = createNightfallTheme("truecolor");
+    for (const [view, label] of [
+      ["inventory", "Inventory"],
+      ["disabled", "Disabled (0)"],
+      ["trash", "Trash (1)"],
+    ] as const) {
+      const rendered = renderTui({ screen: "browse", ...browse, view }, theme);
+      expect(rendered).toContain(styleTui(theme, "selected", label));
+    }
+    const themed = renderTui({ screen: "browse", ...browse }, theme);
+    expect(themed).toContain(styleTui(theme, "title", "Lampwright"));
+    expect(themed).toContain(styleTui(theme, "muted", "Inventory"));
     expect(
       parseLineTuiAction({ screen: "browse", ...browse }, "restore"),
     ).toEqual({ kind: "restore-review" });

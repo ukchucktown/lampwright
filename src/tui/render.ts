@@ -956,7 +956,7 @@ export function renderBrowseLines(
     { text: " quit", paint: style.muted },
   ] as const;
   out.push(
-    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.title(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0

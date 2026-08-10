@@ -99,7 +99,8 @@ blur remain owned by the terminal.
 
 The inventory header uses four rows: title and view status; pane-local movement;
 stable pane controls; and primary actions plus search. Each navigation or action
-key is bold cyan and its description is muted. `tab/shift+tab` cycles panes,
+key is bold cyan and its description is muted. The active view is gold while
+inactive views are muted. `tab/shift+tab` cycles panes,
 `shift+←→` changes pane width, and `shift+↑↓` changes detail height.
 Navigation panes show movement and selection, while detail shows scrolling and
 paging. Pointer focus, view changes, review, back, and quit remain separate
