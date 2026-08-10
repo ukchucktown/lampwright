@@ -17,11 +17,12 @@ import type {
  */
 
 /**
- * Six drawn rows — title, hints, filter, two rules, status — plus one row left
- * unused. A frame that fills the terminal exactly scrolls it by one on the
- * final newline, which reads as the panes drifting.
+ * Seven drawn rows — four header rows, two rules, and status — plus one row
+ * left unused. A frame that fills the terminal exactly scrolls it by one on
+ * the final newline, which reads as the panes drifting.
  */
-const CHROME_ROWS = 7;
+const HEADER_ROWS = 4;
+const CHROME_ROWS = 8;
 const MIN_PANE_ROWS = 3;
 const MIN_DETAIL_ROWS = 3;
 const SCROLL_MARGIN = 1;
@@ -69,6 +70,7 @@ export function layout(model: TuiBrowseModel): TuiLayout {
   return {
     rows,
     columns,
+    headerRows: HEADER_ROWS,
     usable,
     paneRows,
     entryRows: Math.max(1, paneRows - 1),

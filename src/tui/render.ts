@@ -927,7 +927,8 @@ export function renderBrowseLines(
   const grid = layout(model);
   const { rows, columns, usable, paneRows, detailRows, leftWidth, rightWidth } =
     grid;
-  if (rows < 7 || columns < 4) return renderCompactBrowse(rows, usable, style);
+  if (rows < grid.headerRows + 4 || columns < 4)
+    return renderCompactBrowse(rows, usable, style);
   const view = panes(model);
   const section = currentSection(model);
   const out: string[] = [];
@@ -936,8 +937,26 @@ export function renderBrowseLines(
 
   const selected = model.selected.size;
   const trashCount = state.operations?.size ?? 0;
+  const paneControls = [
+    { text: "click", paint: style.title },
+    { text: " focus · ", paint: style.muted },
+    { text: "tab/shift+tab", paint: style.title },
+    { text: " pane · ", paint: style.muted },
+    { text: "shift+←→", paint: style.title },
+    { text: " width · ", paint: style.muted },
+    { text: "shift+↑↓", paint: style.title },
+    { text: " height", paint: style.muted },
+  ] as const;
+  const globalControls = [
+    { text: "ctrl-t", paint: style.title },
+    { text: " view · ", paint: style.muted },
+    { text: "esc", paint: style.title },
+    { text: isTrash ? " Inventory · " : " back · ", paint: style.muted },
+    { text: "q", paint: style.title },
+    { text: " quit", paint: style.muted },
+  ] as const;
   out.push(
-    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.title("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.title(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.title(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -954,79 +973,71 @@ export function renderBrowseLines(
             { text: "enter/dbl-click", paint: style.title },
             { text: " restore · ", paint: style.muted },
             { text: "p", paint: style.title },
-            { text: " purge · ", paint: style.muted },
-            { text: "esc", paint: style.title },
-            { text: " Inventory · ", paint: style.muted },
-            { text: "ctrl-t", paint: style.title },
-            { text: " view · ", paint: style.muted },
-            { text: "q", paint: style.title },
-            { text: " quit", paint: style.muted },
+            { text: " purge", paint: style.muted },
           ]
         : model.focus === "detail"
           ? [
               { text: "↑↓/wheel", paint: style.title },
               { text: " scroll · ", paint: style.muted },
               { text: "PgUp/PgDn", paint: style.title },
-              { text: " page · ", paint: style.muted },
-              { text: "click", paint: style.title },
-              { text: " focus · ", paint: style.muted },
-              { text: "tab/⇧tab", paint: style.title },
-              { text: " pane · ", paint: style.muted },
-              { text: "ctrl-t", paint: style.title },
-              { text: " view · ", paint: style.muted },
-              { text: "⇧↑↓", paint: style.title },
-              { text: " resize · ", paint: style.muted },
-              { text: "esc", paint: style.title },
-              { text: " back · ", paint: style.muted },
-              { text: "q", paint: style.title },
-              { text: " quit", paint: style.muted },
+              { text: " page", paint: style.muted },
             ]
           : [
               { text: "↑↓/wheel", paint: style.title },
               { text: " move · ", paint: style.muted },
-              { text: "click", paint: style.title },
-              { text: " focus · ", paint: style.muted },
               { text: "space/dbl-click", paint: style.title },
-              { text: " select · ", paint: style.muted },
-              { text: "tab", paint: style.title },
-              { text: " pane · ", paint: style.muted },
-              { text: "ctrl-t", paint: style.title },
-              { text: " view · ", paint: style.muted },
-              { text: "esc", paint: style.title },
-              { text: " back · ", paint: style.muted },
-              { text: "q", paint: style.title },
-              { text: " quit", paint: style.muted },
+              { text: " select", paint: style.muted },
             ],
       usable,
       style.muted,
     ),
   );
+  out.push(fitStyledSegments(paneControls, usable, style.muted));
   out.push(
     isTrash
-      ? style.muted(
-          "Recoverable content is stored in Quarantine. Reviews do not change files.",
+      ? fitStyledSegments(
+          [
+            ...globalControls,
+            { text: " · recoverable · reviews read-only", paint: style.muted },
+          ],
+          usable,
+          style.muted,
         )
       : model.query === ""
         ? fitStyledSegments(
             [
+              ...globalControls,
+              { text: " · ", paint: style.muted },
               ...(isDisabled
                 ? [
                     { text: "e", paint: style.title },
-                    { text: " review enable · ", paint: style.muted },
+                    { text: " enable · ", paint: style.muted },
                   ]
                 : [
                     { text: "d", paint: style.title },
-                    { text: " review disable · ", paint: style.muted },
+                    { text: " disable · ", paint: style.muted },
                   ]),
-              { text: "/ or type", paint: style.title },
-              { text: " search names by regex · ", paint: style.muted },
+              { text: "/", paint: style.title },
+              { text: " regex search · ", paint: style.muted },
               { text: "ctrl-u", paint: style.title },
-              { text: " clear selection", paint: style.muted },
+              { text: " clear", paint: style.muted },
             ],
             usable,
             style.muted,
           )
-        : `filter ${style.active(model.query)} ${style.muted(`· ${String(view.entries.total)} here`)}`,
+        : fitStyledSegments(
+            [
+              ...globalControls,
+              { text: " · filter ", paint: style.muted },
+              { text: model.query, paint: style.active },
+              {
+                text: ` · ${String(view.entries.total)} here`,
+                paint: style.muted,
+              },
+            ],
+            usable,
+            style.muted,
+          ),
   );
   out.push(
     style.border(

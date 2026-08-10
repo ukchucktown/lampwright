@@ -97,11 +97,14 @@ errors. Focused rows use a light foreground over a slate selection background.
 The application never paints a base background, so terminal transparency and
 blur remain owned by the terminal.
 
-The inventory hint row presents each navigation or action key in bold cyan and
-its description in muted text. Its contents follow the active pane: navigation
-panes show movement and selection, while detail shows scrolling, paging, and
-resizing. Pointer focus, pane changes, review, back, and quit remain separate
-key/action pairs. Separators remain muted, so the row does not conflate
+The inventory header uses four rows: title and view status; pane-local movement;
+stable pane controls; and primary actions plus search. Each navigation or action
+key is bold cyan and its description is muted. The active view is gold while
+inactive views are muted. `tab/shift+tab` cycles panes,
+`shift+←→` changes pane width, and `shift+↑↓` changes detail height.
+Navigation panes show movement and selection, while detail shows scrolling and
+paging. Pointer focus, view changes, review, back, and quit remain separate
+key/action pairs. Separators remain muted, so the header does not conflate
 navigation with selection. Segment styling is applied after clipping,
 preserving emphasis and reset boundaries on narrow terminals.
 

@@ -22,6 +22,7 @@ import {
   TuiController,
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
+  layout,
   renderTui,
   plainTuiTheme,
 } from "../src/tui/index.js";
@@ -1122,17 +1123,20 @@ describe("Disabled TUI projection", () => {
             { dragging: false, doubleClick: false },
           ),
         );
+        if (controller.state.screen !== "browse")
+          throw new Error("expected Disabled browse view");
+        const pointerRow = layout(controller.state.model).headerRows + 3;
         await controller.dispatch(
           mouseAction(
             controller.state,
-            { button: 0, column: 2, row: 6, pressed: true },
+            { button: 0, column: 2, row: pointerRow, pressed: true },
             { dragging: false, doubleClick: false },
           ),
         );
         await controller.dispatch(
           mouseAction(
             controller.state,
-            { button: 0, column: 45, row: 6, pressed: true },
+            { button: 0, column: 45, row: pointerRow, pressed: true },
             { dragging: false, doubleClick: true },
           ),
         );
