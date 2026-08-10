@@ -236,14 +236,24 @@ describe("Trash projection", () => {
     expect(
       mouseAction(
         { screen: "browse", ...browse },
-        { button: 0, column: 4, row: 5, pressed: true },
+        {
+          button: 0,
+          column: 4,
+          row: layout(browse.model).headerRows + 2,
+          pressed: true,
+        },
         { dragging: false, doubleClick: true },
       ),
     ).toEqual({ kind: "noop" });
     expect(
       mouseAction(
         { screen: "browse", ...browse },
-        { button: 0, column: 70, row: 6, pressed: true },
+        {
+          button: 0,
+          column: 70,
+          row: layout(browse.model).headerRows + 3,
+          pressed: true,
+        },
         { dragging: false, doubleClick: true },
       ),
     ).toEqual({ kind: "select" });
@@ -842,16 +852,24 @@ describe("terminal theme", () => {
     const theme = createNightfallTheme("truecolor");
     const colored = renderBrowseLines(state, theme)[1]!;
     const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
+    const controls = renderBrowseLines(state, theme)[2]!;
+    const plainControls = renderBrowseLines(state, plainTuiTheme)[2]!;
+    const actions = renderBrowseLines(state, theme)[3]!;
+    const plainActions = renderBrowseLines(state, plainTuiTheme)[3]!;
 
     expect(colored).toContain(styleTui(theme, "title", "↑↓/wheel"));
-    expect(colored).toContain(styleTui(theme, "title", "click"));
     expect(colored).toContain(styleTui(theme, "title", "space/dbl-click"));
     expect(colored).toContain(styleTui(theme, "muted", " move · "));
     expect(colored.replace(ansi, "")).toBe(plain);
-    expect(plain).toContain("↑↓/wheel move · click focus");
+    expect(plain).toContain("↑↓/wheel move");
     expect(plain).toContain("space/dbl-click select");
-    expect(plain).toContain("q quit");
     expect(visibleWidth(colored)).toBe(179);
+    expect(controls).toContain(styleTui(theme, "title", "click"));
+    expect(plainControls).toContain("click focus");
+    expect(actions).toContain(styleTui(theme, "title", "q"));
+    expect(plainActions).toContain("q quit");
+    expect(visibleWidth(controls)).toBe(179);
+    expect(visibleWidth(actions)).toBe(179);
 
     const narrow = renderBrowseLines(
       {
@@ -876,16 +894,16 @@ describe("terminal theme", () => {
       }),
       { kind: "focus", pane: "detail" },
     );
-    const line = renderBrowseLines(
+    const lines = renderBrowseLines(
       { screen: "browse", inventory, model },
       plainTuiTheme,
-    )[1]!;
+    );
 
-    expect(line).toContain("↑↓/wheel scroll");
-    expect(line).toContain("PgUp/PgDn page");
-    expect(line).toContain("shift+←→ resize width");
-    expect(line).toContain("shift+↑↓ resize height");
-    expect(line).toContain("tab/shift+tab pane");
+    expect(lines[1]).toContain("↑↓/wheel scroll");
+    expect(lines[1]).toContain("PgUp/PgDn page");
+    expect(lines[2]).toContain("shift+←→ width");
+    expect(lines[2]).toContain("shift+↑↓ height");
+    expect(lines[2]).toContain("tab/shift+tab pane");
   });
 
   it("keeps explicit pane and resize controls visible across browse focus", () => {
@@ -904,11 +922,11 @@ describe("terminal theme", () => {
       renderBrowseLines(
         { screen: "browse", inventory, model: navigationModel },
         theme,
-      )[1]!,
+      )[2]!,
       renderBrowseLines(
         { screen: "browse", inventory, model: detailModel },
         theme,
-      )[1]!,
+      )[2]!,
     ];
 
     for (const line of lines) {
@@ -916,6 +934,32 @@ describe("terminal theme", () => {
       expect(line).toContain(styleTui(theme, "title", "shift+←→"));
       expect(line).toContain(styleTui(theme, "title", "shift+↑↓"));
       expect(line.replace(ansi, "")).not.toContain("⇧");
+    }
+  });
+
+  it("uses four short header rows before the browse frame", () => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 80,
+    });
+    const plain = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    );
+
+    expect(plain[0]).toContain("Lampwright Inventory");
+    expect(plain[1]).toContain("space/dbl-click select");
+    expect(plain[2]).toContain("tab/shift+tab pane");
+    expect(plain[2]).toContain("shift+←→ width");
+    expect(plain[2]).toContain("shift+↑↓ height");
+    expect(plain[3]).toContain("d disable");
+    expect(plain[3]).toContain("/ regex search");
+    expect(plain[3]).toContain("q quit");
+    expect(plain[4]?.[model.viewport.columns - 2]).toBe("─");
+    for (const line of plain.slice(0, 4)) {
+      expect(visibleWidth(line)).toBe(model.viewport.columns - 1);
+      expect(line).not.toContain("…");
     }
   });
 
@@ -1181,10 +1225,16 @@ describe("terminal pane navigation", () => {
       const plain = lines.map((line) => line.replace(ansi, ""));
 
       expect(lines).toHaveLength(model.viewport.rows - 1);
-      expect(plain[3]?.[grid.leftWidth]).toBe("┬");
-      for (let row = 4; row < 4 + grid.paneRows; row += 1)
+      expect(plain[grid.headerRows]?.[grid.leftWidth]).toBe("┬");
+      for (
+        let row = grid.headerRows + 1;
+        row < grid.headerRows + 1 + grid.paneRows;
+        row += 1
+      )
         expect(plain[row]?.[grid.leftWidth]).toBe("│");
-      expect(plain[4 + grid.paneRows]?.[grid.leftWidth]).toBe("┴");
+      expect(plain[grid.headerRows + 1 + grid.paneRows]?.[grid.leftWidth]).toBe(
+        "┴",
+      );
       for (const line of lines) expect(visibleWidth(line)).toBe(grid.usable);
     }
   });
@@ -1197,14 +1247,14 @@ describe("terminal pane navigation", () => {
       delta: 100,
     });
 
-    expect(enlarged.detailRows).toBe(14);
-    expect(layout(enlarged).detailRows).toBe(14);
+    expect(enlarged.detailRows).toBe(13);
+    expect(layout(enlarged).detailRows).toBe(13);
 
     const taller = reduceBrowse(enlarged, {
       kind: "viewport",
       viewport: { rows: 50, columns: 100 },
     });
-    expect(layout(taller).detailRows).toBe(14);
+    expect(layout(taller).detailRows).toBe(13);
   });
 
   it("never draws beyond a terminal that is temporarily too small", () => {
@@ -1212,6 +1262,7 @@ describe("terminal pane navigation", () => {
     const base = createBrowseModel(createTuiSections(inventory), viewport);
     for (const size of [
       { rows: 8, columns: 40 },
+      { rows: 7, columns: 40 },
       { rows: 12, columns: 20 },
       { rows: 4, columns: 2 },
     ]) {
@@ -2619,42 +2670,54 @@ describe("terminal pointer input", () => {
   });
 
   it("maps a click to the row beneath it in either pane", () => {
-    const { leftWidth } = layout(browse.model);
-    expect(mouseAction(browse, press(4, 5), idle)).toEqual({
+    const { headerRows, leftWidth } = layout(browse.model);
+    const firstPaneRow = headerRows + 2;
+    expect(mouseAction(browse, press(4, firstPaneRow), idle)).toEqual({
       kind: "point-section",
       index: 0,
     });
-    expect(mouseAction(browse, press(leftWidth + 8, 7), idle)).toEqual({
+    expect(
+      mouseAction(browse, press(leftWidth + 8, firstPaneRow + 2), idle),
+    ).toEqual({
       kind: "point-entry",
       index: 1,
     });
   });
 
   it("selects on a double click rather than a single one", () => {
+    const firstPaneRow = layout(browse.model).headerRows + 2;
     expect(
-      mouseAction(browse, press(4, 5), { dragging: false, doubleClick: true }),
+      mouseAction(browse, press(4, firstPaneRow), {
+        dragging: false,
+        doubleClick: true,
+      }),
     ).toEqual({ kind: "point-toggle", pane: "sections", index: 0 });
   });
 
   it("moves the pane under the wheel and ignores non-pane wheel input", () => {
-    const { leftWidth } = layout(browse.model);
-    expect(mouseAction(browse, press(4, 6, 64), idle)).toEqual({
+    const { headerRows, leftWidth } = layout(browse.model);
+    const contentRow = headerRows + 3;
+    expect(mouseAction(browse, press(4, contentRow, 64), idle)).toEqual({
       kind: "move-pane",
       pane: "sections",
       delta: -1,
     });
-    expect(mouseAction(browse, press(leftWidth + 8, 6, 65), idle)).toEqual({
+    expect(
+      mouseAction(browse, press(leftWidth + 8, contentRow, 65), idle),
+    ).toEqual({
       kind: "move-pane",
       pane: "entries",
       delta: 1,
     });
     // Bit 2 is a modifier; the wheel still reports through bits 6 and 0.
-    expect(mouseAction(browse, press(4, 6, 69), idle)).toEqual({
+    expect(mouseAction(browse, press(4, contentRow, 69), idle)).toEqual({
       kind: "move-pane",
       pane: "sections",
       delta: 1,
     });
-    expect(mouseAction(browse, press(leftWidth + 1, 6, 65), idle)).toEqual({
+    expect(
+      mouseAction(browse, press(leftWidth + 1, contentRow, 65), idle),
+    ).toEqual({
       kind: "noop",
     });
     expect(mouseAction(browse, press(4, 23, 65), idle)).toEqual({
@@ -2672,7 +2735,7 @@ describe("terminal pointer input", () => {
 
   it("focuses and scrolls detail content and drags its horizontal divider", () => {
     const grid = layout(browse.model);
-    const dividerRow = 5 + grid.paneRows;
+    const dividerRow = grid.headerRows + 2 + grid.paneRows;
     const detailRow = dividerRow + 1;
 
     expect(mouseAction(browse, press(4, detailRow), idle)).toEqual({
@@ -2697,15 +2760,16 @@ describe("terminal pointer input", () => {
   });
 
   it("resizes from the divider and ignores motion that is not a drag", () => {
-    const { leftWidth } = layout(browse.model);
-    expect(mouseAction(browse, press(leftWidth + 1, 8), idle).kind).toBe(
+    const { headerRows, leftWidth } = layout(browse.model);
+    const paneRow = headerRows + 3;
+    expect(mouseAction(browse, press(leftWidth + 1, paneRow), idle).kind).toBe(
       "set-left-percent",
     );
-    expect(mouseAction(browse, press(30, 8, 32), idle)).toEqual({
+    expect(mouseAction(browse, press(30, paneRow, 32), idle)).toEqual({
       kind: "noop",
     });
     expect(
-      mouseAction(browse, press(30, 8, 32), {
+      mouseAction(browse, press(30, paneRow, 32), {
         dragging: "panes",
         doubleClick: false,
       }).kind,
@@ -2713,13 +2777,18 @@ describe("terminal pointer input", () => {
   });
 
   it("ignores clicks on chrome, the section header, and empty rows", () => {
-    const { leftWidth } = layout(browse.model);
+    const { headerRows, leftWidth } = layout(browse.model);
+    const firstPaneRow = headerRows + 2;
     expect(mouseAction(browse, press(4, 2), idle)).toEqual({ kind: "noop" });
-    expect(mouseAction(browse, press(leftWidth + 8, 5), idle)).toEqual({
+    expect(
+      mouseAction(browse, press(leftWidth + 8, firstPaneRow), idle),
+    ).toEqual({
       kind: "noop",
     });
     expect(mouseAction(browse, press(4, 90), idle)).toEqual({ kind: "noop" });
-    expect(mouseAction(browse, press(4, 5, 2), idle)).toEqual({ kind: "noop" });
+    expect(mouseAction(browse, press(4, firstPaneRow, 2), idle)).toEqual({
+      kind: "noop",
+    });
   });
 });
 
@@ -2926,14 +2995,15 @@ describe("raw terminal pointer input", () => {
         { rows: 24, columns: 100 },
       ),
     };
-    const { leftWidth } = layout(state.model);
+    const { headerRows, leftWidth } = layout(state.model);
+    const pointerRow = headerRows + 3;
     const { input, output } = fakeTty();
     const terminal = createNodeTuiTerminal(
       input as unknown as NodeJS.ReadStream,
       output as unknown as NodeJS.WriteStream,
     );
 
-    input.write(`${ESC}[<0;4;6M`);
+    input.write(`${ESC}[<0;4;${String(pointerRow)}M`);
     await expect(terminal.readAction(state)).resolves.toEqual({
       kind: "point-section",
       index: 1,
@@ -2943,7 +3013,7 @@ describe("raw terminal pointer input", () => {
       model: reduceBrowse(state.model, { kind: "point-section", index: 1 }),
     };
 
-    input.write(`${ESC}[<0;${String(leftWidth + 8)};6M`);
+    input.write(`${ESC}[<0;${String(leftWidth + 8)};${String(pointerRow)}M`);
     await expect(terminal.readAction(sectionState)).resolves.toEqual({
       kind: "point-entry",
       index: 0,
@@ -2956,7 +3026,7 @@ describe("raw terminal pointer input", () => {
       }),
     };
 
-    input.write(`${ESC}[<0;${String(leftWidth + 8)};6M`);
+    input.write(`${ESC}[<0;${String(leftWidth + 8)};${String(pointerRow)}M`);
     await expect(terminal.readAction(entryState)).resolves.toEqual({
       kind: "point-toggle",
       pane: "entries",
@@ -3015,9 +3085,10 @@ describe("raw terminal pointer input", () => {
       input as unknown as NodeJS.ReadStream,
       output as unknown as NodeJS.WriteStream,
     );
+    const pointerRow = layout(state.model).headerRows + 2;
 
     // Readline splits this into eight keypresses; none is a whole report.
-    input.write(`${ESC}[<0;4;5M`);
+    input.write(`${ESC}[<0;4;${String(pointerRow)}M`);
     const action = await terminal.readAction(state);
     expect(action).toEqual({ kind: "point-section", index: 0 });
 
@@ -3051,9 +3122,10 @@ describe("raw terminal pointer input", () => {
       input as unknown as NodeJS.ReadStream,
       output as unknown as NodeJS.WriteStream,
     );
+    const pointerRow = layout(state.model).headerRows + 2;
 
     input.write(`${ESC}[<`);
-    input.write("0;4;5M");
+    input.write(`0;4;${String(pointerRow)}M`);
     await expect(terminal.readAction(state)).resolves.toEqual({
       kind: "point-section",
       index: 0,

@@ -35,9 +35,6 @@ const SGR_MOUSE_INCOMPLETE = new RegExp(
 );
 const DOUBLE_CLICK_MS = 400;
 
-/** Rows above browse panes: title, hints, filter, and top rule. */
-const BROWSE_PANE_TOP = 4;
-
 interface MouseReport {
   readonly button: number;
   readonly column: number;
@@ -182,7 +179,8 @@ export function mouseAction(
   }
   const grid = layout(state.model);
   const { leftWidth, columns, paneRows, rows } = grid;
-  const detailDividerRow = BROWSE_PANE_TOP + paneRows + 1;
+  const paneTop = grid.headerRows + 1;
+  const detailDividerRow = paneTop + paneRows + 1;
 
   if ((report.button & 64) !== 0) {
     const pane = pointerPane(state, report);
@@ -206,7 +204,7 @@ export function mouseAction(
   if (
     context.dragging === "panes" ||
     (report.column === leftWidth + 1 &&
-      report.row > BROWSE_PANE_TOP &&
+      report.row > paneTop &&
       report.row < detailDividerRow)
   )
     return {
@@ -238,15 +236,18 @@ function inColumns(column: number, range: readonly [number, number]): boolean {
 
 function pointerPane(state: TuiState, report: MouseReport): PointerPane | null {
   if (state.screen !== "browse") return null;
-  const { paneRows, detailRows, leftWidth, usable } = layout(state.model);
-  const paneRow = report.row - BROWSE_PANE_TOP - 1;
+  const { headerRows, paneRows, detailRows, leftWidth, usable } = layout(
+    state.model,
+  );
+  const paneTop = headerRows + 1;
+  const paneRow = report.row - paneTop - 1;
   if (paneRow >= 0 && paneRow < paneRows) {
     if (report.column >= 1 && report.column <= leftWidth) return "sections";
     if (report.column > leftWidth + 1 && report.column <= usable)
       return "entries";
     return null;
   }
-  const detailRow = report.row - (BROWSE_PANE_TOP + paneRows + 2);
+  const detailRow = report.row - (paneTop + paneRows + 2);
   if (
     detailRow >= 0 &&
     detailRow < detailRows &&
@@ -261,7 +262,7 @@ function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
   if (state.screen !== "browse") return null;
   const pane = pointerPane(state, report);
   if (pane === null || pane === "detail") return null;
-  const paneRow = report.row - BROWSE_PANE_TOP - 1;
+  const paneRow = report.row - layout(state.model).headerRows - 2;
   const view = panes(state.model);
   if (pane === "sections") {
     const index = view.sections.offset + paneRow;

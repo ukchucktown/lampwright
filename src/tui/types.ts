@@ -61,6 +61,8 @@ export interface TuiViewport {
 export interface TuiLayout {
   readonly rows: number;
   readonly columns: number;
+  /** Header rows before the top pane rule. */
+  readonly headerRows: number;
   /** One column short of the width; the last cell wraps on auto-margin. */
   readonly usable: number;
   readonly paneRows: number;
