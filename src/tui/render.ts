@@ -388,13 +388,50 @@ function availabilityPlanBodyLines(
       const harnesses = [
         ...new Set(action.effects.map((effect) => effect.harnessId)),
       ].sort();
+      const pluginEffects = action.effects.filter(
+        (effect) => "pluginBoundaryId" in effect,
+      );
+      if (pluginEffects.length > 0) {
+        const plugins = pluginEffects.flatMap((effect) => {
+          const plugin = state.browse.inventory.plugins.find(
+            (candidate) => candidate.id === effect.pluginBoundaryId,
+          );
+          return plugin === undefined ? [] : [plugin];
+        });
+        const ownedSkills = new Set(
+          plugins.flatMap((plugin) =>
+            plugin.installationIds.flatMap((id) => {
+              const installation = state.browse.inventory.installations.find(
+                (candidate) => candidate.id === id,
+              );
+              return installation === undefined
+                ? []
+                : [installation.skill.name];
+            }),
+          ),
+        );
+        const resources = plugins.reduce(
+          (total, plugin) => total + plugin.resources.length,
+          0,
+        );
+        lines.push(
+          ...wrapPlanLine(
+            `Native Plugin: ${operation} ${plugins.map((plugin) => plugin.pluginId).join(", ")} in ${harnesses.join(", ")} by changing harness configuration. ${String(ownedSkills.size)} owned Skill${ownedSkills.size === 1 ? "" : "s"} and ${String(resources)} other known resource${resources === 1 ? "" : "s"} remain installed and change availability together.`,
+            width,
+          ).map(style.active),
+        );
+        if (pluginEffects.length === action.effects.length) continue;
+      }
       const skills = [
         ...new Set(
-          action.affectedInstallationIds.map(
-            (id) =>
-              state.browse.inventory.installations.find(
-                (installation) => installation.id === id,
-              )?.skill.name ?? id,
+          action.effects.flatMap((effect) =>
+            "installationId" in effect
+              ? [
+                  state.browse.inventory.installations.find(
+                    (installation) => installation.id === effect.installationId,
+                  )?.skill.name ?? effect.installationId,
+                ]
+              : [],
           ),
         ),
       ].sort();
@@ -492,7 +529,7 @@ function availabilityPlanBodyLines(
       if (action.kind === "native-control") {
         for (const effect of action.effects)
           technical(
-            `  Effect: ${effect.installationId} · ${effect.harnessId} · ${effect.operation}`,
+            `  Effect: ${"installationId" in effect ? effect.installationId : effect.pluginBoundaryId} · ${effect.harnessId} · ${effect.operation}`,
           );
         for (const mutation of action.mutations)
           technical(
@@ -690,6 +727,14 @@ function availabilityTargetLabel(
         (x) => x.id === target.logicalSkillId,
       )?.skill.name ?? target.logicalSkillId
     );
+  if (target.kind === "plugin") {
+    const plugin = state.browse.inventory.plugins.find(
+      (x) => x.id === target.pluginBoundaryId,
+    );
+    return plugin === undefined
+      ? target.pluginBoundaryId
+      : `${plugin.pluginId} (${plugin.exposedTo.join(", ")})`;
+  }
   return (
     state.browse.inventory.groups.find((x) => x.id === target.groupId)?.label ??
     target.groupId
@@ -987,6 +1032,12 @@ export function renderBrowseLines(
               { text: " move · ", paint: style.muted },
               { text: "space/dbl-click", paint: style.title },
               { text: " select", paint: style.muted },
+              ...(isDisabled
+                ? []
+                : [
+                    { text: " · enter", paint: style.title },
+                    { text: " remove", paint: style.muted },
+                  ]),
             ],
       usable,
       style.muted,
@@ -1221,13 +1272,21 @@ function disabledCount(state: TuiBrowseState): number {
       ).length,
     0,
   );
-  return native + (state.disabledEntries?.length ?? 0);
+  const plugins = state.inventory.plugins.filter(
+    (plugin) => plugin.availability.status === "disabled",
+  ).length;
+  return native + plugins + (state.disabledEntries?.length ?? 0);
 }
 
 function disabledRows(sections: readonly TuiSection[]): number {
-  return sections
+  const disabled = sections
     .filter((section) => section.key.startsWith("disabled-"))
     .reduce((count, section) => count + section.entries.length, 0);
+  const plugins =
+    sections
+      .find((section) => section.key === "plugins")
+      ?.entries.filter((entry) => entry.rowKind !== "plugin-skill").length ?? 0;
+  return disabled + plugins;
 }
 
 function renderCompactBrowse(

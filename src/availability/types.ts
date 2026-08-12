@@ -19,6 +19,7 @@ import type {
 export type AvailabilityTarget =
   | { readonly kind: "installation"; readonly installationId: InstallationId }
   | { readonly kind: "logical-skill"; readonly logicalSkillId: LogicalSkillId }
+  | { readonly kind: "plugin"; readonly pluginBoundaryId: string }
   | { readonly kind: "source-group"; readonly groupId: string };
 
 export interface AvailabilityIntent {
@@ -42,6 +43,22 @@ export type NativeMutationOperation =
       readonly kind: "gemini-disabled-skills";
       readonly skillName: string;
       readonly disabled: boolean;
+    }
+  | {
+      readonly kind: "codex-plugin-enabled";
+      readonly pluginId: string;
+      readonly enabled: boolean;
+    }
+  | {
+      readonly kind: "claude-enabled-plugins";
+      readonly pluginId: string;
+      readonly enabled: boolean;
+    }
+  | {
+      readonly kind: "gemini-extension-enablement";
+      readonly pluginId: string;
+      readonly scopePath: string;
+      readonly enabled: boolean;
     };
 
 export interface NativeConfigurationMutation {
@@ -54,11 +71,17 @@ export interface NativeConfigurationMutation {
   readonly operation: NativeMutationOperation;
 }
 
-export interface NativeControlEffect {
-  readonly installationId: InstallationId;
-  readonly harnessId: string;
-  readonly operation: "disable" | "enable";
-}
+export type NativeControlEffect =
+  | {
+      readonly installationId: InstallationId;
+      readonly harnessId: string;
+      readonly operation: "disable" | "enable";
+    }
+  | {
+      readonly pluginBoundaryId: string;
+      readonly harnessId: string;
+      readonly operation: "disable" | "enable";
+    };
 
 interface AvailabilityActionBase {
   readonly id: string;
@@ -138,6 +161,14 @@ export type AvailabilityVerificationCheck =
       readonly entryId: DisabledEntryId | null;
       readonly installationId: InstallationId;
       readonly expectedPresent: boolean;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "plugin-state";
+      readonly target: AvailabilityTarget;
+      readonly actionId: string | null;
+      readonly pluginBoundaryId: string;
+      readonly expectedStatus: "enabled" | "disabled";
     };
 
 export interface AvailabilityPlan {

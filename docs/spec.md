@@ -163,15 +163,17 @@ The UI must:
   or non-default Plugin boundary. Show each Plugin's owning agent harness,
   owned Skill names, descriptions, and other known resources before removal.
   A Plugin's child Skill rows are read-only and use normal entry scrolling; only
-  the Plugin boundary row selects complete Plugin removal. The CLI also permits
-  an individual Installation target.
+  the Plugin boundary row selects complete Plugin removal or whole-Plugin
+  availability. Enter reviews removal and `d` reviews Native Disable. The CLI
+  also permits an individual Installation target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.
 - Clearly distinguish removable, blocked, unresolved, and source-only findings.
 - Present `Inventory | Disabled (N) | Trash (N)` as peer views. Inventory shows
   every Skill with at least one enabled Harness Exposure; Disabled shows every
   Skill with a natively disabled Harness Exposure plus every Suspended Disable.
-  A partially disabled Skill may appear in both views with its per-harness state
-  explained.
+  A natively disabled Plugin appears once as its complete Plugin boundary in
+  Disabled. A partially disabled Skill may appear in both views with its
+  per-harness state explained.
 - Let an Inventory selection open a Disable review and let a Disabled selection
   open an Enable review. Both reviews name every affected harness, distinguish
   Native Disable from Suspended Disable, and remain scrollable before execution.
@@ -248,6 +250,15 @@ A plugin-owned skill may be removed independently only when the owning plugin or
 
 Removing a Plugin must show all owned skills, agents, commands, hooks, configuration, and other known resources. Ordinary `--all` removal excludes plugins; including them requires an explicit `--include-plugins` choice. A runtime-default Plugin supplied by an agent harness is never removable, including when explicitly targeted or forced.
 
+A non-default Plugin may be disabled or enabled only as one complete Plugin
+boundary through a supported harness-native control. The Plugin and every owned
+Skill or resource remain installed and change availability together. Plugin
+availability never displaces content into Disabled Storage, and Plugin-owned
+Skills remain nonselectable as individual Availability Targets. Runtime-default,
+managed-policy, unsupported, unresolved, malformed, ambiguous, protected,
+read-only, stale, or raced Plugin controls fail closed and cannot be forced.
+Removal and availability protections are evaluated independently.
+
 ### 9.2 Project protection
 
 For every path inside a Git worktree, the planner asks Git whether the path is ignored. If Git does not classify it as ignored, the path is Git-protected and no Lampwright action may mutate it. This invariant is not bypassed by force.
@@ -261,14 +272,16 @@ selected capability will be unavailable across all of those exposures; a
 partial result must not be presented as fully disabled.
 
 Codex path-based skill configuration, Claude Code skill overrides, and Gemini
-CLI disabled-skill settings are the initial Native Disable controls. A
-name-based control is blocked when it could affect another Skill Identity with
-the same harness-visible name. Plugin-owned and System Skills are never
+CLI disabled-skill settings are the initial Skill Native Disable controls.
+Codex Plugin settings, Claude Code enabled-Plugin settings, and Gemini extension
+enablement rules are the initial whole-Plugin Native Disable controls. A
+name-based Skill control is blocked when it could affect another Skill Identity
+with the same harness-visible name. Plugin-owned and System Skills are never
 individually disabled by Lampwright.
 
 Inventory represents runtime status separately from native-control support and
 materializes the exact, fail-closed configuration evidence defined in
-[Native Skill availability controls](./availability-controls.md). Planning and
+[Native availability controls](./availability-controls.md). Planning and
 Execution must not infer additional harness configuration conventions.
 
 When any exposure lacks a safe native control, Planning may choose one

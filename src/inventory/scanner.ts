@@ -46,6 +46,7 @@ import { applyAdapterManifests } from "./adapter-runtime.js";
 import {
   createAvailabilityDocumentReader,
   materializeHarnessExposures,
+  materializePluginAvailability,
 } from "./availability.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
@@ -342,12 +343,22 @@ async function scanWithOptions(
     roots,
     options.commandRunner,
   );
-  const plugins = [
+  const rawPlugins = [
     ...genericPlugins,
     ...claudeCode.plugins,
     ...codex.plugins,
     ...gemini.plugins,
   ].sort((left, right) => compareText(left.id, right.id));
+  const plugins = await Promise.all(
+    rawPlugins.map(async (plugin) => ({
+      ...plugin,
+      availability: await materializePluginAvailability(
+        plugin,
+        options.environment,
+        readAvailabilityDocument,
+      ),
+    })),
+  );
   const snapshot = {
     installations,
     otherFindings: [
@@ -1289,6 +1300,14 @@ async function createPluginBoundaries(
           cleanupId: null,
         },
       ],
+      availability: {
+        status: "enabled",
+        control: {
+          kind: "unsupported",
+          reason:
+            "this Plugin boundary has no supported native availability control",
+        },
+      },
       removal: {
         managed: null,
         fallback: {

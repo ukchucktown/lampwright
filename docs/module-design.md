@@ -30,15 +30,16 @@ The module owns:
   resolved direct or ephemeral-package invocations, protected managed effects,
   concrete verification checks, exact declarative record cleanup, and physical
   Plugin boundaries from compiled Adapters
-- Materialization of per-harness availability status, safe native enablement
-  controls, exact configuration evidence, and availability verification
+- Materialization of per-harness Skill and complete-Plugin availability status,
+  safe native enablement controls, exact configuration evidence, and
+  availability verification
 - Semantic Inventory fingerprinting over normalized evidence, excluding scan
   time
 
 The returned Inventory is immutable and disposable. Tests exercise the module through `scan` against temporary filesystem fixtures and fake command execution.
 
 The normalized Harness Exposure and native evidence contract is defined in
-[Native Skill availability controls](./availability-controls.md). Status and
+[Native Skill and Plugin availability controls](./availability-controls.md). Status and
 control support are independent; malformed or ambiguous configuration is
 unresolved rather than silently treated as an enabled default.
 

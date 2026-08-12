@@ -95,7 +95,21 @@ export type NativeControlSelectorValue =
       readonly kind: "claude-skill-overrides";
       readonly mode: "on" | "name-only" | "user-invocable-only" | "off" | null;
     }
-  | { readonly kind: "gemini-disabled-skills"; readonly disabled: boolean };
+  | { readonly kind: "gemini-disabled-skills"; readonly disabled: boolean }
+  | {
+      readonly kind: "codex-plugin-enabled";
+      readonly enabled: boolean | null;
+    }
+  | {
+      readonly kind: "claude-enabled-plugins";
+      readonly enabled: boolean | null;
+    }
+  | {
+      readonly kind: "gemini-extension-enablement";
+      readonly overrides: readonly string[];
+      readonly enabled: boolean;
+      readonly scopePath: string;
+    };
 export interface NativeControlDocumentEvidence {
   readonly path: string;
   readonly format: NativeControlFormat;
@@ -606,6 +620,30 @@ export interface PluginResource {
   readonly cleanupId: string | null;
 }
 
+export type PluginAvailabilityControl =
+  | { readonly kind: "unsupported"; readonly reason: string }
+  | {
+      readonly kind: "native";
+      readonly mechanism:
+        | "codex-plugin-enabled"
+        | "claude-enabled-plugins"
+        | "gemini-extension-enablement";
+      readonly availability: Readonly<
+        Record<"disable" | "enable", NativeControlOperationAvailability>
+      >;
+      readonly selector: {
+        readonly kind: "plugin-id";
+        readonly value: string;
+      };
+      readonly layers: readonly NativeControlDocumentEvidence[];
+      readonly writableLayerPaths: readonly string[];
+    };
+
+export interface PluginAvailability {
+  readonly status: HarnessExposureStatus;
+  readonly control: PluginAvailabilityControl;
+}
+
 export interface PluginBoundary {
   readonly id: string;
   readonly pluginId: string;
@@ -624,6 +662,8 @@ export interface PluginBoundary {
   readonly runtimeDefault: boolean;
   readonly installationIds: readonly InstallationId[];
   readonly resources: readonly PluginResource[];
+  /** Whole-Plugin runtime availability, independent from child Skill controls. */
+  readonly availability: PluginAvailability;
   readonly removal: RemovalEvidence;
 }
 

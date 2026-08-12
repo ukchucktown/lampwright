@@ -15,6 +15,7 @@ import type {
   InstallationId,
   Inventory,
   NativeControlDocumentEvidence,
+  PluginBoundary,
   RemovalTarget,
   SkillIdentity,
 } from "../model/types.js";
@@ -40,6 +41,7 @@ interface ResolvedAvailabilityTarget {
   readonly target: AvailabilityTarget;
   readonly installations: readonly Installation[];
   readonly installationIds: readonly InstallationId[];
+  readonly plugin: PluginBoundary | null;
 }
 type NativeExposure = HarnessExposure & {
   readonly control: Extract<HarnessExposure["control"], { kind: "native" }>;
@@ -69,18 +71,19 @@ export function planAvailability(
   const actions: AvailabilityAction[] = [];
 
   for (const item of resolved) {
-    const itemBlocks = targetBlocks(
-      inventory,
-      entries,
-      item,
-      normalizedIntent,
-      selectedIds,
-    );
+    const itemBlocks =
+      item.plugin === null
+        ? targetBlocks(inventory, entries, item, normalizedIntent, selectedIds)
+        : pluginTargetBlocks(inventory, item, normalizedIntent, selectedIds);
     blocks.push(...itemBlocks);
     if (itemBlocks.some((block) => !block.overridable || !intent.force))
       continue;
     const approvals = approvalsFor(itemBlocks, intent.force);
-    if (intent.operation === "disable")
+    if (item.plugin !== null)
+      actions.push(
+        ...pluginActions(item, normalizedIntent.operation, approvals),
+      );
+    else if (intent.operation === "disable")
       actions.push(...disableActions(item, planId, approvals));
     else actions.push(...enableActions(item, entries, approvals));
   }
@@ -145,11 +148,17 @@ function normalizeTargets(
   const result: ResolvedAvailabilityTarget[] = [];
   for (const candidate of unique) {
     const candidateIds = new Set(candidate.installationIds);
-    const covering = result.find((existing) =>
-      candidate.installationIds.every((id) =>
-        existing.installationIds.includes(id),
-      ),
-    );
+    const covering =
+      candidate.installationIds.length === 0
+        ? result.find(
+            (existing) =>
+              targetKey(existing.target) === targetKey(candidate.target),
+          )
+        : result.find((existing) =>
+            candidate.installationIds.every((id) =>
+              existing.installationIds.includes(id),
+            ),
+          );
     if (covering !== undefined) continue;
     const partial = result.find((existing) =>
       existing.installationIds.some((id) => candidateIds.has(id)),
@@ -167,11 +176,13 @@ function normalizeTargets(
 }
 
 function targetBreadth(target: AvailabilityTarget): number {
-  return target.kind === "source-group"
-    ? 2
-    : target.kind === "logical-skill"
-      ? 1
-      : 0;
+  return target.kind === "plugin"
+    ? 3
+    : target.kind === "source-group"
+      ? 2
+      : target.kind === "logical-skill"
+        ? 1
+        : 0;
 }
 
 function resolveTarget(
@@ -195,6 +206,7 @@ function resolveTarget(
       target,
       installations: installation === undefined ? [] : [installation],
       installationIds: [target.installationId],
+      plugin: null,
     };
   }
   if (target.kind === "logical-skill") {
@@ -212,6 +224,25 @@ function resolveTarget(
         logical.installationIds.includes(installation.id),
       ),
       installationIds: [...logical.installationIds],
+      plugin: null,
+    };
+  }
+  if (target.kind === "plugin") {
+    const plugin = inventory.plugins.find(
+      (candidate) => candidate.id === target.pluginBoundaryId,
+    );
+    if (plugin === undefined)
+      throw new PlanningError(
+        "target-not-found",
+        `Plugin boundary not found: ${target.pluginBoundaryId}`,
+      );
+    return {
+      target,
+      installations: inventory.installations.filter((installation) =>
+        plugin.installationIds.includes(installation.id),
+      ),
+      installationIds: [...plugin.installationIds],
+      plugin,
     };
   }
   const group = inventory.groups.find(
@@ -228,7 +259,190 @@ function resolveTarget(
       group.installationIds.includes(installation.id),
     ),
     installationIds: [...group.installationIds],
+    plugin: null,
   };
+}
+
+function pluginTargetBlocks(
+  inventory: Inventory,
+  resolved: ResolvedAvailabilityTarget,
+  intent: AvailabilityIntent,
+  selectedIds: ReadonlySet<InstallationId>,
+): AvailabilityBlock[] {
+  const plugin = resolved.plugin!;
+  const blocks: AvailabilityBlock[] = [];
+  if (plugin.runtimeDefault)
+    blocks.push(
+      absoluteBlock(
+        "system-skill",
+        resolved.target,
+        "runtime-default Plugins cannot be disabled or enabled",
+        plugin.availability.control.kind === "native"
+          ? (plugin.availability.control.layers[0]?.path ?? null)
+          : null,
+      ),
+    );
+  const desired = intent.operation === "disable" ? "disabled" : "enabled";
+  if (plugin.availability.status === "unresolved")
+    blocks.push(
+      absoluteBlock(
+        "unresolved-exposure",
+        resolved.target,
+        "the Plugin runtime state is unresolved",
+        plugin.availability.control.kind === "native"
+          ? (plugin.availability.control.layers[0]?.path ?? null)
+          : null,
+      ),
+    );
+  if (plugin.availability.status !== desired) {
+    if (plugin.availability.control.kind === "unsupported")
+      blocks.push(
+        absoluteBlock(
+          "unsupported-control",
+          resolved.target,
+          plugin.availability.control.reason,
+          null,
+        ),
+      );
+    else {
+      const availability =
+        plugin.availability.control.availability[intent.operation];
+      if (availability.kind === "unavailable")
+        blocks.push(
+          absoluteBlock(
+            "configuration-unsafe",
+            resolved.target,
+            availability.reason,
+            plugin.availability.control.layers[0]?.path ?? null,
+          ),
+        );
+      if (
+        inventory.plugins.some(
+          (candidate) =>
+            candidate.id !== plugin.id &&
+            candidate.adapterId === plugin.adapterId &&
+            candidate.pluginId === plugin.pluginId,
+        )
+      )
+        blocks.push(
+          absoluteBlock(
+            "name-collision",
+            resolved.target,
+            "the native Plugin selector could affect another installed Plugin boundary",
+            plugin.availability.control.layers[0]?.path ?? null,
+          ),
+        );
+    }
+  }
+  for (const dependency of inventory.dependencies) {
+    if (
+      dependency.kind === "hard" &&
+      removalTargetTouches(
+        dependency.target,
+        resolved.installationIds,
+        inventory,
+      ) &&
+      !selectedIds.has(dependency.dependentInstallationId)
+    )
+      blocks.push({
+        kind: "hard-dependency",
+        target: resolved.target,
+        dependency,
+        overridable: true,
+      });
+  }
+  return deduplicate(blocks);
+}
+
+function pluginActions(
+  resolved: ResolvedAvailabilityTarget,
+  operation: "disable" | "enable",
+  approvals: readonly ApprovalRequirement[],
+): AvailabilityAction[] {
+  const plugin = resolved.plugin!;
+  const desired = operation === "disable" ? "disabled" : "enabled";
+  if (
+    plugin.availability.status === desired ||
+    plugin.availability.control.kind !== "native"
+  )
+    return [];
+  const harnessId =
+    plugin.availability.control.mechanism === "codex-plugin-enabled"
+      ? "codex"
+      : plugin.availability.control.mechanism === "claude-enabled-plugins"
+        ? "claude-code"
+        : "gemini-cli";
+  return pluginNativeMutations(plugin, operation).map((mutation) => ({
+    id: stableId("availability-action", plugin.id, operation, mutation.path),
+    kind: "native-control" as const,
+    targets: [resolved.target],
+    affectedInstallationIds: [...plugin.installationIds],
+    effects: [
+      {
+        pluginBoundaryId: plugin.id,
+        harnessId,
+        operation,
+      },
+    ],
+    mutations: [mutation],
+    dependsOn: [],
+    approvals,
+  }));
+}
+
+function pluginNativeMutations(
+  plugin: PluginBoundary,
+  operation: "disable" | "enable",
+): NativeConfigurationMutation[] {
+  if (plugin.availability.control.kind !== "native") return [];
+  const control = plugin.availability.control;
+  const candidates = control.layers.filter(
+    (layer) =>
+      control.writableLayerPaths.includes(layer.path) && writable(layer),
+  );
+  const layers =
+    control.mechanism === "claude-enabled-plugins"
+      ? candidates
+          .sort(
+            (left, right) =>
+              precedence(right.documentScope) - precedence(left.documentScope),
+          )
+          .slice(0, 1)
+      : candidates.slice(0, 1);
+  return layers.map((layer) => {
+    const enabled = operation === "enable";
+    const selectorValue = layer.selectorValue;
+    return {
+      path: layer.path,
+      format: layer.format,
+      documentScope: layer.documentScope,
+      exists: layer.exists,
+      expectedPreimageHash: layer.preimageHash,
+      protection: layer.protection,
+      operation:
+        control.mechanism === "codex-plugin-enabled"
+          ? {
+              kind: control.mechanism,
+              pluginId: plugin.pluginId,
+              enabled,
+            }
+          : control.mechanism === "claude-enabled-plugins"
+            ? {
+                kind: control.mechanism,
+                pluginId: plugin.pluginId,
+                enabled,
+              }
+            : {
+                kind: control.mechanism,
+                pluginId: plugin.pluginId,
+                scopePath:
+                  selectorValue?.kind === "gemini-extension-enablement"
+                    ? selectorValue.scopePath
+                    : "",
+                enabled,
+              },
+    };
+  });
 }
 
 function targetBlocks(
@@ -852,7 +1066,7 @@ function groupNativeActions(
       );
     const targets = deduplicate(members.flatMap((member) => member.targets));
     const affectedInstallationIds = [
-      ...new Set(effects.map((effect) => effect.installationId)),
+      ...new Set(members.flatMap((member) => member.affectedInstallationIds)),
     ].sort(compare);
     const approvals = deduplicate(
       members.flatMap((member) => member.approvals),
@@ -1070,6 +1284,26 @@ function createChecks(
 ): AvailabilityVerificationCheck[] {
   const checks: AvailabilityVerificationCheck[] = [];
   for (const item of resolved) {
+    if (item.plugin !== null) {
+      const action = actions.find(
+        (candidate) =>
+          candidate.kind === "native-control" &&
+          candidate.effects.some(
+            (effect) =>
+              "pluginBoundaryId" in effect &&
+              effect.pluginBoundaryId === item.plugin!.id,
+          ),
+      );
+      checks.push({
+        id: stableId("availability-check", targetKey(item.target), operation),
+        kind: "plugin-state",
+        target: item.target,
+        actionId: action?.id ?? null,
+        pluginBoundaryId: item.plugin.id,
+        expectedStatus: operation === "disable" ? "disabled" : "enabled",
+      });
+      continue;
+    }
     for (const installation of item.installations) {
       for (const exposure of installation.harnessExposures) {
         const action = actions.find(
@@ -1078,6 +1312,7 @@ function createChecks(
             (candidate.kind !== "native-control" ||
               candidate.effects.some(
                 (effect) =>
+                  "installationId" in effect &&
                   effect.installationId === installation.id &&
                   effect.harnessId === exposure.harnessId,
               )),
@@ -1281,7 +1516,9 @@ function targetKey(target: AvailabilityTarget): string {
     ? `installation:${target.installationId}`
     : target.kind === "logical-skill"
       ? `logical-skill:${target.logicalSkillId}`
-      : `source-group:${target.groupId}`;
+      : target.kind === "plugin"
+        ? `plugin:${target.pluginBoundaryId}`
+        : `source-group:${target.groupId}`;
 }
 function stableId(prefix: string, ...parts: readonly string[]): string {
   const hash = createHash("sha256");

@@ -133,6 +133,14 @@ paths, changed hashes, and replacement races fail closed. Suspended Disable and
 Enable call only the Disabled Storage module; Execution never moves those
 payloads itself.
 
+Whole-Plugin native actions use the same preimage and live-protection boundary.
+Codex changes the Plugin table's `enabled` value, Claude Code changes the exact
+`enabledPlugins` member, and Gemini CLI changes the extension's ordered
+user-scope enablement rules. Every owned Skill and resource remains installed;
+Execution never turns a Plugin action into per-Skill edits or Disabled Storage.
+Final verification evaluates the complete Plugin's observed enabled/disabled
+state.
+
 Actions run only after their `dependsOn` actions succeed or remain unchanged.
 A failed branch blocks its dependents while independent branches continue.
 Afterward, Execution rescans Inventory, relists Disabled Storage, and evaluates

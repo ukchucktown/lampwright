@@ -132,6 +132,13 @@ describe("Gemini CLI adapter", () => {
     const boundary = inventory.plugins.find(
       (item) => item.pluginId === "valid",
     )!;
+    expect(boundary.availability).toMatchObject({
+      status: "unresolved",
+      control: {
+        kind: "native",
+        mechanism: "gemini-extension-enablement",
+      },
+    });
     expect(
       inventory.installations.find((item) => item.plugin?.id === "valid")
         ?.metadata["gemini-cli"],
@@ -759,6 +766,13 @@ describe("Gemini CLI adapter", () => {
     boundary = inventory.plugins.find(
       (item) => item.pluginId === "linked-extension",
     )!;
+    expect(boundary.availability).toMatchObject({
+      status: "enabled",
+      control: {
+        kind: "native",
+        mechanism: "gemini-extension-enablement",
+      },
+    });
     expect(
       boundary.removal.managed?.effects.filter(
         (effect) => effect.kind === "modify-path",

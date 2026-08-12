@@ -272,6 +272,11 @@ function verify(
           : entry.id === check.entryId,
       );
       passed = present === check.expectedPresent;
+    } else if (check.kind === "plugin-state") {
+      const plugin = inventory.plugins.find(
+        (item) => item.id === check.pluginBoundaryId,
+      );
+      passed = plugin?.availability.status === check.expectedStatus;
     } else {
       const installation = inventory.installations.find(
         (item) => item.id === check.installationId,
@@ -366,7 +371,7 @@ function targets(
         target,
         status: "partial",
         actionIds: targetActions.map((action) => action.id),
-        reason: "not every Harness Exposure reached the requested state",
+        reason: "not every requested availability state was observed",
       };
     if (actionResults.some((result) => result.status === "failed"))
       return {

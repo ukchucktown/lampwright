@@ -11,19 +11,21 @@ paths themselves.
 `group:<group-id>`, and `plugin:<boundary-id>`.
 
 `disable` accepts only the exact Availability selectors
-`installation:<id>`, `logical-skill:<id>`, and `group:<group-id>`. `enable`
-accepts those selectors when the live Inventory shows at least one natively
-disabled Harness Exposure. It also accepts
+`installation:<id>`, `logical-skill:<id>`, `group:<group-id>`, and
+`plugin:<plugin-boundary-id>`. `enable` accepts those selectors when the live
+Inventory shows at least one natively disabled Harness Exposure or a disabled
+complete Plugin boundary. It also accepts
 `disabled-entry:<disabled-storage-id>` for a Suspended Disable no longer
 present in Inventory. Successful suspended-disable reports return these exact
 entry IDs; prefix an ID with `disabled-entry:` for the later Enable selector.
-Names, source IDs, and Plugin boundaries are never inferred as Availability
-identity.
+Names and source IDs are never inferred as Availability identity.
 
 ```console
 lampwright disable installation:<installation-id> --dry-run --json
 lampwright disable logical-skill:<logical-skill-id> --yes
+lampwright disable plugin:<plugin-boundary-id> --yes
 lampwright enable installation:<natively-disabled-installation-id> --yes
+lampwright enable plugin:<disabled-plugin-boundary-id> --yes
 lampwright enable disabled-entry:<disabled-storage-id> --yes
 ```
 

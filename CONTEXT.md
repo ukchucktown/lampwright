@@ -61,13 +61,13 @@ A selected Logical Skill, individual Installation, declared Installation Group, 
 The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to remove one or more Removal Targets.
 
 **Availability Target**:
-A selected Logical Skill, individual Installation, or declared Installation Group whose Harness Exposures the user intends to disable or enable without removal.
+A selected Logical Skill, individual Installation, declared Installation Group, or complete Plugin boundary that the user intends to disable or enable without removal. Skill targets change their represented Harness Exposures; a Plugin target changes the harness-native availability of the complete Plugin while keeping its contents installed.
 
 **Availability Plan**:
 The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to disable or enable one or more Availability Targets.
 
 **Native Disable**:
-A reversible change through a harness-supported control that keeps the Installation at its original location.
+A reversible change through a harness-supported control that keeps the Installation or complete Plugin at its original location.
 _Avoid_: Remove, uninstall
 
 **Suspended Disable**:

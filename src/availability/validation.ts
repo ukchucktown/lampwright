@@ -28,6 +28,10 @@ export const availabilityTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("logical-skill"),
     logicalSkillId: nonBlank,
   }),
+  z.strictObject({
+    kind: z.literal("plugin"),
+    pluginBoundaryId: nonBlank,
+  }),
   z.strictObject({ kind: z.literal("source-group"), groupId: nonBlank }),
 ]);
 
@@ -53,6 +57,22 @@ const mutationOperationSchema = z.discriminatedUnion("kind", [
     skillName: nonBlank,
     disabled: z.boolean(),
   }),
+  z.strictObject({
+    kind: z.literal("codex-plugin-enabled"),
+    pluginId: nonBlank,
+    enabled: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal("claude-enabled-plugins"),
+    pluginId: nonBlank,
+    enabled: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal("gemini-extension-enablement"),
+    pluginId: nonBlank,
+    scopePath: nonBlank,
+    enabled: z.boolean(),
+  }),
 ]);
 
 const nativeMutationSchema = z.strictObject({
@@ -73,7 +93,6 @@ const nativeMutationSchema = z.strictObject({
 const actionBase = {
   id: nonBlank,
   targets: z.array(availabilityTargetSchema).min(1),
-  affectedInstallationIds: z.array(nonBlank).min(1),
   dependsOn: z.array(nonBlank),
   approvals: z.array(approvalRequirementSchema),
 };
@@ -82,13 +101,21 @@ export const availabilityActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...actionBase,
     kind: z.literal("native-control"),
+    affectedInstallationIds: z.array(nonBlank),
     effects: z
       .array(
-        z.strictObject({
-          installationId: nonBlank,
-          harnessId: nonBlank,
-          operation: z.enum(["disable", "enable"]),
-        }),
+        z.union([
+          z.strictObject({
+            installationId: nonBlank,
+            harnessId: nonBlank,
+            operation: z.enum(["disable", "enable"]),
+          }),
+          z.strictObject({
+            pluginBoundaryId: nonBlank,
+            harnessId: nonBlank,
+            operation: z.enum(["disable", "enable"]),
+          }),
+        ]),
       )
       .min(1),
     mutations: z.array(nativeMutationSchema).min(1),
@@ -96,12 +123,14 @@ export const availabilityActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...actionBase,
     kind: z.literal("suspended-disable"),
+    affectedInstallationIds: z.array(nonBlank).min(1),
     installationId: nonBlank,
     request: suspendRequestSchema,
   }),
   z.strictObject({
     ...actionBase,
     kind: z.literal("suspended-enable"),
+    affectedInstallationIds: z.array(nonBlank).min(1),
     entry: disabledEntrySchema,
   }),
 ]);
@@ -158,6 +187,14 @@ export const availabilityVerificationCheckSchema = z.discriminatedUnion(
       entryId: nonBlank.nullable(),
       installationId: nonBlank,
       expectedPresent: z.boolean(),
+    }),
+    z.strictObject({
+      id: nonBlank,
+      kind: z.literal("plugin-state"),
+      target: availabilityTargetSchema,
+      actionId: nonBlank.nullable(),
+      pluginBoundaryId: nonBlank,
+      expectedStatus: z.enum(["enabled", "disabled"]),
     }),
   ],
 );

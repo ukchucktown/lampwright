@@ -458,10 +458,7 @@ export class TuiController {
       };
       return;
     }
-    const targets =
-      operation === "enable"
-        ? this.availabilityTargetsFor(state)
-        : (this.targetsFor(state) as readonly AvailabilityTarget[]);
+    const targets = this.availabilityTargetsFor(state, operation);
     if (targets.length === 0) {
       this.stateValue = {
         ...state,
@@ -484,13 +481,30 @@ export class TuiController {
     };
   }
 
-  private availabilityTargetsFor(state: TuiBrowseState) {
-    const selected = disabledSelectionTargets(
-      state.model.sections,
-      state.model.selected,
-    );
-    if (selected.length > 0) return selected;
-    return currentEntry(state.model)?.availabilityTargets ?? [];
+  private availabilityTargetsFor(
+    state: TuiBrowseState,
+    operation: "disable" | "enable",
+  ): readonly AvailabilityTarget[] {
+    if (operation === "enable") {
+      const selected = disabledSelectionTargets(
+        state.model.sections,
+        state.model.selected,
+      );
+      if (selected.length > 0) return selected;
+      return currentEntry(state.model)?.availabilityTargets ?? [];
+    }
+    return this.targetsFor(state).map((target): AvailabilityTarget => {
+      switch (target.kind) {
+        case "installation":
+          return target;
+        case "logical-skill":
+          return target;
+        case "source-group":
+          return target;
+        case "plugin":
+          return target;
+      }
+    });
   }
 
   private searchAction(state: TuiSearchState, action: TuiAction): void {

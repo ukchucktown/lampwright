@@ -96,6 +96,12 @@ function mutate(text: string, mutation: NativeConfigurationMutation): string {
     const separator = text.length === 0 || text.endsWith("\n") ? "" : eol;
     return `${text}${separator}[[skills.config]]${eol}path = ${JSON.stringify(mutation.operation.selectorPath)}${eol}enabled = ${mutation.operation.enabled ? "true" : "false"}${eol}`;
   }
+  if (mutation.operation.kind === "codex-plugin-enabled")
+    return mutateCodexPlugin(
+      text,
+      mutation.operation.pluginId,
+      mutation.operation.enabled,
+    );
   const root = parseJson(text, mutation.format === "jsonc");
   const formattingOptions = {
     insertSpaces: true,
@@ -111,6 +117,37 @@ function mutate(text: string, mutation: NativeConfigurationMutation): string {
         mutation.operation.mode,
         { formattingOptions },
       ),
+    );
+  }
+  if (mutation.operation.kind === "claude-enabled-plugins") {
+    return applyEdits(
+      text,
+      modify(
+        text,
+        ["enabledPlugins", mutation.operation.pluginId],
+        mutation.operation.enabled,
+        { formattingOptions },
+      ),
+    );
+  }
+  if (mutation.operation.kind === "gemini-extension-enablement") {
+    const entry = objectValue(root, mutation.operation.pluginId);
+    const rawOverrides = objectValue(entry, "overrides");
+    const overrides = Array.isArray(rawOverrides)
+      ? rawOverrides.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
+    const next = updateGeminiOverrides(
+      overrides,
+      mutation.operation.scopePath,
+      mutation.operation.enabled,
+    );
+    return applyEdits(
+      text,
+      modify(text, [mutation.operation.pluginId, "overrides"], next, {
+        formattingOptions,
+      }),
     );
   }
   const skills = objectValue(root, "skills");
@@ -140,6 +177,129 @@ function mutate(text: string, mutation: NativeConfigurationMutation): string {
     );
   }
   return updated;
+}
+
+function mutateCodexPlugin(
+  text: string,
+  pluginId: string,
+  enabled: boolean,
+): string {
+  parseToml(text.length === 0 ? "" : text);
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/u);
+  let tableStart = -1;
+  let tableEnd = lines.length;
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index]!.trim();
+    if (!trimmed.startsWith("[")) continue;
+    if (tableStart >= 0) {
+      tableEnd = index;
+      break;
+    }
+    if (trimmed.startsWith("[[")) continue;
+    try {
+      const parsed = parseToml(`${trimmed}${eol}`) as Record<string, unknown>;
+      const plugins = objectValue(parsed, "plugins");
+      if (
+        typeof plugins === "object" &&
+        plugins !== null &&
+        Object.hasOwn(plugins, pluginId)
+      )
+        tableStart = index;
+    } catch {
+      // The complete document was already validated. A non-table line that
+      // resembles a header is simply not the Plugin table we are looking for.
+    }
+  }
+  if (tableStart < 0) {
+    const separator = text.length === 0 || text.endsWith("\n") ? "" : eol;
+    const result = `${text}${separator}[plugins.${JSON.stringify(pluginId)}]${eol}enabled = ${enabled ? "true" : "false"}${eol}`;
+    parseToml(result);
+    return result;
+  }
+  const assignments: number[] = [];
+  for (let index = tableStart + 1; index < tableEnd; index += 1)
+    if (/^\s*enabled\s*=/u.test(lines[index]!)) assignments.push(index);
+  if (assignments.length > 1)
+    throw new Error("Codex Plugin enabled setting is ambiguous");
+  if (assignments.length === 1) {
+    const index = assignments[0]!;
+    lines[index] = lines[index]!.replace(
+      /^(\s*enabled\s*=\s*)(true|false)(\s*(?:#.*)?)$/u,
+      `$1${enabled ? "true" : "false"}$3`,
+    );
+    const result = lines.join(eol);
+    parseToml(result);
+    return result;
+  }
+  lines.splice(tableEnd, 0, `enabled = ${enabled ? "true" : "false"}`);
+  const result = lines.join(eol);
+  parseToml(result);
+  return result;
+}
+
+function updateGeminiOverrides(
+  overrides: readonly string[],
+  scopePath: string,
+  enabled: boolean,
+): string[] {
+  const intended = geminiOverride(scopePath, true, !enabled);
+  const remaining = overrides.filter((raw) => {
+    const existing = parseGeminiOverride(raw);
+    if (
+      existing.base === intended.base &&
+      (existing.includeSubdirs !== intended.includeSubdirs ||
+        existing.disabled !== intended.disabled)
+    )
+      return false;
+    if (
+      existing.base === intended.base &&
+      existing.includeSubdirs === intended.includeSubdirs &&
+      existing.disabled === intended.disabled
+    )
+      return false;
+    return !(
+      intended.includeSubdirs &&
+      geminiOverrideRegex(intended).test(existing.base)
+    );
+  });
+  return [...remaining, renderGeminiOverride(intended)];
+}
+
+interface GeminiOverride {
+  readonly base: string;
+  readonly includeSubdirs: boolean;
+  readonly disabled: boolean;
+}
+
+function geminiOverride(
+  path: string,
+  includeSubdirs: boolean,
+  disabled: boolean,
+): GeminiOverride {
+  let base = path.replaceAll("\\", "/");
+  if (!base.startsWith("/")) base = `/${base}`;
+  if (!base.endsWith("/")) base = `${base}/`;
+  return { base, includeSubdirs, disabled };
+}
+
+function parseGeminiOverride(raw: string): GeminiOverride {
+  const disabled = raw.startsWith("!");
+  let path = disabled ? raw.slice(1) : raw;
+  const includeSubdirs = path.endsWith("*");
+  if (includeSubdirs) path = path.slice(0, -1);
+  return geminiOverride(path, includeSubdirs, disabled);
+}
+
+function renderGeminiOverride(value: GeminiOverride): string {
+  return `${value.disabled ? "!" : ""}${value.base}${value.includeSubdirs ? "*" : ""}`;
+}
+
+function geminiOverrideRegex(value: GeminiOverride): RegExp {
+  const source = `${value.base}${value.includeSubdirs ? "*" : ""}`
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/(\/?)\*/g, "($1.*)?");
+  return new RegExp(`^${source}$`);
 }
 
 function parseJson(text: string, allowComments: boolean): unknown {

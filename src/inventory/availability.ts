@@ -4,12 +4,19 @@ import { isAbsolute, join, resolve } from "node:path";
 import { parse as parseToml } from "@iarna/toml";
 import { parseTree, type ParseError } from "jsonc-parser";
 
+import {
+  CLAUDE_CODE_PLUGIN_ADAPTER_ID,
+  CODEX_PLUGIN_ADAPTER_ID,
+  GEMINI_CLI_ADAPTER_ID,
+} from "../adapter/built-ins.js";
 import type {
   HarnessExposure,
   HarnessExposureControl,
   Installation,
   NativeControlDocumentEvidence,
   NativeControlSelectorValue,
+  PluginAvailability,
+  PluginBoundary,
 } from "../model/types.js";
 import { hasDuplicateKeys } from "./evidence.js";
 import { readAvailabilityDocument } from "./availability-evidence.js";
@@ -84,6 +91,284 @@ export function createAvailabilityDocumentReader(
     snapshots.set(key, snapshot);
     return snapshot;
   };
+}
+
+/** Materializes whole-Plugin controls without granting child Skills control. */
+export async function materializePluginAvailability(
+  plugin: PluginBoundary,
+  environment: InventoryScanEnvironment,
+  readDocument: AvailabilityDocumentReader,
+): Promise<PluginAvailability> {
+  if (
+    plugin.adapterId === CLAUDE_CODE_PLUGIN_ADAPTER_ID &&
+    plugin.availability.status === "unresolved"
+  )
+    return plugin.availability;
+  if (plugin.adapterId === CODEX_PLUGIN_ADAPTER_ID)
+    return codexPluginAvailability(plugin, environment, readDocument);
+  if (plugin.adapterId === CLAUDE_CODE_PLUGIN_ADAPTER_ID)
+    return claudePluginAvailability(plugin, environment, readDocument);
+  if (plugin.adapterId === GEMINI_CLI_ADAPTER_ID)
+    return geminiPluginAvailability(plugin, environment, readDocument);
+  return plugin.availability;
+}
+
+async function codexPluginAvailability(
+  plugin: PluginBoundary,
+  environment: InventoryScanEnvironment,
+  readDocument: AvailabilityDocumentReader,
+): Promise<PluginAvailability> {
+  const home =
+    environment.agentHomeDirectories?.codex ??
+    join(environment.homeDirectory, ".codex");
+  const document = await readDocument(
+    join(home, "config.toml"),
+    "toml",
+    { kind: "user" },
+    "user",
+    true,
+  );
+  const value =
+    document.unsafe || document.text === null
+      ? document.unsafe
+        ? null
+        : parseCodexPlugin("", plugin.pluginId)
+      : parseCodexPlugin(document.text, plugin.pluginId);
+  const layers = [withSelector(document.evidence, value)];
+  if (value === null)
+    return unresolvedPlugin(
+      "codex-plugin-enabled",
+      plugin.pluginId,
+      layers,
+      [document.evidence.path],
+      "the Codex Plugin configuration is malformed, linked, hard-linked, unreadable, or changed while scanning",
+    );
+  const status = value.enabled === false ? "disabled" : "enabled";
+  if (status !== plugin.availability.status)
+    return unresolvedPlugin(
+      "codex-plugin-enabled",
+      plugin.pluginId,
+      layers,
+      [document.evidence.path],
+      "Codex Plugin list state disagrees with its configuration",
+    );
+  return nativePlugin(
+    status,
+    "codex-plugin-enabled",
+    plugin.pluginId,
+    layers,
+    [document.evidence.path],
+    uniformPluginAvailability(layers),
+  );
+}
+
+async function claudePluginAvailability(
+  plugin: PluginBoundary,
+  environment: InventoryScanEnvironment,
+  readDocument: AvailabilityDocumentReader,
+): Promise<PluginAvailability> {
+  const home =
+    environment.agentHomeDirectories?.[claudeHarness] ??
+    join(environment.homeDirectory, ".claude");
+  const workspace = environment.workspaceDirectory;
+  const documents = await Promise.all([
+    readDocument(
+      join(home, "settings.json"),
+      "json",
+      { kind: "user" },
+      "user",
+      true,
+    ),
+    readDocument(
+      join(workspace, ".claude", "settings.json"),
+      "json",
+      { kind: "workspace", workspacePath: workspace },
+      "shared-workspace",
+      true,
+    ),
+    readDocument(
+      join(workspace, ".claude", "settings.local.json"),
+      "json",
+      { kind: "workspace", workspacePath: workspace },
+      "local-workspace",
+      true,
+    ),
+  ]);
+  const values = documents.map((document) =>
+    document.unsafe
+      ? null
+      : parseClaudePlugin(document.text ?? "{}", plugin.pluginId),
+  );
+  const layers = documents.map((document, index) =>
+    withSelector(document.evidence, values[index] ?? null),
+  );
+  if (values.some((value) => value === null))
+    return unresolvedPlugin(
+      "claude-enabled-plugins",
+      plugin.pluginId,
+      layers,
+      [documents[0]!.evidence.path, documents[2]!.evidence.path],
+      "a Claude Code Plugin configuration layer is malformed, linked, hard-linked, unreadable, or changed while scanning",
+    );
+  const enabled = values
+    .map((value) => value!.enabled)
+    .filter((value) => value !== null)
+    .at(-1);
+  return nativePlugin(
+    enabled === false ? "disabled" : "enabled",
+    "claude-enabled-plugins",
+    plugin.pluginId,
+    layers,
+    [documents[0]!.evidence.path, documents[2]!.evidence.path],
+    claudePluginOperationAvailability(layers),
+  );
+}
+
+async function geminiPluginAvailability(
+  plugin: PluginBoundary,
+  environment: InventoryScanEnvironment,
+  readDocument: AvailabilityDocumentReader,
+): Promise<PluginAvailability> {
+  const home =
+    environment.agentHomeDirectories?.[geminiHarness] ??
+    join(environment.homeDirectory, ".gemini");
+  const document = await readDocument(
+    join(home, "extensions", "extension-enablement.json"),
+    "json",
+    { kind: "user" },
+    "user",
+    true,
+  );
+  const value = document.unsafe
+    ? null
+    : parseGeminiPlugin(
+        document.text ?? "{}",
+        plugin.pluginId,
+        environment.workspaceDirectory,
+        environment.homeDirectory,
+      );
+  const layers = [withSelector(document.evidence, value)];
+  if (value === null)
+    return unresolvedPlugin(
+      "gemini-extension-enablement",
+      plugin.pluginId,
+      layers,
+      [document.evidence.path],
+      "the Gemini Plugin enablement document is malformed, linked, hard-linked, unreadable, or changed while scanning",
+    );
+  const status = value.enabled ? "enabled" : "disabled";
+  if (status !== plugin.availability.status)
+    return unresolvedPlugin(
+      "gemini-extension-enablement",
+      plugin.pluginId,
+      layers,
+      [document.evidence.path],
+      "Gemini Plugin runtime state disagrees with its enablement document",
+    );
+  return nativePlugin(
+    status,
+    "gemini-extension-enablement",
+    plugin.pluginId,
+    layers,
+    [document.evidence.path],
+    uniformPluginAvailability(layers),
+  );
+}
+
+function nativePlugin(
+  status: "enabled" | "disabled",
+  mechanism: Extract<
+    PluginAvailability["control"],
+    { readonly kind: "native" }
+  >["mechanism"],
+  pluginId: string,
+  layers: readonly NativeControlDocumentEvidence[],
+  writableLayerPaths: readonly string[],
+  availability: Extract<
+    PluginAvailability["control"],
+    { readonly kind: "native" }
+  >["availability"],
+): PluginAvailability {
+  return {
+    status,
+    control: {
+      kind: "native",
+      mechanism,
+      availability,
+      selector: { kind: "plugin-id", value: pluginId },
+      layers,
+      writableLayerPaths,
+    },
+  };
+}
+
+function unresolvedPlugin(
+  mechanism: Extract<
+    PluginAvailability["control"],
+    { readonly kind: "native" }
+  >["mechanism"],
+  pluginId: string,
+  layers: readonly NativeControlDocumentEvidence[],
+  writableLayerPaths: readonly string[],
+  reason: string,
+): PluginAvailability {
+  return {
+    status: "unresolved",
+    control: {
+      kind: "native",
+      mechanism,
+      availability: {
+        disable: { kind: "unavailable", reason },
+        enable: { kind: "unavailable", reason },
+      },
+      selector: { kind: "plugin-id", value: pluginId },
+      layers,
+      writableLayerPaths,
+    },
+  };
+}
+
+function uniformPluginAvailability(
+  layers: readonly NativeControlDocumentEvidence[],
+): Extract<
+  PluginAvailability["control"],
+  { readonly kind: "native" }
+>["availability"] {
+  const result = layers.some(layerWritable)
+    ? ({ kind: "available" } as const)
+    : ({
+        kind: "unavailable",
+        reason: "the Plugin configuration document is not safe to modify",
+      } as const);
+  return { disable: result, enable: result };
+}
+
+function claudePluginOperationAvailability(
+  layers: readonly NativeControlDocumentEvidence[],
+): Extract<
+  PluginAvailability["control"],
+  { readonly kind: "native" }
+>["availability"] {
+  const [user, shared, local] = layers;
+  const sharedValue = shared?.selectorValue;
+  const localValue = local?.selectorValue;
+  const userCanControl =
+    user !== undefined &&
+    layerWritable(user) &&
+    sharedValue?.kind === "claude-enabled-plugins" &&
+    sharedValue.enabled === null &&
+    localValue?.kind === "claude-enabled-plugins" &&
+    localValue.enabled === null;
+  const available =
+    (local !== undefined && layerWritable(local)) || userCanControl;
+  const result = available
+    ? ({ kind: "available" } as const)
+    : ({
+        kind: "unavailable",
+        reason:
+          "no writable Claude Code layer can override the effective Plugin setting",
+      } as const);
+  return { disable: result, enable: result };
 }
 
 function unsupported(harnessId: string): HarnessExposure {
@@ -537,6 +822,155 @@ function parseGemini(
       disabled: (disabled.children ?? []).some((item) => item.value === name),
     },
   };
+}
+
+function parseClaudePlugin(
+  text: string,
+  pluginId: string,
+): Extract<
+  NativeControlSelectorValue,
+  { readonly kind: "claude-enabled-plugins" }
+> | null {
+  const errors: ParseError[] = [];
+  const root = parseTree(text, errors, {
+    allowTrailingComma: false,
+    disallowComments: true,
+  });
+  if (
+    root === undefined ||
+    errors.length > 0 ||
+    root.type !== "object" ||
+    hasDuplicateKeys(root)
+  )
+    return null;
+  const enabledPlugins = root.children?.find(
+    (property) => property.children?.[0]?.value === "enabledPlugins",
+  )?.children?.[1];
+  if (enabledPlugins === undefined)
+    return { kind: "claude-enabled-plugins", enabled: null };
+  if (enabledPlugins.type !== "object") return null;
+  const entry = enabledPlugins.children?.find(
+    (property) => property.children?.[0]?.value === pluginId,
+  )?.children?.[1];
+  if (entry === undefined)
+    return { kind: "claude-enabled-plugins", enabled: null };
+  if (entry.type !== "boolean") return null;
+  return { kind: "claude-enabled-plugins", enabled: entry.value as boolean };
+}
+
+function parseCodexPlugin(
+  text: string,
+  pluginId: string,
+): Extract<
+  NativeControlSelectorValue,
+  { readonly kind: "codex-plugin-enabled" }
+> | null {
+  let root: Record<string, unknown>;
+  try {
+    root = parseToml(text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (root.plugins === undefined)
+    return { kind: "codex-plugin-enabled", enabled: null };
+  if (!isRecord(root.plugins)) return null;
+  const plugin = root.plugins[pluginId];
+  if (plugin === undefined)
+    return { kind: "codex-plugin-enabled", enabled: null };
+  if (!isRecord(plugin)) return null;
+  if (plugin.enabled === undefined)
+    return { kind: "codex-plugin-enabled", enabled: null };
+  if (typeof plugin.enabled !== "boolean") return null;
+  return { kind: "codex-plugin-enabled", enabled: plugin.enabled };
+}
+
+function parseGeminiPlugin(
+  text: string,
+  pluginId: string,
+  workspaceDirectory: string,
+  scopePath: string,
+): Extract<
+  NativeControlSelectorValue,
+  { readonly kind: "gemini-extension-enablement" }
+> | null {
+  const errors: ParseError[] = [];
+  const root = parseTree(text, errors, {
+    allowTrailingComma: false,
+    disallowComments: true,
+  });
+  if (
+    root === undefined ||
+    errors.length > 0 ||
+    root.type !== "object" ||
+    hasDuplicateKeys(root)
+  )
+    return null;
+  for (const property of root.children ?? []) {
+    const value = property.children?.[1];
+    if (value?.type !== "object") return null;
+    const overrides = value.children?.find(
+      (child) => child.children?.[0]?.value === "overrides",
+    )?.children?.[1];
+    if (
+      overrides?.type !== "array" ||
+      !(overrides.children ?? []).every((item) => item.type === "string")
+    )
+      return null;
+  }
+  const entry = root.children?.find(
+    (property) => property.children?.[0]?.value === pluginId,
+  )?.children?.[1];
+  if (entry === undefined)
+    return {
+      kind: "gemini-extension-enablement",
+      overrides: [],
+      enabled: true,
+      scopePath,
+    };
+  if (entry.type !== "object") return null;
+  const overridesNode = entry.children?.find(
+    (property) => property.children?.[0]?.value === "overrides",
+  )?.children?.[1];
+  if (
+    overridesNode === undefined ||
+    overridesNode.type !== "array" ||
+    !(overridesNode.children ?? []).every((item) => item.type === "string")
+  )
+    return null;
+  const overrides = (overridesNode.children ?? []).map((item) =>
+    String(item.value),
+  );
+  let enabled = true;
+  const currentPath = normalizedGeminiRule(workspaceDirectory);
+  for (const raw of overrides) {
+    const disabled = raw.startsWith("!");
+    let rule = disabled ? raw.slice(1) : raw;
+    const includeSubdirs = rule.endsWith("*");
+    if (includeSubdirs) rule = rule.slice(0, -1);
+    const base = normalizedGeminiRule(rule);
+    const expression = geminiRuleExpression(base, includeSubdirs);
+    if (expression.test(currentPath)) enabled = !disabled;
+  }
+  return {
+    kind: "gemini-extension-enablement",
+    overrides,
+    enabled,
+    scopePath,
+  };
+}
+
+function normalizedGeminiRule(value: string): string {
+  let result = value.replaceAll("\\", "/");
+  if (!result.startsWith("/")) result = `/${result}`;
+  if (!result.endsWith("/")) result = `${result}/`;
+  return result;
+}
+
+function geminiRuleExpression(base: string, includeSubdirs: boolean): RegExp {
+  const source = `${base}${includeSubdirs ? "*" : ""}`
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/(\/?)\*/g, "($1.*)?");
+  return new RegExp(`^${source}$`);
 }
 
 async function parseCodex(

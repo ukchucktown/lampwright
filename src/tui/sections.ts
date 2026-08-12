@@ -46,6 +46,9 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       owner: ownerLabel(members),
       note: entryNote(logical, members),
       target: { kind: "logical-skill", logicalSkillId: logical.id },
+      availabilityTargets: [
+        { kind: "logical-skill", logicalSkillId: logical.id },
+      ],
     };
   };
 
@@ -88,6 +91,7 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       owner: item.manager?.id ?? item.ownership.kind,
       note: entryNote(null, [item]),
       target: { kind: "installation", installationId: item.id },
+      availabilityTargets: [{ kind: "installation", installationId: item.id }],
     }));
   const sections: TuiSection[] = [];
 
@@ -127,14 +131,18 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       entries: sorted([...ungrouped.map(entryFor), ...loneEntries]),
     });
 
-  if (inventory.plugins.length > 0)
+  const inventoryPlugins = inventory.plugins.filter(
+    (plugin) => plugin.availability.status !== "disabled",
+  );
+  if (inventoryPlugins.length > 0)
     sections.push({
       key: "plugins",
       label: "Plugins",
-      detail: "select a custom Plugin row to review complete removal impact",
-      selectable: inventory.plugins.some((plugin) => !plugin.runtimeDefault),
+      detail:
+        "select a custom Plugin parent; enter reviews removal and d reviews disable",
+      selectable: inventoryPlugins.some((plugin) => !plugin.runtimeDefault),
       target: null,
-      entries: [...inventory.plugins]
+      entries: [...inventoryPlugins]
         .sort((left, right) =>
           compare(pluginDisplayName(left), pluginDisplayName(right)),
         )
@@ -174,7 +182,7 @@ function evidenceLabel(group: InstallationGroup): string {
     : group.evidence.remoteUrl;
 }
 
-function pluginEntries(
+export function pluginEntries(
   plugin: PluginBoundary,
   installations: ReadonlyMap<Installation["id"], Installation>,
 ): readonly TuiEntry[] {
@@ -190,7 +198,7 @@ function pluginEntries(
     name: pluginDisplayName(plugin),
     description: plugin.runtimeDefault
       ? `Agent-supplied Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources.`
-      : `Custom Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources. Select this Plugin row to review complete removal.`,
+      : `Custom Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources. Enter reviews complete removal; d reviews whole-Plugin disable while everything remains installed.`,
     exposedTo: [...plugin.exposedTo].sort(compare),
     paths: [...new Set(resources)],
     owner: plugin.adapterId ?? "plugin",
@@ -204,6 +212,9 @@ function pluginEntries(
     target: plugin.runtimeDefault
       ? null
       : { kind: "plugin", pluginBoundaryId: plugin.id },
+    availabilityTargets: plugin.runtimeDefault
+      ? []
+      : [{ kind: "plugin", pluginBoundaryId: plugin.id }],
   };
   const skillRows = ownedSkills.map((installation, index): TuiEntry => ({
     key: `plugin-skill:${plugin.id}:${installation.id}`,

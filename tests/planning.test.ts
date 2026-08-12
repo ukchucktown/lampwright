@@ -154,6 +154,14 @@ function pluginBoundary(
     },
     installationIds: installations.map((installation) => installation.id),
     resources: [],
+    availability: {
+      status: "enabled",
+      control: {
+        kind: "unsupported",
+        reason:
+          "this Plugin boundary has no supported native availability control",
+      },
+    },
     removal: managerRemoval({
       managed: {
         adapterId: "fixture-adapter",
