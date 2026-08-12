@@ -33,8 +33,8 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 - Explain who owns each installation and what else would be affected by removal.
 - Disable unused standalone and explicitly supported Manager-owned Skills without deleting their content, and enable them again.
 - Remove standalone, manager-owned, and independently selectable plugin-owned skills.
-- Explicitly uninstall non-default containing plugins when the user includes
-  plugins in a CLI plan.
+- Explicitly uninstall a non-default containing Plugin selected from Inventory
+  or included in a CLI plan.
 - Fall back to recoverable brute-force cleanup when managed removal cannot be used.
 - Preserve a reliable audit trail without maintaining an installation database.
 - Allow new tool support through local declarative adapters.
@@ -159,10 +159,12 @@ The UI must:
 - Keep long descriptions and physical paths reachable through an independently
   scrollable and resizable detail pane. Detail navigation never changes the
   selected Removal Targets.
-- Permit terminal selection of a Logical Skill or declared Installation Group.
-  Show Plugin boundaries and their owning agent harnesses for context, but do
-  not make them selectable in the terminal. The CLI permits an individual
-  Installation or non-default Plugin boundary target.
+- Permit terminal selection of a Logical Skill, declared Installation Group,
+  or non-default Plugin boundary. Show each Plugin's owning agent harness,
+  owned Skill names, descriptions, and other known resources before removal.
+  A Plugin's child Skill rows are read-only and use normal entry scrolling; only
+  the Plugin boundary row selects complete Plugin removal. The CLI also permits
+  an individual Installation target.
 - Display ownership, dependency, Git protection, and removal-method summaries before planning.
 - Clearly distinguish removable, blocked, unresolved, and source-only findings.
 - Present `Inventory | Disabled (N) | Trash (N)` as peer views. Inventory shows
@@ -242,7 +244,7 @@ Hard dependencies block removal by default. Soft references warn but do not bloc
 
 ### 9.1 Plugin boundaries
 
-A plugin-owned skill may be removed independently only when the owning plugin or adapter declares that its skills are independently selectable. Otherwise the skill is blocked as an individual target. The containing Plugin remains visible in the terminal for ownership context and may be addressed only through an explicit CLI Plugin target.
+A plugin-owned skill may be removed independently only when the owning plugin or adapter declares that its skills are independently selectable. Otherwise the skill is blocked as an individual target. The containing Plugin remains visible with its harness and owned Skills, and a non-default Plugin boundary may be selected explicitly from the Inventory TUI or CLI.
 
 Removing a Plugin must show all owned skills, agents, commands, hooks, configuration, and other known resources. Ordinary `--all` removal excludes plugins; including them requires an explicit `--include-plugins` choice. A runtime-default Plugin supplied by an agent harness is never removable, including when explicitly targeted or forced.
 
@@ -397,11 +399,11 @@ The v1 MVP is complete when:
    publication and `npx` verification require separate explicit approval.
 2. A zero-footprint scan inventories generic, Vercel, Claude Code, Codex, and Gemini skill installations from isolated fixtures.
 3. The TUI provides additive, name-only regular-expression search and can
-   select Logical Skills and declared Installation Groups. Plugin boundaries
-   and their owning harnesses remain visible but non-selectable. The
-   non-interactive CLI additionally accepts an individual Installation or
-   non-default Plugin boundary target; exposing individual paths in the TUI
-   remains future prototyping work.
+   select Logical Skills, declared Installation Groups, and non-default Plugin
+   boundaries. Plugin rows show their owning harnesses, owned Skill names, and
+   other resource impact; runtime-default Plugins remain protected. The
+   non-interactive CLI additionally accepts an individual Installation target;
+   exposing individual paths in the TUI remains future prototyping work.
 4. The planner reports ownership, dependencies, plugin impact, Git protection, and exact actions.
 5. Supported managers/plugins are used for removal when available.
 6. Failed managed removal never silently triggers fallback.

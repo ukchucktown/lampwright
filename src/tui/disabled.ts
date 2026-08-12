@@ -84,9 +84,27 @@ export function createDisabledSections(
       ),
     );
   sections.push(
-    ...createTuiSections(inventory).filter(
-      (candidate) => candidate.key === "plugins" || candidate.key === "system",
-    ),
+    ...createTuiSections(inventory)
+      .filter(
+        (candidate) =>
+          candidate.key === "plugins" || candidate.key === "system",
+      )
+      .map((candidate) =>
+        candidate.key === "plugins"
+          ? {
+              ...candidate,
+              detail: "informational; uninstall custom Plugins from Inventory",
+              selectable: false,
+              target: null,
+              entries: candidate.entries.map((entry) => ({
+                ...entry,
+                target: null,
+                availabilityTargets: [],
+                selectable: false,
+              })),
+            }
+          : candidate,
+      ),
   );
   return sections;
 }

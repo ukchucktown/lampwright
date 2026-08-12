@@ -82,6 +82,10 @@ export interface TuiPaneView<Item> {
 /** One visible inventory row; informational rows have no Removal Target. */
 export interface TuiEntry {
   readonly key: string;
+  /** Read-only child rows provide context for a selectable parent boundary. */
+  readonly rowKind?: "plugin-skill";
+  /** Tree connector used when rendering a child beneath its Plugin. */
+  readonly treeBranch?: "middle" | "last";
   readonly name: string;
   readonly description: string | null;
   readonly exposedTo: readonly string[];
@@ -89,6 +93,8 @@ export interface TuiEntry {
   readonly owner: string;
   /** Supplemental row context, such as protection or a Plugin's harness. */
   readonly note: string | null;
+  /** Detail-only notes keep hierarchical entry lists name-first. */
+  readonly showNoteInRow?: boolean;
   readonly target: RemovalTarget | null;
   /** Targets used only by the Disabled/Availability workflow. */
   readonly availabilityTargets?: readonly AvailabilityTarget[];

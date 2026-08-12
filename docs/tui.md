@@ -25,7 +25,9 @@ all disabled harnesses for that Installation; the row and review say so.
 Selecting one Suspended row restores its complete stored artifact set and may
 cover all recorded Installation targets. Press `e` to review enabling selected
 rows.
-Plugin and System rows remain visible and informational in both projections.
+Plugin and System rows remain visible and informational in Disabled. Custom
+Plugin removal is available only from Inventory; runtime-default Plugins and
+System Skills remain protected in every view.
 The same name-only regular-expression search is available in Disabled; results
 come only from its per-exposure and per-entry projection, and applying or
 cancelling search restores that view's independent position and selection.
@@ -157,9 +159,15 @@ Sections come from declared evidence, never from a name or a path:
 - One section per Installation Group, labelled with its source.
 - `No shared source` for Skills no Owner records together, including an
   Installation that belongs to no Logical Skill.
-- `Plugins`, listing each Plugin boundary and the agent harness tied to it as
-  ownership context. Plugin rows are informational and cannot be selected. A
-  Plugin the agent runtime ships with itself is marked.
+- `Plugins`, listing each Plugin boundary, its owned Skill names and resources,
+  and the agent harness tied to it. A custom Plugin boundary can be selected
+  for complete Plugin removal. A Plugin the agent runtime ships with itself is
+  marked and cannot be selected. Each boundary is followed by read-only Skill
+  rows; focusing one shows only that Skill's description and paths in the
+  bottom pane. This keeps large Plugins navigable through the ordinary entry
+  scrollbar without turning detail into one oversized catalog. The entry list
+  stays name-first; harness, ownership, protection, and view-only context appear
+  in the focused detail pane instead of being repeated beside every row.
 - `System skills`, present but not selectable. Its rows draw no checkbox,
   because offering one would invite a click that can only be refused.
 
@@ -201,9 +209,12 @@ Skills from several bundles can be reviewed together.
 Selection resolves to Removal Targets through the same rule the command line
 uses. A fully selected Group collapses into one `source-group` target rather
 than a list of its members; a partial selection stays a list of Logical Skill
-targets. Plugin and System Skill rows remain visible but have no Removal Target.
-With nothing selected, `enter` reviews the removable row under the cursor and
-does nothing on an informational row.
+targets. Custom Plugin rows resolve to their complete Plugin boundary; their
+detail and review name the owned Skills and other known resources that removal
+affects. Their indented Skill rows are for inspection and never select the
+whole Plugin. Runtime-default Plugin and System Skill rows remain visible but
+have no Removal Target. With nothing selected, `enter` reviews the removable
+row under the cursor and does nothing on an informational row.
 
 `q` exits the TUI immediately from every screen except search, where it is valid
 regex input; Ctrl-C remains an alternate exit everywhere. In the inventory,

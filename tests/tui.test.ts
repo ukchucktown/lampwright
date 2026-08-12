@@ -998,7 +998,7 @@ describe("terminal theme", () => {
 });
 
 describe("terminal section projection", () => {
-  it("builds sections from declared evidence and keeps System Skills unselectable", () => {
+  it("makes custom Plugins removable while keeping System Skills protected", () => {
     const sections = createTuiSections(
       buildInventory({
         installations: [buildInstallation()],
@@ -1012,7 +1012,7 @@ describe("terminal section projection", () => {
       sections.map((section) => [section.label, section.selectable]),
     ).toEqual([
       ["No shared source", true],
-      ["Plugins", false],
+      ["Plugins", true],
       ["System skills", false],
     ]);
     expect(
@@ -1044,20 +1044,66 @@ describe("terminal section projection", () => {
     });
   });
 
-  it("shows a Plugin and its harness without offering a Removal Target", () => {
+  it("shows the owned Skill names and selects a custom Plugin boundary", () => {
+    const alpha = buildInstallation({
+      id: "plugin-alpha",
+      classification: "managed-plugin-resource",
+      skill: { name: "alpha-skill", description: "Alpha capability" },
+      plugin: { id: "fixture-plugin", version: "1.0.0" },
+      pluginBoundaryId: "fixture-plugin",
+      ownership: {
+        kind: "plugin",
+        pluginId: "fixture-plugin",
+        independentlySelectable: false,
+        confidence: "declared",
+      },
+    });
+    const beta = buildInstallation({
+      id: "plugin-beta",
+      classification: "managed-plugin-resource",
+      skill: { name: "beta-skill", description: "Beta capability" },
+      plugin: { id: "fixture-plugin", version: "1.0.0" },
+      pluginBoundaryId: "fixture-plugin",
+      ownership: {
+        kind: "plugin",
+        pluginId: "fixture-plugin",
+        independentlySelectable: false,
+        confidence: "declared",
+      },
+    });
     const inventory = buildInventory({
-      installations: [],
-      plugins: [buildPluginBoundary()],
+      installations: [alpha, beta],
+      plugins: [
+        {
+          ...buildPluginBoundary(),
+          installationIds: [alpha.id, beta.id],
+        },
+      ],
     });
     const sections = createTuiSections(inventory);
 
     expect(sections[0]).toMatchObject({
       label: "Plugins",
-      selectable: false,
+      selectable: true,
       entries: [
         {
           exposedTo: ["fixture-agent"],
+          target: {
+            kind: "plugin",
+            pluginBoundaryId: "fixture-plugin",
+          },
+        },
+        {
+          name: "alpha-skill",
+          description: "Alpha capability",
           target: null,
+          selectable: false,
+        },
+        {
+          name: "beta-skill",
+          description: "Beta capability",
+          target: null,
+          selectable: false,
         },
       ],
     });
@@ -1066,15 +1112,139 @@ describe("terminal section projection", () => {
       createBrowseModel(sections, { rows: 24, columns: 100 }),
       { kind: "focus", pane: "entries" },
     );
-    const attempted = reduceBrowse(focused, { kind: "toggle-select" });
-    expect(attempted.selected).toEqual(new Set());
-    expect(attempted.notice).toBe("Plugins cannot be removed here.");
+    const selected = reduceBrowse(focused, { kind: "toggle-select" });
+    expect(selectionTargets(sections, selected.selected)).toEqual([
+      { kind: "plugin", pluginBoundaryId: "fixture-plugin" },
+    ]);
+    const skillFocused = reduceBrowse(focused, { kind: "move", delta: 1 });
+    const rendered = renderBrowseLines(
+      { screen: "browse", inventory, model: skillFocused },
+      plainTuiTheme,
+    ).join("\n");
+    expect(rendered).toContain("├─ alpha-skill");
+    expect(rendered).toContain("└─ beta-skill");
+    expect(rendered).toContain("Alpha capability");
+    expect(rendered).not.toContain("Beta capability");
+  });
+
+  it("keeps runtime-default Plugins visible and protected beside custom Plugins", () => {
+    const custom = buildPluginBoundary();
+    const runtime = buildPluginBoundary({
+      id: "runtime-plugin",
+      pluginId: "runtime-plugin",
+      ownership: {
+        kind: "plugin",
+        pluginId: "runtime-plugin",
+        independentlySelectable: false,
+        confidence: "declared",
+      },
+      runtimeDefault: true,
+    });
+    const inventory = buildInventory({
+      installations: [],
+      plugins: [custom, runtime],
+    });
+    const plugins = createTuiSections(inventory).find(
+      (section) => section.key === "plugins",
+    )!;
+    const customEntry = plugins.entries.find(
+      (entry) => entry.key === `plugin:${custom.id}`,
+    )!;
+    const runtimeEntry = plugins.entries.find(
+      (entry) => entry.key === `plugin:${runtime.id}`,
+    )!;
+
+    expect(customEntry.target).toEqual({
+      kind: "plugin",
+      pluginBoundaryId: custom.id,
+    });
+    expect(runtimeEntry).toMatchObject({
+      target: null,
+      note: expect.stringContaining("protected"),
+    });
+    expect(
+      selectionTargets([plugins], new Set([customEntry.key, runtimeEntry.key])),
+    ).toEqual([{ kind: "plugin", pluginBoundaryId: custom.id }]);
+
+    const customFocused = createBrowseModel([plugins], {
+      rows: 24,
+      columns: 100,
+    });
+    const customLines = renderBrowseLines(
+      { screen: "browse", inventory, model: customFocused },
+      plainTuiTheme,
+    );
+    expect(
+      customLines.find((line) => line.includes("runtime-plugin@1.0.0")),
+    ).not.toContain("protected");
+
+    const runtimeFocused = reduceBrowse(customFocused, {
+      kind: "point-entry",
+      index: plugins.entries.indexOf(runtimeEntry),
+    });
     expect(
       renderBrowseLines(
-        { screen: "browse", inventory, model: attempted },
+        { screen: "browse", inventory, model: runtimeFocused },
         plainTuiTheme,
       ).join("\n"),
-    ).toContain("fixture-agent");
+    ).toContain("agent default · protected");
+  });
+
+  it("keeps a large Plugin navigable one Skill description at a time", () => {
+    const installations = Array.from({ length: 40 }, (_, index) => {
+      const suffix = String(index + 1).padStart(2, "0");
+      return buildInstallation({
+        id: `large-plugin-${suffix}`,
+        classification: "managed-plugin-resource",
+        skill: {
+          name: `skill-${suffix}`,
+          description: `Description for skill ${suffix}`,
+        },
+        plugin: { id: "large-plugin", version: "1.0.0" },
+        pluginBoundaryId: "large-plugin",
+        ownership: {
+          kind: "plugin",
+          pluginId: "large-plugin",
+          independentlySelectable: false,
+          confidence: "declared",
+        },
+      });
+    });
+    const inventory = buildInventory({
+      installations,
+      plugins: [
+        {
+          ...buildPluginBoundary({
+            id: "large-plugin",
+            pluginId: "large-plugin",
+            ownership: {
+              kind: "plugin",
+              pluginId: "large-plugin",
+              independentlySelectable: false,
+              confidence: "declared",
+            },
+          }),
+          installationIds: installations.map((item) => item.id),
+        },
+      ],
+    });
+    const sections = createTuiSections(inventory);
+    const model = reduceBrowse(
+      createBrowseModel(sections, { rows: 18, columns: 90 }),
+      { kind: "point-entry", index: 40 },
+    );
+
+    expect(sections[0]?.entries).toHaveLength(41);
+    expect(model.entryScroll).toBeGreaterThan(0);
+    expect(reduceBrowse(model, { kind: "toggle-select" }).selected).toEqual(
+      new Set(),
+    );
+    const rendered = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    ).join("\n");
+    expect(rendered).toContain("Description for skill 40");
+    expect(rendered).not.toContain("Description for skill 01");
   });
 });
 
@@ -1833,6 +2003,61 @@ describe("global name-regex search", () => {
 });
 
 describe("terminal removal interactions", () => {
+  it("reviews a custom Plugin with every owned Skill and resource before uninstall", async () => {
+    const child = buildInstallation({
+      id: "plugin-review",
+      classification: "managed-plugin-resource",
+      skill: { name: "review-skill", description: "Review capability" },
+      plugin: { id: "fixture-plugin", version: "1.0.0" },
+      pluginBoundaryId: "fixture-plugin",
+      ownership: {
+        kind: "plugin",
+        pluginId: "fixture-plugin",
+        independentlySelectable: false,
+        confidence: "declared",
+      },
+    });
+    const boundary = {
+      ...buildPluginBoundary(),
+      installationIds: [child.id],
+      resources: [
+        {
+          kind: "command" as const,
+          id: "review-command",
+          location: null,
+          protection: null,
+          cleanupId: null,
+        },
+      ],
+    };
+    const inventory = buildInventory({
+      installations: [child],
+      plugins: [boundary],
+    });
+    const execute = vi.fn(async () => buildExecutionReport());
+    const controller = new TuiController(
+      { scan: async () => inventory, plan, execute },
+      { rows: 30, columns: 100 },
+    );
+
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+
+    expect(controller.state).toMatchObject({
+      screen: "plan",
+      plan: {
+        targets: [{ kind: "plugin", pluginBoundaryId: "fixture-plugin" }],
+      },
+    });
+    const rendered = renderTui(controller.state, plainTuiTheme);
+    expect(rendered).toContain("Remove fixture-plugin@1.0.0?");
+    expect(rendered).toContain("Skill review-skill");
+    expect(rendered).toContain("Command review-command");
+    expect(rendered).not.toContain("skill:review-skill:");
+    expect(rendered).toContain("will not enter Trash");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("presents a ready recoverable plan in plain language", async () => {
     const inventory = buildInventory();
     const controller = new TuiController(

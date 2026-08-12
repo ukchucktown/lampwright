@@ -131,10 +131,14 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     sections.push({
       key: "plugins",
       label: "Plugins",
-      detail: "informational; manage with the owning harness",
-      selectable: false,
+      detail: "select a custom Plugin row to review complete removal impact",
+      selectable: inventory.plugins.some((plugin) => !plugin.runtimeDefault),
       target: null,
-      entries: sorted(inventory.plugins.map((plugin) => pluginEntry(plugin))),
+      entries: [...inventory.plugins]
+        .sort((left, right) =>
+          compare(pluginDisplayName(left), pluginDisplayName(right)),
+        )
+        .flatMap((plugin) => pluginEntries(plugin, installations)),
     });
 
   const system = inventory.otherFindings.filter(
@@ -170,28 +174,63 @@ function evidenceLabel(group: InstallationGroup): string {
     : group.evidence.remoteUrl;
 }
 
-function pluginEntry(plugin: PluginBoundary): TuiEntry {
+function pluginEntries(
+  plugin: PluginBoundary,
+  installations: ReadonlyMap<Installation["id"], Installation>,
+): readonly TuiEntry[] {
+  const ownedSkills = plugin.installationIds
+    .map((id) => installations.get(id))
+    .filter((item): item is Installation => item !== undefined)
+    .sort((left, right) => compare(left.skill.name, right.skill.name));
   const resources = plugin.resources
     .map((resource) => resource.location?.path)
     .filter((path): path is string => path !== undefined);
-  return {
+  const boundary: TuiEntry = {
     key: `plugin:${plugin.id}`,
-    name:
-      plugin.version === null
-        ? plugin.pluginId
-        : `${plugin.pluginId}@${plugin.version}`,
-    description: `${String(plugin.installationIds.length)} owned skills, ${String(plugin.resources.length)} resources`,
+    name: pluginDisplayName(plugin),
+    description: plugin.runtimeDefault
+      ? `Agent-supplied Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources.`
+      : `Custom Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources. Select this Plugin row to review complete removal.`,
     exposedTo: [...plugin.exposedTo].sort(compare),
-    paths: resources,
+    paths: [...new Set(resources)],
     owner: plugin.adapterId ?? "plugin",
     note: [
       plugin.exposedTo.join(", "),
-      plugin.runtimeDefault ? "agent default" : null,
+      plugin.runtimeDefault ? "agent default · protected" : "custom Plugin",
     ]
       .filter((value): value is string => value !== null && value !== "")
       .join(" · "),
-    target: null,
+    showNoteInRow: false,
+    target: plugin.runtimeDefault
+      ? null
+      : { kind: "plugin", pluginBoundaryId: plugin.id },
   };
+  const skillRows = ownedSkills.map((installation, index): TuiEntry => ({
+    key: `plugin-skill:${plugin.id}:${installation.id}`,
+    rowKind: "plugin-skill",
+    treeBranch: index === ownedSkills.length - 1 ? "last" : "middle",
+    name: installation.skill.name,
+    description: installation.skill.description,
+    exposedTo: [...installation.exposedTo].sort(compare),
+    paths: [
+      installation.location.path,
+      ...(installation.removal.supplementalArtifacts ?? []).map(
+        (artifact) => artifact.location.path,
+      ),
+    ],
+    owner: plugin.pluginId,
+    note: "owned Skill · view only",
+    showNoteInRow: false,
+    target: null,
+    selectable: false,
+  }));
+  return [boundary, ...skillRows];
+}
+
+function pluginDisplayName(plugin: PluginBoundary): string {
+  return plugin.version === null
+    ? plugin.pluginId
+    : `${plugin.pluginId}@${plugin.version}`;
 }
 
 /** Only worth a column when it departs from what the section already says. */
