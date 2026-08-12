@@ -478,6 +478,13 @@ async function materializePlugin(input: {
       runtimeDefault: input.runtimeDefault,
       installationIds: installations.map((installation) => installation.id),
       resources,
+      availability: {
+        status: input.entry.enabled ? "enabled" : "disabled",
+        control: {
+          kind: "unsupported",
+          reason: "Codex Plugin availability evidence is not materialized",
+        },
+      },
       removal: {
         managed,
         fallback: {

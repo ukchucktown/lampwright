@@ -673,6 +673,13 @@ async function scanExtensions(
         runtimeDefault: false,
         installationIds: [],
         resources,
+        availability: {
+          status: reference.enabled ? "enabled" : "disabled",
+          control: {
+            kind: "unsupported",
+            reason: "Gemini Plugin availability evidence is not materialized",
+          },
+        },
         removal: {
           managed,
           fallback:

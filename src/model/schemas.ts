@@ -411,6 +411,77 @@ const removalEvidenceSchema = z.strictObject({
   recordCleanups: z.array(declarativeRecordCleanupSchema),
 });
 
+const nativeControlSelectorValueSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("codex-skills-config"),
+    matchingRules: z.array(
+      z.strictObject({
+        index: z.number().int().min(0),
+        selector: z.strictObject({
+          kind: z.enum(["path", "name"]),
+          value: nonEmptyString,
+        }),
+        enabled: z.boolean(),
+      }),
+    ),
+  }),
+  z.strictObject({
+    kind: z.literal("claude-skill-overrides"),
+    mode: z.enum(["on", "name-only", "user-invocable-only", "off"]).nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal("gemini-disabled-skills"),
+    disabled: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal("codex-plugin-enabled"),
+    enabled: z.boolean().nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal("claude-enabled-plugins"),
+    enabled: z.boolean().nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal("gemini-extension-enablement"),
+    overrides: z.array(z.string()),
+    enabled: z.boolean(),
+    scopePath: nonEmptyString,
+  }),
+]);
+
+const nativeControlDocumentEvidenceSchema = z.strictObject({
+  path: nonEmptyString,
+  format: z.enum(["toml", "json", "jsonc"]),
+  scope: scopeSchema,
+  documentScope: z.enum([
+    "user",
+    "shared-workspace",
+    "local-workspace",
+    "workspace",
+  ]),
+  applies: z.union([
+    z.literal(true),
+    z.literal(false),
+    z.literal("unresolved"),
+  ]),
+  exists: z.boolean(),
+  canonicalPath: nonEmptyString.nullable(),
+  preimageHash: sha256DigestSchema.nullable(),
+  protection: protectionStatusSchema,
+  selectorValue: nativeControlSelectorValueSchema.nullable(),
+});
+
+const operationAvailabilitySchema = z.strictObject({
+  disable: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("available") }),
+    z.strictObject({ kind: z.literal("unavailable"), reason: nonEmptyString }),
+  ]),
+  enable: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("available") }),
+    z.strictObject({ kind: z.literal("unavailable"), reason: nonEmptyString }),
+  ]),
+});
+
 /** Canonical persisted shape for Harness Exposure evidence. */
 export const harnessExposureSchema = z
   .strictObject({
@@ -428,75 +499,12 @@ export const harnessExposureSchema = z
           "claude-skill-overrides",
           "gemini-disabled-skills",
         ]),
-        availability: z.strictObject({
-          disable: z.discriminatedUnion("kind", [
-            z.strictObject({ kind: z.literal("available") }),
-            z.strictObject({
-              kind: z.literal("unavailable"),
-              reason: nonEmptyString,
-            }),
-          ]),
-          enable: z.discriminatedUnion("kind", [
-            z.strictObject({ kind: z.literal("available") }),
-            z.strictObject({
-              kind: z.literal("unavailable"),
-              reason: nonEmptyString,
-            }),
-          ]),
-        }),
+        availability: operationAvailabilitySchema,
         selector: z.strictObject({
           kind: z.enum(["path", "name"]),
           value: nonEmptyString,
         }),
-        layers: z.array(
-          z.strictObject({
-            path: nonEmptyString,
-            format: z.enum(["toml", "json", "jsonc"]),
-            scope: scopeSchema,
-            documentScope: z.enum([
-              "user",
-              "shared-workspace",
-              "local-workspace",
-              "workspace",
-            ]),
-            applies: z.union([
-              z.literal(true),
-              z.literal(false),
-              z.literal("unresolved"),
-            ]),
-            exists: z.boolean(),
-            canonicalPath: nonEmptyString.nullable(),
-            preimageHash: sha256DigestSchema.nullable(),
-            protection: protectionStatusSchema,
-            selectorValue: z
-              .discriminatedUnion("kind", [
-                z.strictObject({
-                  kind: z.literal("codex-skills-config"),
-                  matchingRules: z.array(
-                    z.strictObject({
-                      index: z.number().int().min(0),
-                      selector: z.strictObject({
-                        kind: z.enum(["path", "name"]),
-                        value: nonEmptyString,
-                      }),
-                      enabled: z.boolean(),
-                    }),
-                  ),
-                }),
-                z.strictObject({
-                  kind: z.literal("claude-skill-overrides"),
-                  mode: z
-                    .enum(["on", "name-only", "user-invocable-only", "off"])
-                    .nullable(),
-                }),
-                z.strictObject({
-                  kind: z.literal("gemini-disabled-skills"),
-                  disabled: z.boolean(),
-                }),
-              ])
-              .nullable(),
-          }),
-        ),
+        layers: z.array(nativeControlDocumentEvidenceSchema),
         writableLayerPaths: z.array(nonEmptyString),
       }),
     ]),
@@ -870,6 +878,31 @@ const pluginResourceSchema = z.strictObject({
   cleanupId: modelId.nullable(),
 });
 
+const pluginAvailabilitySchema = z.strictObject({
+  status: z.enum(["enabled", "disabled", "unresolved"]),
+  control: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("unsupported"),
+      reason: nonEmptyString,
+    }),
+    z.strictObject({
+      kind: z.literal("native"),
+      mechanism: z.enum([
+        "codex-plugin-enabled",
+        "claude-enabled-plugins",
+        "gemini-extension-enablement",
+      ]),
+      availability: operationAvailabilitySchema,
+      selector: z.strictObject({
+        kind: z.literal("plugin-id"),
+        value: nonEmptyString,
+      }),
+      layers: z.array(nativeControlDocumentEvidenceSchema).min(1),
+      writableLayerPaths: z.array(nonEmptyString),
+    }),
+  ]),
+});
+
 const pluginBoundarySchema = z.strictObject({
   id: nonEmptyString,
   pluginId: nonEmptyString,
@@ -880,6 +913,7 @@ const pluginBoundarySchema = z.strictObject({
   runtimeDefault: z.boolean(),
   installationIds: z.array(modelId),
   resources: z.array(pluginResourceSchema),
+  availability: pluginAvailabilitySchema,
   removal: removalEvidenceSchema,
 });
 

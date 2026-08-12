@@ -1,8 +1,9 @@
-# Native Skill availability controls
+# Native Skill and Plugin availability controls
 
 This document defines the native configuration evidence that Inventory may
-materialize for reversible Skill availability. It is the source of truth for
-issues #72 and #73. Presentation code does not read or interpret these files.
+materialize for reversible Skill and complete-Plugin availability. It is the
+source of truth for issues #72, #73, and #91. Presentation code does not read or
+interpret these files.
 
 ## Canonical Inventory contract
 
@@ -51,6 +52,12 @@ Plugin-owned and System Skills retain Harness Exposure status for display, but
 their individual control is always `unsupported`. Installation lifecycle state
 remains separate: disabling an exposure does not change an Installation from
 `active` to another lifecycle status.
+
+A Plugin boundary separately records `enabled`, `disabled`, or `unresolved`
+status and a closed whole-Plugin native-control value. Its selector is the exact
+Plugin identifier. This evidence never grants availability control to an owned
+Installation, never authorizes Disabled Storage, and never changes Plugin
+removal protection.
 
 ## Codex
 
@@ -116,6 +123,56 @@ System defaults, system overrides, remote administration, and session-only
 overrides are not writable native controls. Observed higher-precedence evidence
 must make the control unavailable; absence of such evidence is not authority to
 edit those sources.
+
+## Whole-Plugin controls
+
+Whole-Plugin availability changes the harness's Plugin boundary, not its child
+Skills. Runtime-default Plugins and managed policy are absolute blocks. A
+supported control must have one exact Plugin identifier, complete safe document
+evidence, an operation-specific writable layer, and an effective status that
+agrees with the harness's observed Plugin list. Otherwise the Plugin is
+`unresolved` or its operation is unavailable.
+
+### Codex Plugins
+
+- Document: `<codex-home>/config.toml`, normally `~/.codex/config.toml`.
+- Format: TOML.
+- Control: `plugins.<plugin-id>.enabled`; no value means enabled.
+- Writable candidate: the user Codex document only.
+
+Lampwright parses the complete TOML document and cross-checks the effective
+value with `codex plugin list`. Mutation updates the existing Plugin table or
+adds its canonical table while preserving unrelated settings, comments, and
+line endings.
+
+### Claude Code Plugins
+
+- User document: `<claude-home>/settings.json`, normally
+  `~/.claude/settings.json`.
+- Shared project document: `<workspace>/.claude/settings.json`.
+- Local project document: `<workspace>/.claude/settings.local.json`.
+- Format: JSON.
+- Control: `enabledPlugins[plugin-id]`; no value means enabled.
+- Effective precedence, low to high: user, shared project, local project.
+- Writable candidates: user and safe Git-ignored local project. Shared project
+  settings are evidence only.
+
+Managed settings are unsupported. Mutation uses the highest-precedence safe
+writable layer without altering unrelated JSON members.
+
+### Gemini CLI extensions
+
+- Document: `<gemini-home>/extensions/extension-enablement.json`, normally
+  `~/.gemini/extensions/extension-enablement.json`.
+- Format: JSON.
+- Control: the extension's ordered `overrides` array evaluated for the current
+  workspace path. Later matching rules win.
+- Writable candidate: the user enablement document only.
+
+Lampwright validates every extension record before trusting the document,
+cross-checks the evaluated value with Gemini's observed extension state, and
+uses Gemini's user-scope include/exclude rule semantics. Mutation preserves
+unrelated extension records and configuration.
 
 ## Verification and serialization
 

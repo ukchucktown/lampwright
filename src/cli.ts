@@ -115,7 +115,7 @@ Usage:
 
 Selectors:
   Availability: installation:<installation-id>  logical-skill:<logical-skill-id>
-                group:<group-id>
+                group:<group-id>  plugin:<plugin-boundary-id>
   Enable only:  disabled-entry:<entry-id>
   Removal also: source:<source-id>  plugin:<plugin-boundary-id>
 

@@ -265,6 +265,14 @@ describe("Codex plugin adapter", () => {
     });
 
     const inventory = await scanner(environment, runner).scan({});
+    expect(inventory.plugins[0]?.availability).toMatchObject({
+      status: "enabled",
+      control: {
+        kind: "native",
+        mechanism: "codex-plugin-enabled",
+        selector: { value: "quality-suite@acme-marketplace" },
+      },
+    });
     expect(seenCommands).toContainEqual({
       executable: "codex",
       arguments: ["plugin", "list", "--json"],

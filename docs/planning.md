@@ -152,8 +152,9 @@ Soft References are warnings only.
 
 ## Availability planning
 
-`AvailabilityIntent` selects one or more Installation, Logical Skill, or
-declared Installation Group targets and requests `disable` or `enable`.
+`AvailabilityIntent` selects one or more Installation, Logical Skill, declared
+Installation Group, or complete Plugin boundary targets and requests `disable`
+or `enable`.
 Planning is pure: both live Inventory and the current Disabled Storage entries
 are explicit immutable inputs. Target containment is normalized before the
 plan is identified; partially overlapping boundaries are rejected.
@@ -172,6 +173,13 @@ collisions across Skill Identities, unsafe configuration, Git-protected paths,
 and read-only paths are absolute blocks.
 Name collision checks include every Installation exposed to that harness,
 regardless of its control kind, plus harness-owned System Skill findings.
+
+A Plugin target never expands into child Skill targets. Planning uses only the
+Plugin boundary's materialized native evidence and emits one grouped native
+configuration action. Runtime-default, managed-policy, unsupported, unresolved,
+ambiguous, protected, read-only, or stale controls block absolutely. Plugin
+availability never emits `suspended-disable` or `suspended-enable` actions and
+never writes Disabled Storage.
 
 Disabled Storage paths are exclusive claims. Disable is blocked while a
 matching entry exists. Enable is blocked if a selected entry's original
@@ -194,13 +202,15 @@ The version-1 `AvailabilityPlan` schema contains `id`, `inventoryId`,
 `createdAt`, normalized `intent` and `targets`, sorted `disabledEntryIds`,
 `actions`, `blocks`, `warnings`, and `verificationChecks`. Actions are the
 closed union `native-control | suspended-disable | suspended-enable`; checks
-are `harness-exposure-state | disabled-entry-state`. All intent, plan, action,
-check, and report values have exported TypeScript types and Zod parsers through
-the Availability module.
+are `harness-exposure-state | plugin-state | disabled-entry-state`. Native
+effects identify either an Installation/Harness Exposure or one complete Plugin
+boundary. All intent, plan, action, check, and report values have exported
+TypeScript types and Zod parsers through the Availability module.
 
 Git-protected paths, System Skill protection, read-only filesystem evidence,
-Plugin boundary restrictions, unavailable required Owner operations, and
-blocked Adapter trust never produce actions and cannot be bypassed by force.
+Plugin-owned child restrictions, unavailable complete-Plugin controls,
+unavailable required Owner operations, and blocked Adapter trust never produce
+actions and cannot be bypassed by force.
 Unknown ownership and unresolved metadata are ambiguity blocks; force may
 permit recoverable cleanup with both ambiguity and brute-force approval.
 Exact ephemeral package execution adds matching package-trust approval and a

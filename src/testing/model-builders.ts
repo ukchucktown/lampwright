@@ -276,6 +276,14 @@ export function buildPluginBoundary(
         runtimeDefault: false,
         installationIds: [],
         resources: [],
+        availability: {
+          status: "enabled",
+          control: {
+            kind: "unsupported",
+            reason:
+              "this Plugin boundary has no supported native availability control",
+          },
+        },
         removal: {
           managed: {
             adapterId: "fixture-adapter",

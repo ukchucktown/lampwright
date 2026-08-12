@@ -22,6 +22,7 @@ import type {
   LogicalSkill,
   ManagedOwnership,
   NonInstallationFinding,
+  PluginBoundary,
   RemovalEvidence,
   RemovalAction,
   RemovalPlan,
@@ -578,6 +579,7 @@ function validatePluginBoundaries(
         "Plugin harnesses must be unique",
       );
     }
+    validatePluginAvailability(plugin, path, issues);
     validateRemovalEvidence(
       plugin.removal,
       plugin.ownership,
@@ -698,6 +700,120 @@ function validatePluginBoundaries(
       );
     }
   });
+}
+
+function validatePluginAvailability(
+  plugin: PluginBoundary,
+  path: readonly (number | string)[],
+  issues: MutableIssue[],
+): void {
+  const control = plugin.availability.control;
+  if (control.kind === "unsupported") return;
+  const availabilityPath = [...path, "availability"];
+  const fail = (message: string): void =>
+    addIssue(issues, availabilityPath, message);
+  if (control.selector.value !== plugin.pluginId)
+    fail("Plugin availability selector must match the Plugin boundary ID");
+  const expectedHarness =
+    control.mechanism === "codex-plugin-enabled"
+      ? "codex"
+      : control.mechanism === "claude-enabled-plugins"
+        ? "claude-code"
+        : "gemini-cli";
+  if (plugin.exposedTo.length !== 1 || plugin.exposedTo[0] !== expectedHarness)
+    fail(
+      "Plugin availability mechanism must exclusively control its exposed harness",
+    );
+  if (
+    new Set(control.layers.map((layer) => layer.path)).size !==
+    control.layers.length
+  )
+    fail("Plugin availability layer paths must be unique");
+  if (
+    new Set(control.writableLayerPaths).size !==
+    control.writableLayerPaths.length
+  )
+    fail("Plugin writable layer paths must be unique");
+  if (
+    control.writableLayerPaths.some(
+      (candidate) => !control.layers.some((layer) => layer.path === candidate),
+    )
+  )
+    fail("Plugin writable layer paths must name materialized evidence");
+  for (const layer of control.layers) {
+    if (
+      !layer.exists &&
+      (layer.canonicalPath !== null || layer.preimageHash !== null)
+    )
+      fail("missing Plugin configuration cannot carry a preimage");
+    if (
+      layer.exists &&
+      layer.selectorValue !== null &&
+      (layer.canonicalPath === null || layer.preimageHash === null)
+    )
+      fail("safe Plugin configuration requires canonical preimage evidence");
+  }
+  const values = control.layers.map((layer) => layer.selectorValue);
+  const allSafe = values.every((value) => value !== null);
+  if (control.mechanism === "codex-plugin-enabled") {
+    if (
+      control.layers.length !== 1 ||
+      control.layers[0]?.format !== "toml" ||
+      control.layers[0]?.documentScope !== "user" ||
+      values.some(
+        (value) => value !== null && value.kind !== "codex-plugin-enabled",
+      )
+    )
+      fail("Codex Plugin availability requires one user TOML layer");
+  } else if (control.mechanism === "claude-enabled-plugins") {
+    if (
+      control.layers.length !== 3 ||
+      control.layers.some((layer) => layer.format !== "json") ||
+      control.layers.map((layer) => layer.documentScope).join(",") !==
+        "user,shared-workspace,local-workspace" ||
+      values.some(
+        (value) => value !== null && value.kind !== "claude-enabled-plugins",
+      )
+    )
+      fail(
+        "Claude Plugin availability requires ordered user, shared, and local JSON layers",
+      );
+  } else if (
+    control.layers.length !== 1 ||
+    control.layers[0]?.format !== "json" ||
+    control.layers[0]?.documentScope !== "user" ||
+    values.some(
+      (value) => value !== null && value.kind !== "gemini-extension-enablement",
+    )
+  )
+    fail("Gemini Plugin availability requires one user JSON enablement layer");
+  if (!allSafe && plugin.availability.status !== "unresolved")
+    fail("unsafe Plugin availability evidence requires unresolved status");
+  if (
+    plugin.availability.status === "unresolved" &&
+    (control.availability.disable.kind !== "unavailable" ||
+      control.availability.enable.kind !== "unavailable")
+  )
+    fail("unresolved Plugin availability must block both operations");
+  if (allSafe && plugin.availability.status !== "unresolved") {
+    const enabled =
+      control.mechanism === "codex-plugin-enabled"
+        ? values[0]?.kind === "codex-plugin-enabled" &&
+          values[0].enabled !== false
+        : control.mechanism === "claude-enabled-plugins"
+          ? values
+              .flatMap((value) =>
+                value?.kind === "claude-enabled-plugins" &&
+                value.enabled !== null
+                  ? [value.enabled]
+                  : [],
+              )
+              .at(-1) !== false
+          : values[0]?.kind === "gemini-extension-enablement" &&
+            values[0].enabled;
+    if ((enabled ? "enabled" : "disabled") !== plugin.availability.status)
+      fail("Plugin availability status must match its effective evidence");
+  }
 }
 
 function validateGlobalRecordCleanupEvidence(

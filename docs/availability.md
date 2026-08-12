@@ -1,9 +1,10 @@
-# Reversible Skill availability
+# Reversible Skill and Plugin availability
 
-Disable makes a Skill unavailable without removing its identity or intentionally
-deleting its content. Enable reverses that lifecycle change. Both commands use a
-fresh Inventory, current Disabled Storage entries, an Availability Plan, explicit
-confirmation, Availability Execution, and final verification.
+Disable makes a Skill or complete Plugin unavailable without removing its
+identity or intentionally deleting its content. Enable reverses that lifecycle
+change. Both commands use a fresh Inventory, current Disabled Storage entries,
+an Availability Plan, explicit confirmation, Availability Execution, and final
+verification.
 
 ## Recognizing every state
 
@@ -20,7 +21,13 @@ never enters Trash, never expires, and has no purge action. A Disabled entry is
 consumed only after exact restoration succeeds or recovery proves the exact
 completed publication.
 
+A disabled Plugin is always Native state. Its complete boundary appears once in
+Disabled, including its harness, owned Skills, and other known resources. Enable
+changes the same native control; Plugin files never enter Disabled Storage.
+
 ## Native controls
+
+Skill controls are:
 
 - **Codex** writes an ordered exact-path `skills.config` rule to user
   `config.toml`. The last matching rule is effective. CRLF and unrelated TOML
@@ -32,6 +39,18 @@ completed publication.
 - **Gemini CLI** changes exact case-sensitive membership in `skills.disabled`.
   Enable removes the name from every applied layer that currently disables it.
   Workspace settings apply only when durable folder-trust evidence says they do.
+
+Whole-Plugin controls are:
+
+- **Codex** changes `plugins.<plugin-id>.enabled` in the user `config.toml`.
+- **Claude Code** changes `enabledPlugins[plugin-id]` in the highest-precedence
+  safe writable local or user settings document.
+- **Gemini CLI** changes the extension's user-scope rules in
+  `extensions/extension-enablement.json` using Gemini's ordered override
+  semantics for the current workspace.
+
+Only the complete Plugin boundary is selectable. Owned Skill rows remain
+read-only, and no whole-Plugin operation falls back to filesystem suspension.
 
 Every native action groups all changes to one document behind one preimage.
 Malformed documents, duplicate keys, links, hard links, read races, replacement
@@ -73,7 +92,8 @@ destinations cannot redirect cleanup outside Disabled Storage.
 
 1. Run `lampwright scan --json` when live state is uncertain.
 2. Use an exact Availability selector. Disable accepts `installation:`,
-   `logical-skill:`, or `group:`. Enable also accepts
+   `logical-skill:`, `group:`, or `plugin:`. Enable accepts those live targets
+   and also
    `disabled-entry:<opaque-id>`.
 3. Review the plan or use `--dry-run --json`. A dry run creates no Lampwright state.
 4. Resolve absolute blocks at their source. Use `--force` only for a plan that
@@ -102,13 +122,15 @@ Reports expose Disabled entry IDs created by Suspended Disable so they can be
 used verbatim in a later Enable selector.
 
 The TUI presents `Inventory | Disabled (N) | Trash (N)`. Inventory can open a
-Disable review with `d`; Disabled can open an Enable review with `e`. Reviews
-name Native versus Suspended actions, Skills, harnesses, storage/restoration,
-warnings, and blocks. Execution shows approved target/action counts. Reports
-show readable partial concerns; `d` reveals exact targets, paths, formats,
-preimage hashes, entry/action/effect/check IDs, timestamps, and raw errors.
-Returning from an Availability report refreshes Inventory and Disabled rather
-than presenting pre-mutation state.
+Disable review with `d`; Enter remains Removal review. Disabled can open an
+Enable review with `e`. A Plugin parent is one availability target and its
+children stay read-only. Reviews name Native versus Suspended actions, Skills
+or Plugins, harnesses, owned resources, storage/restoration, warnings, and
+blocks. Execution shows approved target/action counts. Reports show readable
+partial concerns; `d` reveals exact targets, paths, formats, preimage hashes,
+entry/action/effect/check IDs, timestamps, and raw errors. Returning from an
+Availability report refreshes Inventory and Disabled rather than presenting
+pre-mutation state.
 
 Public TypeScript exports include `AvailabilityIntent`, `AvailabilityTarget`,
 `AvailabilityPlan`, `AvailabilityAction`, `AvailabilityReport`,

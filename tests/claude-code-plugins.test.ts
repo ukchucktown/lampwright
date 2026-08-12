@@ -245,6 +245,14 @@ describe("Claude Code plugin adapter", () => {
     }
     expect(inventory.plugins).toHaveLength(1);
     const plugin = inventory.plugins[0]!;
+    expect(plugin.availability).toMatchObject({
+      status: "enabled",
+      control: {
+        kind: "native",
+        mechanism: "claude-enabled-plugins",
+        selector: { value: "quality-suite@acme-marketplace" },
+      },
+    });
     expect(plugin.resources.map((resource) => resource.id)).toEqual(
       expect.arrayContaining([
         "agents",

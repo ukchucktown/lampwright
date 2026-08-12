@@ -46,7 +46,8 @@ collections:
 - `identityHints` records shared names or hashes for display without merging
   Installation identities.
 - `plugins` records ownership boundaries, owned Installation IDs, known
-  collateral resources, and planner-ready removal evidence.
+  collateral resources, planner-ready removal evidence, and whole-Plugin
+  availability evidence.
 - `dependencies` stores Inventory-level relationships so hard dependencies and
   soft references can originate from either installations or other findings.
 
@@ -97,6 +98,11 @@ Location, including the `file` artifact kind, plus normal protection evidence.
 Every pathless resource names the exact declarative cleanup that represents it;
 an unresolved cleanup ID is invalid Inventory. Generic scanning represents the
 physical declared root even when it contains no Skills.
+
+Plugin Availability Targets use the same physical boundary ID but a separate
+closed control. The boundary records `enabled`, `disabled`, or `unresolved`, an
+exact Plugin-ID selector, operation availability, and complete native document
+evidence. That value grants no availability control to child Installations.
 
 ## Plans and reports
 

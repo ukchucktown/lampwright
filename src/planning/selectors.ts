@@ -187,6 +187,21 @@ export function resolveAvailabilitySelectors(
       targets.push({ kind: "source-group", groupId: group.id });
       continue;
     }
+    if (kind === "plugin") {
+      const plugin = inventory.plugins.find((candidate) => candidate.id === id);
+      if (plugin === undefined)
+        throw new PlanningError(
+          "target-not-found",
+          `plugin selector did not match Inventory: ${id}`,
+        );
+      if (operation === "enable" && plugin.availability.status !== "disabled")
+        throw new PlanningError(
+          "target-not-found",
+          `enable selector is not disabled: ${selector}`,
+        );
+      targets.push({ kind: "plugin", pluginBoundaryId: plugin.id });
+      continue;
+    }
     throw new PlanningError(
       "invalid-intent",
       `unknown Availability selector kind: ${kind}`,

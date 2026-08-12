@@ -2,7 +2,7 @@ import type { AvailabilityTarget } from "../availability/types.js";
 import type { DisabledEntry } from "../disabled-storage/types.js";
 import type { Installation, Inventory } from "../model/types.js";
 import type { TuiEntry, TuiSection } from "./types.js";
-import { createTuiSections } from "./sections.js";
+import { createTuiSections, pluginEntries } from "./sections.js";
 
 /** A display projection only; it never infers identity or mutates availability. */
 export function createDisabledSections(
@@ -83,28 +83,48 @@ export function createDisabledSections(
         suspended,
       ),
     );
-  sections.push(
-    ...createTuiSections(inventory)
-      .filter(
-        (candidate) =>
-          candidate.key === "plugins" || candidate.key === "system",
-      )
-      .map((candidate) =>
-        candidate.key === "plugins"
-          ? {
-              ...candidate,
-              detail: "informational; uninstall custom Plugins from Inventory",
-              selectable: false,
-              target: null,
-              entries: candidate.entries.map((entry) => ({
+  const disabledPlugins = inventory.plugins.filter(
+    (plugin) => plugin.availability.status === "disabled",
+  );
+  if (disabledPlugins.length > 0) {
+    const installations = new Map(
+      inventory.installations.map((installation) => [
+        installation.id,
+        installation,
+      ]),
+    );
+    sections.push({
+      key: "plugins",
+      label: "Plugins",
+      detail: "whole Plugins disabled by native harness configuration",
+      selectable: disabledPlugins.some((plugin) => !plugin.runtimeDefault),
+      target: null,
+      entries: disabledPlugins.flatMap((plugin) =>
+        pluginEntries(plugin, installations).map((entry, index) =>
+          index === 0
+            ? {
                 ...entry,
+                description: `Disabled whole Plugin with ${String(plugin.installationIds.length)} owned Skills and ${String(plugin.resources.length)} other known resources.`,
                 target: null,
-                availabilityTargets: [],
-                selectable: false,
-              })),
-            }
-          : candidate,
+                availabilityTargets: plugin.runtimeDefault
+                  ? []
+                  : [
+                      {
+                        kind: "plugin" as const,
+                        pluginBoundaryId: plugin.id,
+                      },
+                    ],
+                selectable: !plugin.runtimeDefault,
+              }
+            : entry,
+        ),
       ),
+    });
+  }
+  sections.push(
+    ...createTuiSections(inventory).filter(
+      (candidate) => candidate.key === "system",
+    ),
   );
   return sections;
 }
@@ -166,5 +186,6 @@ function targetKey(target: AvailabilityTarget): string {
     return `installation:${target.installationId}`;
   if (target.kind === "logical-skill")
     return `logical-skill:${target.logicalSkillId}`;
+  if (target.kind === "plugin") return `plugin:${target.pluginBoundaryId}`;
   return `group:${target.groupId}`;
 }

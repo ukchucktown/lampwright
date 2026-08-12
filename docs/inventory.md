@@ -101,8 +101,9 @@ the marker the subtree stays ordinary: a missing marker never hides Skills.
 `Inventory.id` is a deterministic fingerprint of the complete normalized
 snapshot, excluding `scannedAt`. Repeating an unchanged scan at another time
 therefore retains the ID, while changed ownership, protection, removal,
-dependency, or record evidence changes it. Execution can use this semantic
-identity when it fresh-scans and replans an approved Removal Plan.
+availability, dependency, or record evidence changes it. Execution can use
+this semantic identity when it fresh-scans and replans an approved Removal or
+Availability Plan.
 
 Each physical declared Plugin root receives a stable scan-local boundary ID.
 Installations reference that boundary separately from the Plugin system's

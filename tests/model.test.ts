@@ -35,6 +35,13 @@ const directInvocation = {
 };
 
 const writableProtection = buildInstallation().protection;
+const unsupportedPluginAvailability = () => ({
+  status: "enabled" as const,
+  control: {
+    kind: "unsupported" as const,
+    reason: "fixture Plugin availability is unsupported",
+  },
+});
 const fixtureFileHash = {
   algorithm: "sha256" as const,
   digest: "a".repeat(64),
@@ -691,6 +698,7 @@ describe("core model boundary validation", () => {
             adapterId: "fixture-adapter",
             exposedTo: child.exposedTo,
             runtimeDefault: false,
+            availability: unsupportedPluginAvailability(),
             ownership: child.ownership,
             installationIds: [child.id],
             resources: [
@@ -724,6 +732,7 @@ describe("core model boundary validation", () => {
             adapterId: "fixture-adapter",
             exposedTo: child.exposedTo,
             runtimeDefault: false,
+            availability: unsupportedPluginAvailability(),
             ownership: child.ownership,
             installationIds: [child.id],
             resources: [
@@ -878,6 +887,7 @@ describe("core model boundary validation", () => {
           adapterId: "fixture-adapter",
           exposedTo: child.exposedTo,
           runtimeDefault: false,
+          availability: unsupportedPluginAvailability(),
           ownership: child.ownership,
           installationIds: [child.id],
           resources: [],
@@ -943,6 +953,7 @@ describe("core model boundary validation", () => {
             adapterId: "fixture-adapter",
             exposedTo: first.exposedTo,
             runtimeDefault: false,
+            availability: unsupportedPluginAvailability(),
             ownership: first.ownership,
             installationIds: [first.id, sibling.id],
             resources: [],

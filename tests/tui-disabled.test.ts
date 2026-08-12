@@ -139,6 +139,60 @@ function fixture() {
   return { inventory, enabled, disabled, partial };
 }
 
+function pluginAvailabilityInventory(status: "enabled" | "disabled") {
+  const plugin = buildPluginBoundary({
+    id: "availability-plugin-boundary",
+    pluginId: "quality-suite@acme",
+    exposedTo: ["codex"],
+    ownership: {
+      kind: "plugin",
+      pluginId: "quality-suite@acme",
+      independentlySelectable: false,
+      confidence: "declared",
+    },
+    availability: {
+      status,
+      control: {
+        kind: "native",
+        mechanism: "codex-plugin-enabled",
+        availability: {
+          disable: { kind: "available" },
+          enable: { kind: "available" },
+        },
+        selector: { kind: "plugin-id", value: "quality-suite@acme" },
+        layers: [
+          {
+            path: "/fixtures/config.toml",
+            format: "toml",
+            scope: { kind: "user" },
+            documentScope: "user",
+            applies: true,
+            exists: false,
+            canonicalPath: null,
+            preimageHash: null,
+            protection: {
+              git: { kind: "outside-worktree" },
+              system: { kind: "none" },
+              filesystem: { kind: "writable" },
+            },
+            selectorValue: {
+              kind: "codex-plugin-enabled",
+              enabled: status === "enabled",
+            },
+          },
+        ],
+        writableLayerPaths: ["/fixtures/config.toml"],
+      },
+    },
+  });
+  return buildInventory({
+    id: `plugin-${status}-inventory`,
+    installations: [],
+    logicalSkills: [],
+    plugins: [plugin],
+  });
+}
+
 function disabledEntry(
   installation: ReturnType<typeof buildInstallation>,
   id: string,
@@ -481,7 +535,7 @@ describe("Disabled TUI projection", () => {
     ).toEqual(["disabled-entry:stored-a", "disabled-entry:stored-b"]);
     expect(
       sections.find((section) => section.key === "plugins")?.selectable,
-    ).toBe(false);
+    ).toBeUndefined();
     expect(
       sections.find((section) => section.key === "system")?.selectable,
     ).toBe(false);
@@ -489,6 +543,168 @@ describe("Disabled TUI projection", () => {
       .flatMap((section) => section.entries)
       .find((entry) => entry.key.includes("plugin-installation"));
     expect(pluginRow?.selectable).toBe(false);
+  });
+
+  it("uses the Plugin parent as the whole-boundary Disable and Enable target", async () => {
+    const { inventory } = fixture();
+    const plugin = inventory.plugins[0]!;
+    const disabledInventory = buildInventory({
+      ...inventory,
+      plugins: [
+        {
+          ...plugin,
+          availability: {
+            status: "disabled",
+            control: {
+              kind: "unsupported",
+              reason: "fixture native state is already disabled",
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      createTuiSections(disabledInventory)
+        .flatMap((section) => section.entries)
+        .some((entry) => entry.key === `plugin:${plugin.id}`),
+    ).toBe(false);
+    const disabledSections = createDisabledSections(disabledInventory, []);
+    const pluginSection = disabledSections.find(
+      (section) => section.key === "plugins",
+    )!;
+    expect(pluginSection.selectable).toBe(true);
+    expect(pluginSection.entries[0]).toMatchObject({
+      key: `plugin:${plugin.id}`,
+      selectable: true,
+      target: null,
+      availabilityTargets: [{ kind: "plugin", pluginBoundaryId: plugin.id }],
+    });
+    expect(pluginSection.entries[1]).toMatchObject({
+      rowKind: "plugin-skill",
+      selectable: false,
+      target: null,
+    });
+
+    const planner = vi.fn(planAvailability);
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: vi.fn(),
+      listDisabled: async () => [],
+      planAvailability: planner,
+    });
+    await controller.start();
+    if (controller.state.screen !== "browse")
+      throw new Error("expected browse");
+    const pluginIndex = controller.state.model.sections.findIndex(
+      (section) => section.key === "plugins",
+    );
+    await controller.dispatch({ kind: "point-section", index: pluginIndex });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "disable-review" });
+    const review = controller.state as TuiState;
+    expect(review.screen).toBe("availability-plan");
+    expect(planner).toHaveBeenCalledWith(
+      inventory,
+      [],
+      expect.objectContaining({
+        operation: "disable",
+        targets: [{ kind: "plugin", pluginBoundaryId: plugin.id }],
+      }),
+    );
+    if (review.screen !== "availability-plan")
+      throw new Error("expected availability review");
+    const header = renderTui(
+      { screen: "browse", ...review.browse } as TuiBrowseState,
+      plainTuiTheme,
+    );
+    expect(header).toContain("enter remove");
+  });
+
+  it("keeps a disabled runtime-default Plugin visible but nonselectable", () => {
+    const plugin = buildPluginBoundary({
+      runtimeDefault: true,
+      availability: {
+        status: "disabled",
+        control: {
+          kind: "unsupported",
+          reason: "agent runtime controls this Plugin",
+        },
+      },
+    });
+    const section = createDisabledSections(
+      buildInventory({ plugins: [plugin] }),
+      [],
+    ).find((candidate) => candidate.key === "plugins");
+    expect(section?.entries[0]).toMatchObject({
+      key: `plugin:${plugin.id}`,
+      selectable: false,
+      availabilityTargets: [],
+    });
+    expect(section?.selectable).toBe(false);
+  });
+
+  it("round-trips a complete Plugin through Inventory, Disabled, and Enable", async () => {
+    const enabledInventory = pluginAvailabilityInventory("enabled");
+    const disabledInventory = pluginAvailabilityInventory("disabled");
+    let currentInventory = enabledInventory;
+    const executor = vi.fn(async (planned: AvailabilityPlan) => {
+      currentInventory =
+        planned.intent.operation === "disable"
+          ? disabledInventory
+          : enabledInventory;
+      return availabilityReport(planned);
+    });
+    const controller = new TuiController({
+      scan: async () => currentInventory,
+      plan,
+      execute: vi.fn(),
+      listDisabled: async () => [],
+      planAvailability,
+      executeAvailability: executor,
+    });
+
+    await controller.start();
+    if (controller.state.screen !== "browse")
+      throw new Error("expected Inventory browse");
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "disable-review" });
+    expect(controller.state.screen).toBe("availability-plan");
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAvailabilityExecution();
+    expect(controller.state.screen).toBe("availability-report");
+    await controller.dispatch({ kind: "cancel" });
+    expect((controller.state as TuiBrowseState).view).toBe("inventory");
+    expect(
+      (controller.state as TuiBrowseState).model.sections.some(
+        (section) => section.key === "plugins",
+      ),
+    ).toBe(false);
+
+    await controller.dispatch({ kind: "switch-view", view: "disabled" });
+    if (controller.state.screen !== "browse")
+      throw new Error("expected Disabled browse");
+    const pluginSection = controller.state.model.sections.findIndex(
+      (section) => section.key === "plugins",
+    );
+    await controller.dispatch({ kind: "point-section", index: pluginSection });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "enable-review" });
+    expect(controller.state.screen).toBe("availability-plan");
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAvailabilityExecution();
+    expect(controller.state.screen).toBe("availability-report");
+    await controller.dispatch({ kind: "cancel" });
+    expect((controller.state as TuiBrowseState).view).toBe("disabled");
+    expect(
+      (controller.state as TuiBrowseState).model.sections.some(
+        (section) => section.key === "plugins",
+      ),
+    ).toBe(false);
+    expect(executor).toHaveBeenCalledTimes(2);
   });
 
   it("does not let a hidden disabled Group member ride along in a Removal target", () => {
@@ -709,7 +925,9 @@ describe("Disabled TUI projection", () => {
     const browseState = controller.state as TuiState;
     expect(browseState.screen).toBe("browse");
     if (browseState.screen !== "browse") throw new Error("expected browse");
-    expect(browseState.model.notice).toBe("Plugins cannot be enabled here.");
+    expect(browseState.model.notice).toBe(
+      "System skills cannot be enabled here.",
+    );
     expect(browseState.model.selected.size).toBe(0);
   });
 

@@ -1,9 +1,9 @@
 # Lampwright
 
 `lampwright` is a cross-platform terminal application for discovering,
-reversibly disabling, enabling, and safely removing AI agent Skills whether
-they were installed as standalone files, by a Manager, or through a Plugin
-system.
+reversibly disabling, enabling, and safely removing AI agent Skills and
+complete Plugins whether they were installed as standalone files, by a
+Manager, or through a Plugin system.
 
 The primary interface is an interactive terminal inventory. Until publication, build and run it from a trusted checkout:
 
@@ -25,9 +25,12 @@ confirmed Brute-force Removal moves artifacts into Quarantine.
 
 Non-ignored Git worktree content and System Skills cannot be mutated, including
 with force. Matching names and hashes do not merge Skill identities. Ordinary
-remove-all excludes Plugins. Read-only scans, TUI browsing, and dry runs create
-no persistent state. The application has no telemetry and does not transmit
-paths, Inventory, metadata, or search queries.
+remove-all excludes Plugins. Plugin-owned Skills cannot be disabled
+individually; where a harness exposes a safe native control, Lampwright can
+disable or enable the complete Plugin while leaving its files installed.
+Read-only scans, TUI browsing, and dry runs create no persistent state. The
+application has no telemetry and does not transmit paths, Inventory, metadata,
+or search queries.
 
 ## Interfaces
 

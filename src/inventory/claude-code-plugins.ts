@@ -391,6 +391,17 @@ async function materializePlugin(input: {
       runtimeDefault: false,
       installationIds: installations.map((installation) => installation.id),
       resources,
+      availability: {
+        status:
+          input.entry.record.scope === "managed" ? "unresolved" : "enabled",
+        control: {
+          kind: "unsupported",
+          reason:
+            input.entry.record.scope === "managed"
+              ? "managed Claude Code Plugins are controlled by policy"
+              : "Claude Code Plugin availability evidence is not materialized",
+        },
+      },
       removal: {
         managed,
         fallback:
