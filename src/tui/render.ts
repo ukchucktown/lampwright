@@ -1098,7 +1098,13 @@ function sectionCell(
   if (item === undefined) return " ".repeat(width);
   const index = view.offset + row;
   const focused = index === model.sectionIndex;
-  const taken = item.entries.filter((entry) =>
+  const counted = item.entries.filter(
+    (entry) => entry.rowKind !== "plugin-skill",
+  );
+  const selectable = counted.filter(
+    (entry) => entry.selectable ?? entry.target !== null,
+  );
+  const taken = selectable.filter((entry) =>
     model.selected.has(entry.key),
   ).length;
   const marker = isTrash
@@ -1107,13 +1113,13 @@ function sectionCell(
       ? " - "
       : taken === 0
         ? "[ ]"
-        : taken === item.entries.length
+        : taken === selectable.length
           ? "[x]"
           : "[~]";
   const count =
     taken > 0
-      ? `${String(taken)}/${String(item.entries.length)}`
-      : String(item.entries.length);
+      ? `${String(taken)}/${String(selectable.length)}`
+      : String(counted.length);
   const text = `${marker} ${fit(item.label, width - 12)} ${fit(count, 6)} `;
   if (focused && model.focus === "sections")
     return style.focus(fit(text, width));
@@ -1135,8 +1141,16 @@ function entryCell(
     if (section === null) return " ".repeat(width);
     const exposure = sharedExposure(section);
     const paths = sharedPathCount(section);
+    const pluginSkills = section.entries.filter(
+      (entry) => entry.rowKind === "plugin-skill",
+    ).length;
+    const boundaries = section.entries.length - pluginSkills;
+    const entrySummary =
+      pluginSkills === 0
+        ? `${String(section.entries.length)} entries`
+        : `${String(boundaries)} ${boundaries === 1 ? "Plugin" : "Plugins"} · ${String(pluginSkills)} Skills`;
     const detail = [
-      `${String(section.entries.length)} entries`,
+      entrySummary,
       section.detail,
       paths === null || paths <= 1 ? null : `${String(paths)} paths each`,
       exposure === null || exposure === "" ? null : exposure,
@@ -1152,31 +1166,41 @@ function entryCell(
   const index = view.offset + row - 1;
   const focused = index === model.entryIndex && model.focus === "entries";
   const selectable = entry.selectable ?? entry.target !== null;
-  const marker = isTrash
-    ? " • "
-    : section !== null && (!section.selectable || !selectable)
-      ? " - "
-      : model.selected.has(entry.key)
-        ? "[x]"
-        : "[ ]";
+  const marker =
+    entry.rowKind === "plugin-skill"
+      ? "   "
+      : isTrash
+        ? " • "
+        : section !== null && (!section.selectable || !selectable)
+          ? " - "
+          : model.selected.has(entry.key)
+            ? "[x]"
+            : "[ ]";
+  const displayName =
+    entry.rowKind === "plugin-skill"
+      ? `${entry.treeBranch === "last" ? "└─" : "├─"} ${entry.name}`
+      : entry.name;
   if (width < 11) {
-    const compact = fit(`${marker} ${entry.name}`, width);
+    const compact = fit(`${marker} ${displayName}`, width);
     if (focused) return style.focus(compact);
     return model.selected.has(entry.key) ? style.selected(compact) : compact;
   }
   const exposure = section === null ? null : sharedExposure(section);
   const differs = exposure === null || entry.exposedTo.join(" ") !== exposure;
   const exposureNote = entry.exposedTo.join(" ");
-  const note = [
-    entry.note,
-    differs && !(entry.note?.includes(exposureNote) ?? false)
-      ? exposureNote
-      : null,
-  ]
-    .filter((value): value is string => value !== null && value !== "")
-    .join(" · ");
+  const note =
+    entry.showNoteInRow === false
+      ? ""
+      : [
+          entry.note,
+          differs && !(entry.note?.includes(exposureNote) ?? false)
+            ? exposureNote
+            : null,
+        ]
+          .filter((value): value is string => value !== null && value !== "")
+          .join(" · ");
   const nameWidth = Math.max(6, Math.min(44, width - 22));
-  const head = `${marker} ${fit(entry.name, nameWidth)} `;
+  const head = `${marker} ${fit(displayName, nameWidth)} `;
   const tail = fit(note, Math.max(0, width - nameWidth - 5));
   if (focused) return style.focus(fit(head + tail, width));
   const styledHead = model.selected.has(entry.key)
@@ -1761,7 +1785,7 @@ function describePlainWarning(warning: PlanWarning): readonly string[] {
     ];
   if (warning.kind === "plugin-impact")
     return [
-      `  • Removing Plugin ${warning.pluginId} also affects: ${warning.affectedResources.join(", ") || "other Plugin resources"}`,
+      `  • Removing Plugin ${warning.pluginId} also affects: ${warning.affectedResources.map(describePluginResource).join(", ") || "other Plugin resources"}`,
     ];
   if (warning.kind === "ephemeral-download") {
     const item = warning.packageExecution;
@@ -1773,6 +1797,34 @@ function describePlainWarning(warning: PlanWarning): readonly string[] {
   return [
     `  • The managing tool may still list this capability after removal: ${warning.reason}`,
   ];
+}
+
+function describePluginResource(resource: string): string {
+  if (resource.startsWith("skill:")) {
+    const nameEnd = resource.indexOf(":", "skill:".length);
+    const name =
+      nameEnd === -1
+        ? resource.slice("skill:".length)
+        : resource.slice(6, nameEnd);
+    return `Skill ${name}`;
+  }
+  const separator = resource.indexOf(":");
+  if (separator === -1) return resource;
+  const kind = resource.slice(0, separator);
+  const id = resource.slice(separator + 1);
+  const label =
+    kind === "agent"
+      ? "Agent"
+      : kind === "command"
+        ? "Command"
+        : kind === "hook"
+          ? "Hook"
+          : kind === "configuration"
+            ? "Configuration"
+            : kind === "plugin"
+              ? "Plugin"
+              : "Other resource";
+  return `${label} ${id}`;
 }
 
 function stylelessDetail(value: string): string {
