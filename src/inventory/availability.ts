@@ -18,7 +18,7 @@ import type {
   PluginAvailability,
   PluginBoundary,
 } from "../model/types.js";
-import { hasDuplicateKeys } from "./evidence.js";
+import { hasDuplicateKeys, pathKey } from "./evidence.js";
 import { readAvailabilityDocument } from "./availability-evidence.js";
 import type {
   InventoryCommandRunner,
@@ -171,16 +171,14 @@ async function claudePluginAvailability(
     environment.agentHomeDirectories?.[claudeHarness] ??
     join(environment.homeDirectory, ".claude");
   const workspace = environment.workspaceDirectory;
+  const userSettings = join(home, "settings.json");
+  const workspaceSettings = join(workspace, ".claude", "settings.json");
   const documents = await Promise.all([
+    ...(pathKey(userSettings) === pathKey(workspaceSettings)
+      ? []
+      : [readDocument(userSettings, "json", { kind: "user" }, "user", true)]),
     readDocument(
-      join(home, "settings.json"),
-      "json",
-      { kind: "user" },
-      "user",
-      true,
-    ),
-    readDocument(
-      join(workspace, ".claude", "settings.json"),
+      workspaceSettings,
       "json",
       { kind: "workspace", workspacePath: workspace },
       "shared-workspace",
@@ -207,7 +205,7 @@ async function claudePluginAvailability(
       "claude-enabled-plugins",
       plugin.pluginId,
       layers,
-      [documents[0]!.evidence.path, documents[2]!.evidence.path],
+      claudeWritableLayerPaths(documents),
       "a Claude Code Plugin configuration layer is malformed, linked, hard-linked, unreadable, or changed while scanning",
     );
   const enabled = values
@@ -219,7 +217,7 @@ async function claudePluginAvailability(
     "claude-enabled-plugins",
     plugin.pluginId,
     layers,
-    [documents[0]!.evidence.path, documents[2]!.evidence.path],
+    claudeWritableLayerPaths(documents),
     claudePluginOperationAvailability(layers),
   );
 }
@@ -349,7 +347,13 @@ function claudePluginOperationAvailability(
   PluginAvailability["control"],
   { readonly kind: "native" }
 >["availability"] {
-  const [user, shared, local] = layers;
+  const user = layers.find((layer) => layer.documentScope === "user");
+  const shared = layers.find(
+    (layer) => layer.documentScope === "shared-workspace",
+  );
+  const local = layers.find(
+    (layer) => layer.documentScope === "local-workspace",
+  );
   const sharedValue = shared?.selectorValue;
   const localValue = local?.selectorValue;
   const userCanControl =
@@ -448,16 +452,14 @@ async function claudeExposure(
     environment.agentHomeDirectories?.[claudeHarness] ??
     join(environment.homeDirectory, ".claude");
   const workspace = environment.workspaceDirectory;
+  const userSettings = join(home, "settings.json");
+  const workspaceSettings = join(workspace, ".claude", "settings.json");
   const documents = await Promise.all([
+    ...(pathKey(userSettings) === pathKey(workspaceSettings)
+      ? []
+      : [readDocument(userSettings, "json", { kind: "user" }, "user", true)]),
     readDocument(
-      join(home, "settings.json"),
-      "json",
-      { kind: "user" },
-      "user",
-      true,
-    ),
-    readDocument(
-      join(workspace, ".claude", "settings.json"),
+      workspaceSettings,
       "json",
       { kind: "workspace", workspacePath: workspace },
       "shared-workspace",
@@ -488,7 +490,7 @@ async function claudeExposure(
       "claude-skill-overrides",
       selector,
       layers,
-      [documents[0]!.evidence.path, documents[2]!.evidence.path],
+      claudeWritableLayerPaths(documents),
       "a Claude Code configuration layer is malformed, linked, hard-linked, unreadable, or changed while scanning",
     );
   const modes = values
@@ -501,7 +503,7 @@ async function claudeExposure(
     "claude-skill-overrides",
     selector,
     layers,
-    [documents[0]!.evidence.path, documents[2]!.evidence.path],
+    claudeWritableLayerPaths(documents),
     claudeAvailability(layers),
   );
 }
@@ -634,7 +636,13 @@ function claudeAvailability(
   HarnessExposureControl,
   { readonly kind: "native" }
 >["availability"] {
-  const [user, shared, local] = layers;
+  const user = layers.find((layer) => layer.documentScope === "user");
+  const shared = layers.find(
+    (layer) => layer.documentScope === "shared-workspace",
+  );
+  const local = layers.find(
+    (layer) => layer.documentScope === "local-workspace",
+  );
   const localCanOverride = local !== undefined && layerWritable(local);
   const sharedMode = shared?.selectorValue;
   const localMode = local?.selectorValue;
@@ -654,6 +662,16 @@ function claudeAvailability(
             "no writable Claude Code layer can override the effective setting",
         };
   return { disable: result, enable: result };
+}
+
+function claudeWritableLayerPaths(
+  documents: readonly Awaited<ReturnType<AvailabilityDocumentReader>>[],
+): readonly string[] {
+  return documents
+    .filter((document) =>
+      ["user", "local-workspace"].includes(document.evidence.documentScope),
+    )
+    .map((document) => document.evidence.path);
 }
 
 function geminiAvailability(

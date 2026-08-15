@@ -567,21 +567,23 @@ export const harnessExposureSchema = z
         );
     }
     if (control.mechanism === "claude-skill-overrides") {
+      const scopes = control.layers
+        .map((layer) => layer.documentScope)
+        .join(",");
       if (
         control.selector.kind !== "name" ||
-        control.layers.length !== 3 ||
+        (scopes !== "user,shared-workspace,local-workspace" &&
+          scopes !== "shared-workspace,local-workspace") ||
         control.layers
           .map((layer) => layer.format)
           .some((format) => format !== "json") ||
-        control.layers.map((layer) => layer.documentScope).join(",") !==
-          "user,shared-workspace,local-workspace" ||
         control.layers.some((layer) => layer.applies !== true) ||
         values.some(
           (value) => value !== null && value.kind !== "claude-skill-overrides",
         )
       )
         fail(
-          "Claude native evidence must contain ordered applied user, shared, and local JSON layers",
+          "Claude native evidence must contain ordered applied shared and local JSON layers, with a distinct user layer when present",
         );
     }
     if (control.mechanism === "gemini-disabled-skills") {
@@ -612,7 +614,12 @@ export const harnessExposureSchema = z
       control.mechanism === "codex-skills-config"
         ? [0]
         : control.mechanism === "claude-skill-overrides"
-          ? [0, 2]
+          ? control.layers
+              .map((layer, index) => ({ layer, index }))
+              .filter(({ layer }) =>
+                ["user", "local-workspace"].includes(layer.documentScope),
+              )
+              .map(({ index }) => index)
           : [0, 1];
     const expectedWritablePaths = expectedWritableIndexes
       .map((index) => control.layers[index]?.path)
@@ -688,15 +695,23 @@ export const harnessExposureSchema = z
           );
       }
       if (control.mechanism === "claude-skill-overrides") {
-        const shared = control.layers[1]!.selectorValue;
-        const local = control.layers[2]!.selectorValue;
+        const user = control.layers.find(
+          (layer) => layer.documentScope === "user",
+        );
+        const shared = control.layers.find(
+          (layer) => layer.documentScope === "shared-workspace",
+        )?.selectorValue;
+        const localLayer = control.layers.find(
+          (layer) => layer.documentScope === "local-workspace",
+        );
+        const local = localLayer?.selectorValue;
         const canUseUser =
-          writable(control.layers[0]) &&
+          writable(user) &&
           shared?.kind === "claude-skill-overrides" &&
           shared.mode === null &&
           local?.kind === "claude-skill-overrides" &&
           local.mode === null;
-        const canOverride = writable(control.layers[2]) || canUseUser;
+        const canOverride = writable(localLayer) || canUseUser;
         if (disableAvailable !== canOverride || enableAvailable !== canOverride)
           fail(
             "Claude operation availability must use a writable effective override layer",

@@ -654,13 +654,12 @@ async function defaultDiscoveryRoots(
     pathComparisonKey(userRoot.path) === pathComparisonKey(workspaceRoot.path)
       ? [workspaceRoot]
       : [userRoot, workspaceRoot];
-  return [
-    ...genericRoots,
-    codexRoot,
-    ...codexSystemRoots,
-    claudeUserRoot,
-    claudeWorkspaceRoot,
-  ];
+  const claudeRoots =
+    pathComparisonKey(claudeUserRoot.path) ===
+    pathComparisonKey(claudeWorkspaceRoot.path)
+      ? [claudeWorkspaceRoot]
+      : [claudeUserRoot, claudeWorkspaceRoot];
+  return [...genericRoots, codexRoot, ...codexSystemRoots, ...claudeRoots];
 }
 
 /**
