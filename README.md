@@ -10,11 +10,15 @@ The primary interface is an interactive terminal inventory. Until publication, b
 ```console
 npm ci
 npm run build
-node dist/cli.js
+npm link
+npx --no-install lampwright
 ```
 
 No npm version has been published yet. Until the first explicitly approved
-release, build and run the executable from a trusted checkout.
+release, build and link the executable from a trusted checkout. `npm link`
+registers that checkout locally, and `--no-install` prevents `npx` from
+downloading a registry package. Re-run `npm run build` after changing the
+source; the link remains active.
 
 ## Safety model
 
@@ -86,9 +90,9 @@ npm run pack:check
 After building:
 
 ```console
-node dist/cli.js
-node dist/cli.js --help
-node dist/cli.js --version
+npx --no-install lampwright
+npx --no-install lampwright --help
+npx --no-install lampwright --version
 ```
 
 CI runs the complete gate and package audit on Node 20, 22, and 24 across
