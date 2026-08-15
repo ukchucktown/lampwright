@@ -19,6 +19,20 @@ Read the documents relevant to the issue before changing code:
 
 When guidance appears inconsistent, stop and reconcile it in the specification or an ADR instead of encoding an undocumented interpretation in code.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the repository's documented five-label triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Lampwright uses a single domain context. See `docs/agents/domain.md`.
+
 ## Current structure
 
 ```text
