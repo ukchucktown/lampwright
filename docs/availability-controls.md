@@ -94,6 +94,11 @@ append an exact-path rule without confusing a name match with identity.
   shared project document. A local candidate is unavailable unless Git reports
   its path ignored.
 
+When the workspace is the user's home directory, the user and shared project
+paths name the same `settings.json`. Inventory represents that physical file
+once as the higher-precedence shared project layer. It is evidence only: the
+only writable candidate in this collision case is the local project document.
+
 Managed policy and command-line/session overrides are outside this local-file
 control. If observed evidence shows that one affects the Skill, the exposure is
 `unresolved`; Lampwright never claims that a lower-precedence local edit can
@@ -156,6 +161,10 @@ line endings.
 - Effective precedence, low to high: user, shared project, local project.
 - Writable candidates: user and safe Git-ignored local project. Shared project
   settings are evidence only.
+
+The same home-workspace collision rule applies to Plugin evidence: the shared
+project layer represents the coincident `settings.json` once, and only the
+local project document remains a writable candidate.
 
 Managed settings are unsupported. Mutation uses the highest-precedence safe
 writable layer without altering unrelated JSON members.

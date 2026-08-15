@@ -2835,6 +2835,41 @@ describe("Inventory scan", () => {
     ]);
   });
 
+  it("deduplicates the Claude user and workspace root when scanning from home", async () => {
+    const environment = await createTestEnvironment();
+    await createSkill(
+      join(environment.home, ".claude", "skills", "home-helper"),
+      {
+        name: "home-helper",
+      },
+    );
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: environment.home,
+    }).scan({});
+
+    expect(inventory.installations).toHaveLength(1);
+    expect(inventory.installations[0]).toMatchObject({
+      skill: { name: "home-helper" },
+      agentId: "claude-code",
+      scope: { kind: "workspace", workspacePath: environment.home },
+      classification: "standalone-project-skill",
+    });
+    expect(
+      inventory.installations[0]?.harnessExposures[0]?.control,
+    ).toMatchObject({
+      kind: "native",
+      layers: [
+        { documentScope: "shared-workspace" },
+        { documentScope: "local-workspace" },
+      ],
+      writableLayerPaths: [
+        join(environment.home, ".claude", "settings.local.json"),
+      ],
+    });
+  });
+
   it("groups a Claude link with its unmanaged target instead of duplicating the Skill", async () => {
     const environment = await createTestEnvironment();
     const canonical = join(environment.home, ".agents", "skills", "shared");

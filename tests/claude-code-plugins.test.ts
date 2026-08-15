@@ -175,6 +175,39 @@ function pluginTarget(plugin: PluginBoundary): RemovalTarget {
 }
 
 describe("Claude Code plugin adapter", () => {
+  it("deduplicates Plugin user and shared settings when scanning from home", async () => {
+    const fixture = await createTestEnvironment();
+    const environment: FixtureEnvironment = {
+      ...scanEnvironment(fixture),
+      workspaceDirectory: fixture.home,
+      agentHomeDirectories: {
+        "claude-code": join(fixture.home, ".claude"),
+      },
+    };
+    const installed = installPath(environment);
+    await createPluginRoot(installed);
+    await createRegistry(environment, [
+      { scope: "user", installPath: installed, version: "1.2.3" },
+    ]);
+    await writeJson(join(fixture.home, ".claude", "settings.json"), {
+      enabledPlugins: { "quality-suite@acme-marketplace": true },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+
+    expect(inventory.plugins).toHaveLength(1);
+    expect(inventory.plugins[0]?.availability.control).toMatchObject({
+      kind: "native",
+      layers: [
+        { documentScope: "shared-workspace" },
+        { documentScope: "local-workspace" },
+      ],
+      writableLayerPaths: [
+        join(fixture.home, ".claude", "settings.local.json"),
+      ],
+    });
+  });
+
   it("inventories user plugin skills and complete containing-plugin impact", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);

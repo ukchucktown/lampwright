@@ -766,17 +766,17 @@ function validatePluginAvailability(
     )
       fail("Codex Plugin availability requires one user TOML layer");
   } else if (control.mechanism === "claude-enabled-plugins") {
+    const scopes = control.layers.map((layer) => layer.documentScope).join(",");
     if (
-      control.layers.length !== 3 ||
+      (scopes !== "user,shared-workspace,local-workspace" &&
+        scopes !== "shared-workspace,local-workspace") ||
       control.layers.some((layer) => layer.format !== "json") ||
-      control.layers.map((layer) => layer.documentScope).join(",") !==
-        "user,shared-workspace,local-workspace" ||
       values.some(
         (value) => value !== null && value.kind !== "claude-enabled-plugins",
       )
     )
       fail(
-        "Claude Plugin availability requires ordered user, shared, and local JSON layers",
+        "Claude Plugin availability requires ordered shared and local JSON layers, with a distinct user layer when present",
       );
   } else if (
     control.layers.length !== 1 ||
