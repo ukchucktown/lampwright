@@ -10,6 +10,35 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = process.cwd();
 
 describe("release readiness", () => {
+  it("normalizes exactly one npm 11 or npm 12 pack result", async () => {
+    const { normalizeNpmPackResult } =
+      // @ts-expect-error The exercised release helper is intentionally executable ESM.
+      await import("../scripts/npm-pack-result.mjs");
+    const pack = {
+      id: "lampwright@0.1.0",
+      name: "lampwright",
+      version: "0.1.0",
+    };
+
+    expect(normalizeNpmPackResult([pack], "lampwright")).toBe(pack);
+    expect(normalizeNpmPackResult({ lampwright: pack }, "lampwright")).toBe(
+      pack,
+    );
+    for (const invalid of [
+      [],
+      [pack, pack],
+      [{ ...pack, name: "other" }],
+      { lampwright: pack, other: pack },
+      { other: pack },
+      { lampwright: [pack] },
+      null,
+      "lampwright",
+    ])
+      expect(() => normalizeNpmPackResult(invalid, "lampwright")).toThrow(
+        "npm pack returned an unexpected result",
+      );
+  });
+
   it("fails closed unless exact public tag publication authority is present", async () => {
     const command = join(repositoryRoot, "scripts", "verify-release.mjs");
     const authority = {
@@ -177,6 +206,43 @@ describe("release readiness", () => {
     ) as { readonly description: string };
     expect(metadata.description).toContain("reversibly disable");
     expect(metadata.description).toContain("enable");
+  });
+
+  it("keeps the packed first-release documentation complete", async () => {
+    const [readme, security, specification, releaseNotes, verifier] =
+      await Promise.all(
+        [
+          "README.md",
+          "SECURITY.md",
+          "docs/spec.md",
+          "docs/releases/0.1.0.md",
+          "scripts/verify-package.mjs",
+        ].map((path) => readFile(join(repositoryRoot, path), "utf8")),
+      );
+
+    expect(readme).toContain("npx lampwright@0.1.0");
+    expect(readme).not.toContain("No npm version has been published yet");
+    expect(security).toContain("`0.1.x`");
+    expect(security).toContain("security/advisories/new");
+    expect(specification).toContain("npx lampwright@0.1.0");
+    expect(specification).not.toContain("Future published invocation");
+    expect(verifier).toContain('"docs/releases/0.1.0.md"');
+    for (const requiredTopic of [
+      "Vercel `npx skills`",
+      "Claude Code",
+      "Codex",
+      "Gemini CLI",
+      "System Skills",
+      "Git worktree",
+      "Disabled Storage",
+      "non-expiring",
+      "Managed Removal",
+      "Brute-force Removal",
+      "Trash",
+      "Restore",
+      "Recovery expectations",
+    ])
+      expect(releaseNotes).toContain(requiredTopic);
   });
 
   it("keeps Availability operator terminology aligned with the CLI schema", async () => {

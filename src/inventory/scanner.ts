@@ -169,7 +169,11 @@ async function scanWithOptions(
     );
   }
   const scannedAt = scanDate.toISOString();
-  const adapterRoots = await adapterDiscoveryRoots(options);
+  const isExecutablePresent = options.executablePresent ?? executablePresent;
+  const adapterRoots = await adapterDiscoveryRoots(
+    options,
+    isExecutablePresent,
+  );
   const roots = validateAndNormalizeAdapterRoots(
     [...requestRoots, ...adapterRoots.roots],
     options,
@@ -234,6 +238,7 @@ async function scanWithOptions(
   const gemini = await scanGeminiCli(
     options.environment,
     options.commandRunner,
+    isExecutablePresent,
   );
   const geminiInstallations = gemini.installations.filter(
     (installation) =>
@@ -676,6 +681,7 @@ async function isRegularFile(path: string): Promise<boolean> {
 
 async function adapterDiscoveryRoots(
   options: InventoryScannerOptions,
+  isExecutablePresent: (executable: string) => Promise<boolean>,
 ): Promise<{
   readonly roots: readonly DiscoveryRoot[];
   readonly probes: ReadonlyMap<string, ReadonlySet<string>>;
@@ -695,7 +701,7 @@ async function adapterDiscoveryRoots(
     const probes = await adapterProbeResults(
       adapter,
       options.commandRunner,
-      options.executablePresent ?? executablePresent,
+      isExecutablePresent,
     );
     probeResults.set(adapter.id, probes);
     for (const root of adapter.roots) {

@@ -2,23 +2,24 @@
 
 ## Supported versions
 
-No npm version has been released yet. Security fixes currently target the
-latest commit on `main`. This table will be updated when the first version is
-published.
+The initial supported release line is `0.1.x`. Version `0.1.0` is being
+prepared for publication; until its registry release is verified, security
+fixes for that line also target the latest commit on `main`.
 
 | Version | Supported |
 | --- | --- |
-| Unreleased `main` | Yes |
-| npm releases | None yet |
+| `0.1.x` | Yes |
+| `< 0.1.0` | No |
 
 ## Reporting a vulnerability
 
 Do not open a public issue for a vulnerability or include real local paths,
-Inventory data, adapter contents, credentials, or exploit details in a public
-pull request. Use GitHub's private vulnerability-reporting flow from the
-repository Security tab when it is available. While the repository is private,
-collaborators should contact the repository owner privately through GitHub and
-request a private security advisory.
+Inventory data, Adapter contents, credentials, or exploit details in a public
+pull request. Use the repository's
+[private vulnerability-reporting form](https://github.com/ukchucktown/lampwright/security/advisories/new).
+If the form is unavailable, contact the repository owner privately through
+GitHub and ask for a private security advisory; do not fall back to a public
+issue.
 
 Include the affected version or commit, operating system and Node.js version,
 the safety invariant involved, a minimal isolated reproduction, and the impact.

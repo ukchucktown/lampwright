@@ -5,7 +5,18 @@ reversibly disabling, enabling, and safely removing AI agent Skills and
 complete Plugins whether they were installed as standalone files, by a
 Manager, or through a Plugin system.
 
-The primary interface is an interactive terminal inventory. Until publication, build and run it from a trusted checkout:
+The primary interface is an interactive terminal Inventory. The supported,
+version-pinned invocation for the first npm release is:
+
+```console
+npx lampwright@0.1.0
+```
+
+Use that command after the registry shows `lampwright@0.1.0` and the published
+artifact has been verified. It downloads the package to npm's cache; Lampwright
+does not install itself globally or add a dependency to the current project.
+
+Before registry publication is verified, build and run from a trusted checkout:
 
 ```console
 npm ci
@@ -14,10 +25,8 @@ npm link
 npx --no-install lampwright
 ```
 
-No npm version has been published yet. Until the first explicitly approved
-release, build and link the executable from a trusted checkout. `npm link`
-registers that checkout locally, and `--no-install` prevents `npx` from
-downloading a registry package. Re-run `npm run build` after changing the
+`npm link` registers that checkout locally, and `--no-install` prevents `npx`
+from downloading a registry package. Re-run `npm run build` after changing the
 source; the link remains active.
 
 ## Safety model
@@ -68,6 +77,7 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Execution and fallback](./docs/execution.md)
 - [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
+- [0.1.0 release notes](./docs/releases/0.1.0.md)
 - [Release readiness](./docs/release.md)
 - [Product ideas](./docs/ideas.md) — unapproved directions under consideration
 - [Architectural decisions](./docs/adr/)
@@ -96,8 +106,8 @@ npx --no-install lampwright --version
 ```
 
 CI runs the complete gate and package audit on Node 20, 22, and 24 across
-macOS, Linux, and Windows. Release preparation never authorizes npm publication
-or a repository visibility change; follow the manual checklist in
+macOS, Linux, and Windows. Release preparation never authorizes npm publication,
+a Git tag, or a GitHub release; follow the manual checklist in
 [`docs/release.md`](./docs/release.md).
 
 ## License

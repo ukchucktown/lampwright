@@ -1,13 +1,22 @@
-import { link, lstat, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  link,
+  lstat,
+  mkdir,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  createInventoryScanner,
+  createInventoryScanner as createInventoryScannerModule,
   createExecutionModule,
   plan,
   type InventoryCommandRunner,
+  type InventoryScannerOptions,
   type QuarantineModule,
 } from "../src/index.js";
 import {
@@ -18,12 +27,55 @@ import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-en
 
 const fixture = createIsolatedTestEnvironmentFixture();
 
+function createInventoryScanner(options: InventoryScannerOptions) {
+  return createInventoryScannerModule({
+    executablePresent: async (executable) => executable === "gemini",
+    ...options,
+  });
+}
+
 async function skill(path: string, name: string): Promise<void> {
   await mkdir(path, { recursive: true });
   await writeFile(join(path, "SKILL.md"), `---\nname: ${name}\n---\n`, "utf8");
 }
 
 describe("Gemini CLI adapter", () => {
+  it("checks executable presence without invoking Gemini during Inventory", async () => {
+    const environment = await fixture();
+    const path = join(environment.home, ".gemini", "skills", "native");
+    await skill(path, "native");
+    const marker = join(environment.home, "manager-invoked");
+    const run = vi.fn(async (command) => {
+      if (command.executable === "gemini") {
+        await writeFile(marker, "invoked", "utf8");
+        return { exitCode: 0, stdout: "1" };
+      }
+      return { exitCode: 1, stdout: "" };
+    });
+    const executablePresent = vi.fn(async () => true);
+
+    const inventory = await createInventoryScanner({
+      now: () => new Date(0),
+      environment: {
+        homeDirectory: environment.home,
+        workspaceDirectory: environment.workspace,
+      },
+      commandRunner: { run },
+      executablePresent,
+    }).scan({});
+
+    expect(executablePresent).toHaveBeenCalledWith("gemini");
+    expect(run).not.toHaveBeenCalledWith(
+      expect.objectContaining({ executable: "gemini" }),
+    );
+    expect(await readdir(environment.home)).toEqual([".gemini"]);
+    expect(
+      inventory.installations.find(
+        (installation) => installation.location.path === path,
+      )?.removal.managed,
+    ).toMatchObject({ availability: { kind: "available" } });
+  });
+
   it("does not traverse linked native skills roots and fails closed on unsafe extension paths", async () => {
     const environment = await fixture();
     const external = join(environment.temporary, "external");
@@ -568,6 +620,21 @@ describe("Gemini CLI adapter", () => {
     const environment = await fixture();
     const path = join(environment.home, ".gemini", "skills", "native");
     await skill(path, "native");
+    const extensionRoot = join(
+      environment.home,
+      ".gemini",
+      "extensions",
+      "extension",
+    );
+    await skill(join(extensionRoot, "skills", "child"), "child");
+    await writeFile(
+      join(extensionRoot, ".gemini-extension-install.json"),
+      JSON.stringify({ source: "x", type: "git" }),
+    );
+    await writeFile(
+      join(extensionRoot, "gemini-extension.json"),
+      JSON.stringify({ name: "extension", version: "1" }),
+    );
     const runner: InventoryCommandRunner = {
       async run() {
         return { exitCode: 1, stdout: "" };
@@ -580,10 +647,22 @@ describe("Gemini CLI adapter", () => {
         workspaceDirectory: environment.workspace,
       },
       commandRunner: runner,
+      executablePresent: async () => false,
     }).scan({});
     const installation = inventory.installations.find(
       (item) => item.location.path === path,
     )!;
+    expect(installation.removal.managed?.availability).toEqual({
+      kind: "unavailable",
+      reason: "the Gemini CLI executable is not available",
+    });
+    expect(
+      inventory.plugins.find((plugin) => plugin.pluginId === "extension")
+        ?.removal.managed?.availability,
+    ).toEqual({
+      kind: "unavailable",
+      reason: "the Gemini CLI executable is not available",
+    });
     const managed = plan(inventory, {
       kind: "targets",
       targets: [{ kind: "installation", installationId: installation.id }],

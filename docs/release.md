@@ -1,7 +1,8 @@
 # Release readiness and manual publication
 
-Status: release-ready verification for `0.1.0`; no npm publication or repository
-visibility change is authorized by this document or issue #15.
+Status: publication preparation for `0.1.0` in the public Lampwright repository.
+This document does not authorize a Git tag, npm publication, or GitHub release;
+each external release action still requires the maintainer's explicit approval.
 
 ## Verified release model
 
@@ -34,19 +35,22 @@ The release configuration follows these current primary-source requirements:
   before a publish job runs. See
   [GitHub deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
 
-As verified on 2026-08-09, the GitHub repository is public and
-`npm view lampwright` returns `E404`. Do not reserve or publish the name
-now; recheck its availability only at explicitly approved release time. The
-checked-in publish workflow deliberately rejects a private
-repository, so it cannot emit a provenance-less release. Changing visibility
-and publishing remain separate, explicit maintainer decisions.
+As rechecked on 2026-08-20, the GitHub repository is public and
+`npm view lampwright` returns `E404`. That result is only a point-in-time
+availability check, so recheck immediately before tagging. Do not reserve or
+publish the name as an implied part of preparation. The checked-in publish
+workflow also verifies the canonical public repository so it cannot emit a
+provenance-less release from another checkout.
 
 ## Automated evidence
 
 `npm run pack:check` builds from source, asks npm for the dry-run pack list, and
-fails unless every file is within the documented allowlist. It verifies all
-exports, schemas, the executable shebang, release documentation, and the absence
-of source, tests, scripts, logs, environment files, and `node_modules`.
+fails unless exactly one package and only files within the documented allowlist
+are returned. It accepts the npm 11 result array and npm 12 lifecycle object,
+then applies the same strict name, version, exports, schemas, executable
+shebang, and content checks. The package must include these `0.1.0` release
+notes and exclude source, tests, scripts, logs, environment files, and
+`node_modules`.
 
 The manually dispatched `release-candidate.yml` workflow runs every quality
 gate on a GitHub-hosted Node 24 runner, creates the actual tarball and a SHA-256
@@ -126,43 +130,58 @@ and Git-protected project Skill and proves no Lampwright state root exists.
 
 Preparation (safe before publication):
 
-- [ ] Obtain explicit approval to make the repository public and publish the
-      named npm version. Do neither as an implied part of release readiness.
-- [ ] Confirm the package name is still available and `package.json` version,
-      changelog/release notes, and intended `v<version>` tag agree.
-- [ ] Run all six local quality commands from `CONTRIBUTING.md` after `npm ci`.
-- [ ] Dispatch `Release candidate` at the exact release commit; download the
-      tarball and digest, verify SHA-256, unpack it, and inspect the allowlisted
-      contents and executable behavior.
-- [ ] Confirm the full macOS/Linux/Windows CI matrix is green from a clean
-      checkout and dependency/security review has no unresolved release block.
-- [ ] Enable GitHub private vulnerability reporting before public visibility.
-- [ ] Create and configure the `npm-production` GitHub environment with a
-      required reviewer and tag restriction where the repository plan supports
-      those controls.
-- [ ] Review the public-transparency-log notice linked by npm's provenance
+- [ ] Confirm GitHub private vulnerability reporting is enabled and that
+      [`SECURITY.md`](../SECURITY.md) points to the working private form.
+- [ ] Create the `npm-production` GitHub environment and restrict deployments
+      to the intended release-tag pattern. Add an eligible independent reviewer
+      or a wait timer when useful; a sole maintainer's own confirmation is not
+      independent approval.
+- [ ] Confirm the npm owner account has two-factor authentication enabled.
+- [ ] Recheck that the unscoped package name is available immediately before
+      tagging and confirm `package.json`, the lockfile, these
+      [`0.1.0` release notes](./releases/0.1.0.md), expected CLI output, and the
+      intended `v0.1.0` tag all agree.
+- [ ] Freeze the intended release commit. Run `npm ci` and every local quality,
+      package, runtime-dependency, and full-dependency gate from a clean
+      checkout; resolve every release blocker.
+- [ ] Confirm the Node 20/22/24 macOS/Linux/Windows CI matrix is green for that
+      exact commit.
+- [ ] Dispatch `Release candidate` at the frozen commit. Download the tarball
+      and SHA-256 file, verify the digest, unpack the package, and inspect it for
+      secrets, development artifacts, stale names, unintended files, and
+      misleading documentation.
+- [ ] Install that exact tarball in a clean temporary location. Run
+      `lampwright --version`, `lampwright --help`, and representative read-only
+      commands, then accept or reject the candidate without rebuilding it.
+- [ ] Review npm's public-transparency-log notice linked by the provenance
       documentation.
 
 First publication (manual and separately authorized):
 
-1. Make the repository public only after the explicit visibility approval.
-2. Create the signed `v<version>` tag at the reviewed commit and push that tag.
-3. Because `lampwright` does not yet exist on npm, create a short-lived,
-   narrowly scoped `NPM_TOKEN` suitable for the bootstrap publication, require
-   account 2FA, and store it only as the `npm-production` environment secret.
-4. Dispatch `Publish to npm` from the exact tag and type the exact
-   `lampwright@<version>` confirmation. Approve the protected environment.
-5. Verify the registry package, install it in a fresh temporary project, run
-   `npx lampwright --version` and `--help`, and verify its attestation with a
-   current npm CLI (`npm audit signatures`).
-6. Delete the bootstrap token immediately. In the npm package settings,
-   configure GitHub Actions trusted publishing for organization/user
-   `ukchucktown`, repository `lampwright`, workflow `publish.yml`, and the
-   `npm-production` environment. Restrict or disallow traditional publish
-   tokens after the OIDC path is verified.
-7. For later versions, consider changing the trusted publisher and workflow to
-   stage-only publishing so a maintainer must inspect and approve the staged
-   package with 2FA.
+1. Obtain explicit approval to create and push the signed `v0.1.0` tag at the
+   accepted candidate commit. Verify the remote tag points to that commit.
+2. Create a short-lived granular npm token with write access only to the
+   bootstrap publication and bypass-2FA enabled. Store it only as the protected
+   `NPM_TOKEN` secret in `npm-production`; never put it in a repository file,
+   log, issue, release note, or chat.
+3. Obtain separate explicit approval to publish `lampwright@0.1.0`.
+4. Dispatch `Publish to npm` from the exact tag and enter the exact confirmation
+   `lampwright@0.1.0`. Satisfy the configured environment gate.
 
-Do not run `npm publish`, dispatch the publish workflow, create the public
-release, or change repository visibility as part of a readiness check.
+Post-publication verification and credential cleanup:
+
+1. Verify `npm view lampwright@0.1.0`, the npm package-page metadata, and
+   `npx lampwright@0.1.0 --version` and `--help` from clean environments.
+2. Verify provenance and signatures with a current npm CLI using
+   `npm audit signatures`, and capture macOS, Linux, and Windows smoke evidence.
+3. Publish the GitHub `v0.1.0` release with the reviewed release notes.
+4. Configure npm trusted publishing for owner `ukchucktown`, repository
+   `lampwright`, workflow `publish.yml`, environment `npm-production`, and the
+   publish action. Verify the OIDC path on supported Node/npm versions.
+5. Remove `NPM_TOKEN`, revoke the bootstrap token, and restrict traditional
+   token publishing only after trusted publishing succeeds.
+6. For later versions, consider stage-only publishing so the maintainer can
+   inspect and approve the staged package with 2FA.
+
+Preparation and candidate review do not authorize `npm publish`, a publish
+workflow dispatch, a Git tag, or a GitHub release.
