@@ -1,7 +1,7 @@
 # Lampwright v1 specification
 
 Status: Accepted product direction; implementation under active refinement
-Last updated: 2026-08-09
+Last updated: 2026-08-20
 
 ## 1. Summary
 
@@ -9,7 +9,11 @@ Last updated: 2026-08-09
 
 The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks Lampwright to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend a complete planner-authorized artifact set when no safe native control exists. For an explicitly supported Manager-owned Installation, suspension preserves the Manager record and displaces every declared discovery artifact. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
 
-The primary interface is an interactive terminal UI. Until an explicitly approved npm publication, it runs from a trusted checkout as `node dist/cli.js`. A compact non-interactive interface and JSON output support automation and future agent sessions.
+The primary interface is an interactive terminal UI. The supported npm
+invocation is version-pinned as `npx lampwright@0.1.0` for the first release.
+Before registry publication is verified, it runs from a trusted checkout as
+`node dist/cli.js`. A compact non-interactive interface and JSON output support
+automation and agent sessions.
 
 ## 2. Product principles
 
@@ -59,8 +63,8 @@ The primary interface is an interactive terminal UI. Until an explicitly approve
 - Runtime: Node.js 20 or newer.
 - Distribution: npm package named `lampwright`.
 - Executable: `lampwright`.
-- Current invocation from a trusted checkout: `node dist/cli.js` after build.
-- Future published invocation: `npx lampwright`.
+- First-release npm invocation: `npx lampwright@0.1.0`.
+- Trusted-checkout invocation: `node dist/cli.js` after build.
 - License: MIT.
 - Supported operating systems: current macOS, mainstream Linux distributions, and supported Windows releases.
 
@@ -133,7 +137,10 @@ Installation Groups are a separate navigational batch-selection mechanism. In v1
 
 ## 7. Search and terminal UI
 
-Running `node dist/cli.js` from a built trusted checkout without a subcommand opens the terminal UI. `npx lampwright` is the future published invocation.
+Running `lampwright` without a subcommand opens the terminal UI. The
+version-pinned first-release invocation is `npx lampwright@0.1.0`; before that
+registry release is verified, `node dist/cli.js` runs the same entry point from
+a built trusted checkout.
 
 The UI must:
 

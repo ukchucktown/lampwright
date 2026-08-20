@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import process from "node:process";
 
+import { normalizeNpmPackResult } from "./npm-pack-result.mjs";
+
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 const npmCli = process.env.npm_execpath;
 if (typeof npmCli !== "string" || npmCli.length === 0)
@@ -12,10 +14,7 @@ const output = execFileSync(
   [npmCli, "pack", "--dry-run", "--json", "--ignore-scripts"],
   { encoding: "utf8" },
 );
-const packs = JSON.parse(output);
-if (!Array.isArray(packs) || packs.length !== 1)
-  throw new Error("npm pack returned an unexpected result");
-const pack = packs[0];
+const pack = normalizeNpmPackResult(JSON.parse(output), packageJson.name);
 if (pack.name !== packageJson.name || pack.version !== packageJson.version)
   throw new Error("packed name/version does not match package.json");
 if (!/\bdisable\b/u.test(packageJson.description))
@@ -65,6 +64,7 @@ for (const required of [
   "dist/testing/index.d.ts",
   "dist/testing/index.js",
   "docs/release.md",
+  "docs/releases/0.1.0.md",
   "docs/availability.md",
   "docs/availability-controls.md",
   "docs/disabled-storage.md",

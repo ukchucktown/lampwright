@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -102,6 +109,26 @@ async function runBuiltExecutableWith(
     }
     throw error;
   }
+}
+
+async function writeSideEffectingGeminiExecutable(
+  environment: IsolatedTestEnvironment,
+): Promise<void> {
+  if (process.platform === "win32") {
+    await writeFile(
+      join(environment.temporary, "gemini.cmd"),
+      '@echo invoked>"%USERPROFILE%\\manager-invoked"\r\n@echo 1.0.0\r\n',
+      "utf8",
+    );
+    return;
+  }
+  const executable = join(environment.temporary, "gemini");
+  await writeFile(
+    executable,
+    '#!/bin/sh\nprintf invoked > "$HOME/manager-invoked"\nprintf "1.0.0\\n"\n',
+    "utf8",
+  );
+  await chmod(executable, 0o755);
 }
 
 function successfulReport(plan: {
@@ -642,6 +669,42 @@ describe("the non-interactive CLI", () => {
 });
 
 describe("the built lampwright executable", () => {
+  it("detects Gemini without invoking it during a read-only scan", async () => {
+    const environment = await createTestEnvironment();
+    const skillRoot = join(
+      environment.home,
+      ".gemini",
+      "skills",
+      "review-tools",
+    );
+    await mkdir(skillRoot, { recursive: true });
+    await writeFile(
+      join(skillRoot, "SKILL.md"),
+      "---\nname: review-tools\ndescription: Review changes\n---\n",
+      "utf8",
+    );
+    await writeSideEffectingGeminiExecutable(environment);
+
+    const result = await runBuiltExecutableWith(
+      environment,
+      {
+        ...environment.environmentVariables,
+        ...(process.platform === "win32" ? { PATHEXT: ".CMD" } : {}),
+      },
+      "scan",
+      "--json",
+    );
+
+    expect(result.exitCode).toBe(0);
+    const inventory = JSON.parse(result.stdout) as Inventory;
+    expect(
+      inventory.installations.find(
+        (candidate) => candidate.location.path === skillRoot,
+      )?.removal.managed,
+    ).toMatchObject({ availability: { kind: "available" } });
+    expect(await readdir(environment.home)).toEqual([".gemini"]);
+  });
+
   it("reads the Vercel global lock from the home-relative location when XDG_STATE_HOME is unset", async () => {
     const environment = await createTestEnvironment();
     const canonical = join(

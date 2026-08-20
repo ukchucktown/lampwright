@@ -79,14 +79,14 @@ interface ExtensionManifest {
 export async function scanGeminiCli(
   environment: InventoryScanEnvironment,
   commandRunner: InventoryCommandRunner,
+  executablePresent: (executable: string) => Promise<boolean>,
 ): Promise<GeminiCliScanResult> {
   const home =
     environment.agentHomeDirectories?.[agentId] ??
     join(environment.homeDirectory, ".gemini");
-  const probe = await commandRunner
-    .run({ executable: GEMINI_CLI_EXECUTABLE, arguments: ["--version"] })
-    .catch(() => ({ exitCode: null, stdout: "" }));
-  const managerAvailable = probe.exitCode === 0;
+  const managerAvailable = await executablePresent(GEMINI_CLI_EXECUTABLE).catch(
+    () => false,
+  );
   const userGeminiSkills = join(home, "skills");
   const workspaceGeminiSkills = join(
     environment.workspaceDirectory,
@@ -730,7 +730,10 @@ async function managedSkill(
     operationId: `uninstall-${cliScope}-skill`,
     availability: available
       ? { kind: "available" }
-      : { kind: "unavailable", reason: "gemini --version did not succeed" },
+      : {
+          kind: "unavailable",
+          reason: "the Gemini CLI executable is not available",
+        },
     trust: { kind: "trusted" },
     externalId: name,
     invocation: {
@@ -769,7 +772,10 @@ async function managedExtension(
     operationId: "uninstall-extension",
     availability: available
       ? { kind: "available" }
-      : { kind: "unavailable", reason: "gemini --version did not succeed" },
+      : {
+          kind: "unavailable",
+          reason: "the Gemini CLI executable is not available",
+        },
     trust: { kind: "trusted" },
     externalId: name,
     invocation: {
