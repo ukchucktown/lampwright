@@ -485,6 +485,12 @@ async function materializePlugin(input: {
           reason: "Codex Plugin availability evidence is not materialized",
         },
       },
+      update: {
+        kind: "unsupported",
+        reason: input.runtimeDefault
+          ? "runtime-default Plugins are outside Update authority"
+          : "Codex has no supported installed-Plugin Update operation",
+      },
       removal: {
         managed,
         fallback: {
@@ -577,6 +583,11 @@ async function materializeSkill(input: {
       confidence: "declared",
     },
     protection: await protectionFor(input.skill.location, input.commandRunner),
+    update: {
+      kind: "unsupported",
+      reason:
+        "Plugin-owned Skills update only through their complete Plugin boundary",
+    },
     removal: {
       managed: null,
       fallback: {

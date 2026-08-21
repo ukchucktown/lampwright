@@ -365,6 +365,12 @@ export async function scanGeminiCli(
               }
             : { kind: "filesystem" as const, confidence: "inferred" as const },
         protection: artifactProtection,
+        update: {
+          kind: "unsupported" as const,
+          reason: extension
+            ? "Plugin-owned Skills update only through their complete Plugin boundary"
+            : "Gemini standalone Skills have no supported Owner Update operation",
+        },
         removal: extension
           ? {
               managed: null,
@@ -684,6 +690,10 @@ async function scanExtensions(
             kind: "unsupported",
             reason: "Gemini Plugin availability evidence is not materialized",
           },
+        },
+        update: {
+          kind: "unsupported",
+          reason: "Gemini extension Update support is not materialized",
         },
         removal: {
           managed,

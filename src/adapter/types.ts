@@ -588,7 +588,11 @@ export type CompiledAdapterUpdateVerification =
   | (Omit<
       Extract<AdapterUpdateVerificationDefinition, { kind: "path-present" }>,
       "path"
-    > & { readonly path: string })
+    > & {
+      readonly path: string;
+      /** Lexically selected template base; retained for runtime canonical checks. */
+      readonly pathBase: string;
+    })
   | Extract<
       AdapterUpdateVerificationDefinition,
       { kind: "manifest-record-present" | "owner-state-present" }

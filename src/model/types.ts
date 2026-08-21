@@ -347,6 +347,8 @@ export interface Installation {
   readonly modifiedAt: string | null;
   readonly ownership: Ownership;
   readonly protection: ProtectionStatus;
+  /** Complete offline evidence for one Owner-controlled Update operation. */
+  readonly update: UpdateEvidence;
   readonly removal: RemovalEvidence;
   readonly tags: readonly string[];
   readonly metadata: JsonObject;
@@ -528,6 +530,23 @@ export type ManagedRemovalInvocation =
       readonly packageArguments: readonly string[];
     };
 
+export type ManagedUpdateInvocation =
+  | {
+      readonly kind: "direct";
+      readonly command: ExecutableCommand;
+      readonly workingDirectory:
+        | { readonly kind: "exact"; readonly path: string }
+        | { readonly kind: "isolated-temporary" };
+    }
+  | {
+      readonly kind: "ephemeral-package";
+      readonly packageExecution: EphemeralPackageExecution;
+      readonly packageArguments: readonly string[];
+      readonly workingDirectory:
+        | { readonly kind: "exact"; readonly path: string }
+        | { readonly kind: "isolated-temporary" };
+    };
+
 export type AdapterExecutionTrust =
   | { readonly kind: "trusted" }
   | {
@@ -535,6 +554,106 @@ export type AdapterExecutionTrust =
       readonly adapterId: string;
       readonly contentHash: string;
     };
+
+export type UpdateEvidence =
+  | { readonly kind: "unsupported"; readonly reason: string }
+  | { readonly kind: "unresolved"; readonly reason: string }
+  | {
+      readonly kind: "managed";
+      readonly operation: ManagedUpdateEvidence;
+    };
+
+export type ManagedUpdateAvailability =
+  | { readonly kind: "available" }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
+export type UpdateRevisionEvidence =
+  | {
+      readonly kind: "owner-value";
+      readonly path: string;
+      readonly format: DeclarativeDocumentFormat;
+      readonly recordPointer: string;
+      readonly value: string | number;
+    }
+  | {
+      readonly kind: "content-hash";
+      readonly path: string;
+      readonly digest: Sha256Digest;
+    };
+
+export type UpdateLocalChangeEvidence =
+  | {
+      readonly kind: "unchanged" | "changed";
+      readonly path: string;
+      readonly expectedDigest: Sha256Digest;
+      readonly actualDigest: Sha256Digest;
+    }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
+export interface ManagedUpdateEffect {
+  readonly kind: "mutation-root" | "configuration-path";
+  readonly path: string;
+  readonly exists: boolean;
+  readonly protection: ProtectionStatus;
+}
+
+export type ManagedUpdateVerificationEvidence =
+  | { readonly kind: "path-present"; readonly path: string }
+  | {
+      readonly kind: "record-present";
+      readonly path: string;
+      readonly format: DeclarativeDocumentFormat;
+      readonly recordPointer: string;
+    }
+  | { readonly kind: "owner-state-present"; readonly externalId: string }
+  | {
+      readonly kind: "revision-content-hash";
+      readonly path: string;
+    }
+  | {
+      readonly kind: "revision-manifest-value";
+      readonly path: string;
+      readonly format: DeclarativeDocumentFormat;
+      readonly recordPointer: string;
+      readonly value: string | number;
+    }
+  | {
+      readonly kind: "command-succeeds";
+      readonly command: ExecutableCommand;
+      readonly successExitCodes: readonly number[];
+    };
+
+export interface ManagedUpdateEvidence {
+  readonly adapterId: string;
+  readonly operationId: string;
+  readonly availability: ManagedUpdateAvailability;
+  readonly trust: AdapterExecutionTrust;
+  readonly owner: ManagedOwnership;
+  readonly externalId: string;
+  readonly invocation: ManagedUpdateInvocation;
+  readonly source: SourceReference;
+  /** `null` means that the recorded Owner policy does not pin a named ref. */
+  readonly ref: string | null;
+  readonly scope: Scope;
+  readonly currentRevision: readonly [
+    UpdateRevisionEvidence,
+    ...UpdateRevisionEvidence[],
+  ];
+  readonly ownerRecordDigest: Sha256Digest;
+  readonly effects: readonly ManagedUpdateEffect[];
+  readonly network:
+    | { readonly kind: "none" }
+    | { readonly kind: "required"; readonly reason: string };
+  readonly packageDownload:
+    | { readonly kind: "none" }
+    | {
+        readonly kind: "possible";
+        readonly packageName: string;
+        readonly packageVersion: string;
+      };
+  readonly localChanges: UpdateLocalChangeEvidence;
+  readonly verifications: readonly ManagedUpdateVerificationEvidence[];
+}
 
 export type ManagedRemovalAvailability =
   | { readonly kind: "available" }
@@ -664,6 +783,8 @@ export interface PluginBoundary {
   readonly resources: readonly PluginResource[];
   /** Whole-Plugin runtime availability, independent from child Skill controls. */
   readonly availability: PluginAvailability;
+  /** Complete offline evidence for one whole-Plugin Update operation. */
+  readonly update: UpdateEvidence;
   readonly removal: RemovalEvidence;
 }
 

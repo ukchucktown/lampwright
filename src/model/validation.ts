@@ -10,7 +10,12 @@ import {
   removalPlanSchema,
 } from "./schemas.js";
 import { stringifyModel } from "./json.js";
-import { artifactPathKey, locationContains, physicalPathKey } from "./paths.js";
+import {
+  artifactPathKey,
+  locationContains,
+  mutationPathKey,
+  physicalPathKey,
+} from "./paths.js";
 import type {
   ApprovalRequirement,
   ExecutionReport,
@@ -28,6 +33,7 @@ import type {
   RemovalPlan,
   RemovalTarget,
   StrongIdentityEvidence,
+  UpdateEvidence,
   VerificationCheck,
   WeakIdentityEvidence,
 } from "./types.js";
@@ -421,6 +427,234 @@ function validateInstallation(
     [...path, "removal"],
     issues,
   );
+  validateUpdateEvidence(
+    installation.update,
+    ownership,
+    installation.adapterId,
+    [...path, "update"],
+    issues,
+  );
+  if (ownership.kind === "plugin" && installation.update.kind === "managed")
+    addIssue(
+      issues,
+      [...path, "update"],
+      "Plugin-owned child Installations cannot carry Update authority",
+    );
+  if (installation.update.kind === "managed") {
+    const operation = installation.update.operation;
+    if (installation.status !== "active")
+      addIssue(
+        issues,
+        [...path, "update"],
+        "managed Installation Update requires active status",
+      );
+    if (ownership.kind !== "manager" || ownership.confidence !== "declared")
+      addIssue(
+        issues,
+        [...path, "update"],
+        "managed Installation Update requires declared Manager ownership",
+      );
+    if (installation.source === null)
+      addIssue(
+        issues,
+        [...path, "update"],
+        "managed Installation Update requires a recorded source",
+      );
+    if (installation.identity.strongEvidence.length === 0)
+      addIssue(
+        issues,
+        [...path, "update"],
+        "managed Installation Update requires strong identity evidence",
+      );
+    if (
+      stringifyModel(operation.scope, 0) !==
+      stringifyModel(installation.scope, 0)
+    )
+      addIssue(
+        issues,
+        [...path, "update", "operation", "scope"],
+        "managed Update Scope must match the Installation Scope",
+      );
+    if (
+      stringifyModel(operation.source, 0) !==
+      stringifyModel(installation.source, 0)
+    )
+      addIssue(
+        issues,
+        [...path, "update", "operation", "source"],
+        "managed Update source must match the recorded Installation source",
+      );
+    operation.currentRevision.forEach((revision, index) => {
+      if (
+        revision.kind === "content-hash" &&
+        mutationPathKey(revision.path) ===
+          mutationPathKey(installation.location.path) &&
+        revision.digest.digest !== installation.contentHash
+      )
+        addIssue(
+          issues,
+          [...path, "update", "operation", "currentRevision", index],
+          "content-hash revision must match the Installation content hash",
+        );
+    });
+  }
+}
+
+function validateUpdateEvidence(
+  update: UpdateEvidence,
+  ownership: ManagedOwnership | Installation["ownership"],
+  adapterId: string | null,
+  path: readonly (number | string)[],
+  issues: MutableIssue[],
+): void {
+  if (update.kind !== "managed") return;
+  const operation = update.operation;
+  if (ownership.kind !== "manager" && ownership.kind !== "plugin")
+    addIssue(
+      issues,
+      path,
+      "managed Update evidence requires Manager or Plugin ownership",
+    );
+  else if (stringifyModel(operation.owner, 0) !== stringifyModel(ownership, 0))
+    addIssue(
+      issues,
+      [...path, "operation", "owner"],
+      "managed Update Owner must match Inventory ownership",
+    );
+  if (operation.adapterId !== adapterId)
+    addIssue(
+      issues,
+      [...path, "operation", "adapterId"],
+      "managed Update Adapter must match the Inventory record Adapter",
+    );
+  if (
+    operation.trust.kind === "blocked" &&
+    operation.trust.adapterId !== operation.adapterId
+  )
+    addIssue(
+      issues,
+      [...path, "operation", "trust", "adapterId"],
+      "blocked trust must identify the managed Update Adapter",
+    );
+  duplicateIndexes(operation.effects, (effect) =>
+    mutationPathKey(effect.path),
+  ).forEach((index) =>
+    addIssue(
+      issues,
+      [...path, "operation", "effects", index, "path"],
+      "managed Update effect paths must be unique",
+    ),
+  );
+  duplicateIndexes(operation.verifications, updateVerificationKey).forEach(
+    (index) =>
+      addIssue(
+        issues,
+        [...path, "operation", "verifications", index],
+        "managed Update verifications must be unique",
+      ),
+  );
+  duplicateIndexes(operation.currentRevision, updateRevisionKey).forEach(
+    (index) =>
+      addIssue(
+        issues,
+        [...path, "operation", "currentRevision", index],
+        "current Update revisions must be unique",
+      ),
+  );
+  const currentRevisionKeys = operation.currentRevision.map(updateRevisionKey);
+  const verificationRevisionKeys = operation.verifications.flatMap(
+    (verification) => {
+      if (verification.kind === "revision-content-hash")
+        return [`content-hash:${mutationPathKey(verification.path)}`];
+      if (verification.kind === "revision-manifest-value")
+        return [
+          `owner-value:${mutationPathKey(verification.path)}:${verification.format}:${verification.recordPointer}:${stringifyModel(verification.value, 0)}`,
+        ];
+      return [];
+    },
+  );
+  if (
+    stringifyModel([...currentRevisionKeys].sort(), 0) !==
+    stringifyModel([...verificationRevisionKeys].sort(), 0)
+  )
+    addIssue(
+      issues,
+      [...path, "operation", "currentRevision"],
+      "current Update revisions must match revision verifications exactly",
+    );
+  operation.verifications.forEach((verification, index) => {
+    if (
+      verification.kind === "command-succeeds" &&
+      new Set(verification.successExitCodes).size !==
+        verification.successExitCodes.length
+    )
+      addIssue(
+        issues,
+        [...path, "operation", "verifications", index, "successExitCodes"],
+        "Update verification success exit codes must be unique",
+      );
+  });
+  const ephemeral = operation.invocation.kind === "ephemeral-package";
+  if (ephemeral !== (operation.packageDownload.kind === "possible"))
+    addIssue(
+      issues,
+      [...path, "operation", "packageDownload"],
+      "package download disclosure must match the approved invocation",
+    );
+  if (
+    operation.invocation.kind === "ephemeral-package" &&
+    (operation.packageDownload.kind !== "possible" ||
+      operation.packageDownload.packageName !==
+        operation.invocation.packageExecution.packageName ||
+      operation.packageDownload.packageVersion !==
+        operation.invocation.packageExecution.packageVersion)
+  )
+    addIssue(
+      issues,
+      [...path, "operation", "packageDownload"],
+      "package download disclosure must identify the invoked exact package",
+    );
+  if (ephemeral && operation.network.kind !== "required")
+    addIssue(
+      issues,
+      [...path, "operation", "network"],
+      "ephemeral package Update must disclose required network access",
+    );
+  if (
+    operation.localChanges.kind !== "unavailable" &&
+    (operation.localChanges.kind === "changed") ===
+      (operation.localChanges.expectedDigest.digest ===
+        operation.localChanges.actualDigest.digest)
+  )
+    addIssue(
+      issues,
+      [...path, "operation", "localChanges", "kind"],
+      "local-change state must match the compared digests",
+    );
+}
+
+function updateRevisionKey(
+  revision: import("./types.js").UpdateRevisionEvidence,
+): string {
+  return revision.kind === "content-hash"
+    ? `content-hash:${mutationPathKey(revision.path)}`
+    : `owner-value:${mutationPathKey(revision.path)}:${revision.format}:${revision.recordPointer}:${stringifyModel(revision.value, 0)}`;
+}
+
+function updateVerificationKey(
+  verification: import("./types.js").ManagedUpdateVerificationEvidence,
+): string {
+  if (
+    verification.kind === "path-present" ||
+    verification.kind === "revision-content-hash"
+  )
+    return `${verification.kind}:${mutationPathKey(verification.path)}`;
+  if (
+    verification.kind === "record-present" ||
+    verification.kind === "revision-manifest-value"
+  )
+    return `${verification.kind}:${mutationPathKey(verification.path)}:${verification.format}:${verification.recordPointer}:${"value" in verification ? stringifyModel(verification.value, 0) : ""}`;
+  return stringifyModel(verification, 0);
 }
 
 function validateRemovalEvidence(
@@ -580,6 +814,19 @@ function validatePluginBoundaries(
       );
     }
     validatePluginAvailability(plugin, path, issues);
+    validateUpdateEvidence(
+      plugin.update,
+      plugin.ownership,
+      plugin.adapterId,
+      [...path, "update"],
+      issues,
+    );
+    if (plugin.runtimeDefault && plugin.update.kind === "managed")
+      addIssue(
+        issues,
+        [...path, "update"],
+        "runtime-default Plugins cannot carry Update authority",
+      );
     validateRemovalEvidence(
       plugin.removal,
       plugin.ownership,

@@ -121,6 +121,45 @@ version 2 adds explicit lifecycle operation types. The schema distinguishes a
 removal operation from an Update operation and does not infer the operation
 from an identifier or a command.
 
+### Normalized Inventory state
+
+Each Installation and Plugin boundary contains one closed `UpdateEvidence`
+value. The value has one of these states:
+
+- `managed`: Inventory contains the complete Owner operation.
+- `unsupported`: The target has no supported Owner Update operation.
+- `unresolved`: Inventory cannot prove a complete and safe Owner operation.
+
+The `unsupported` and `unresolved` states contain a reason and no mutation
+authority. The `managed` state contains these values:
+
+- The Adapter, the Owner, the operation ID, and the exact Owner selector.
+- The operation availability and the Adapter trust state.
+- The exact invocation and the required working directory.
+- The recorded source, ref, Scope, and Owner record digest.
+- One or more current revision values.
+- The complete effect set with existence and protection evidence for each path.
+- The network and package download disclosures.
+- The closed local-change state.
+- The concrete verification values.
+
+A current revision value is an Owner-record primitive or a content hash with
+its exact path. A primitive value also contains the exact record pointer and
+document path. Inventory keeps all declared revision values in deterministic
+order. Inventory does not select one value as more authoritative than another
+value.
+
+The local-change state is `unchanged`, `changed`, or `unavailable`. The first
+two states contain the expected and actual SHA-256 values. The `unavailable`
+state contains the Adapter reason and does not claim that the content matches.
+
+Every declared effect contains Git, System, and filesystem protection evidence.
+An absent path also contains an `exists: false` value. Inventory derives the
+filesystem evidence from the nearest safe parent of an absent path.
+
+Plugin-owned child Installations always contain an `unsupported` state.
+Lampwright can put Update authority only on the complete Plugin boundary.
+
 ## Planning
 
 The Planning module adds this interface:

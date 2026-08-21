@@ -370,6 +370,10 @@ async function materializeLockEntry(input: {
       confidence: "declared",
     },
     protection: primaryProtection,
+    update: {
+      kind: "unsupported",
+      reason: "Vercel Update support is not materialized",
+    },
     removal: {
       managed,
       fallback:
