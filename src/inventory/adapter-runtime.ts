@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { access, lstat, realpath } from "node:fs/promises";
 import { parse as parseJsonc, parseTree } from "jsonc-parser";
 import { parseDocument } from "yaml";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import type {
   AdapterCatalog,
@@ -13,8 +13,11 @@ import type {
   AdapterValueSelector,
   AdapterCommandArgument,
   CompiledAdapter,
+  CompiledAdapterLifecycleOperationV2,
   CompiledAdapterManifest,
+  CompiledAdapterRuntimePath,
 } from "../adapter/types.js";
+import { stringifyModel } from "../model/json.js";
 import type {
   Dependency,
   HardDependency,
@@ -27,11 +30,21 @@ import type {
   StrongIdentityEvidence,
   JsonObject,
   JsonValue,
+  ManagedUpdateEffect,
+  ManagedUpdateVerificationEvidence,
+  Sha256Digest,
+  UpdateEvidence,
 } from "../model/types.js";
+import { hashSkillDirectory } from "./content-hash.js";
+import {
+  digest,
+  hasDuplicateKeys,
+  pathKey,
+  readStableRegularFile,
+} from "./evidence.js";
 import { inspectGitProtection } from "./git-protection.js";
 import { groupInstallations } from "./identity.js";
-import type { InventoryCommandRunner } from "./types.js";
-import { readStableRegularFile, hasDuplicateKeys } from "./evidence.js";
+import type { DiscoveryRoot, InventoryCommandRunner } from "./types.js";
 
 interface ManifestRecord {
   readonly key: string;
@@ -54,6 +67,7 @@ export async function applyAdapterManifests(
   commandRunner: InventoryCommandRunner,
   activeProbes: ReadonlyMap<string, ReadonlySet<string>>,
   activeRootIds: ReadonlyMap<string, ReadonlySet<string>>,
+  discoveryRoots: readonly DiscoveryRoot[],
 ): Promise<{
   readonly installations: readonly Installation[];
   readonly dependencies: readonly Dependency[];
@@ -120,7 +134,15 @@ export async function applyAdapterManifests(
     const original = installations.find(
       (item) => item.id === record.installation.id,
     );
-    if (original !== undefined) replacements.set(original.id, original);
+    if (original !== undefined)
+      replacements.set(original.id, {
+        ...original,
+        update: {
+          kind: "unresolved",
+          reason:
+            "the Adapter Owner record conflicts with discovered ownership",
+        },
+      });
     return false;
   });
 
@@ -172,7 +194,14 @@ export async function applyAdapterManifests(
   for (const [id, records] of applicableByInstallation) {
     if (records.length !== 1 || ambiguousOwnership.has(id)) {
       const generic = installations.find((item) => item.id === id);
-      if (generic !== undefined) replacements.set(id, generic);
+      if (generic !== undefined)
+        replacements.set(id, {
+          ...generic,
+          update: {
+            kind: "unresolved",
+            reason: "the Adapter Owner selector is ambiguous",
+          },
+        });
       continue;
     }
     const record = records[0];
@@ -185,11 +214,20 @@ export async function applyAdapterManifests(
       activeProbes.get(record.adapter.id) ?? new Set(),
       activeRootIds.get(record.adapter.id) ?? new Set(),
     );
-    if (managed !== null)
-      replacements.set(id, {
-        ...current,
-        removal: { ...current.removal, managed },
-      });
+    const update = await updateFor(
+      record,
+      current,
+      commandRunner,
+      activeProbes.get(record.adapter.id) ?? new Set(),
+      activeRootIds.get(record.adapter.id) ?? new Set(),
+      discoveryRoots,
+    );
+    replacements.set(id, {
+      ...current,
+      update,
+      removal:
+        managed === null ? current.removal : { ...current.removal, managed },
+    });
     validBound.push(record);
   }
   result = result.map((item) => replacements.get(item.id) ?? item);
@@ -455,6 +493,23 @@ function withOwnership(item: Installation, ownership: Ownership): Installation {
               reason: "managed ownership requires exact cleanup evidence",
             },
           },
+    update:
+      ownership.kind === "plugin"
+        ? {
+            kind: "unsupported",
+            reason:
+              "Plugin-owned Skills update only through their complete Plugin boundary",
+          }
+        : ownership.kind === "manager"
+          ? {
+              kind: "unsupported",
+              reason: "the Owner has no complete managed Update evidence",
+            }
+          : {
+              kind: "unsupported",
+              reason:
+                "filesystem ownership has no supported Owner Update operation",
+            },
   };
 }
 
@@ -576,6 +631,529 @@ async function managedFor(
     ),
     verifications,
   };
+}
+
+async function updateFor(
+  record: BoundRecord,
+  installation: Installation,
+  runner: InventoryCommandRunner,
+  activeProbes: ReadonlySet<string>,
+  activeRootIds: ReadonlySet<string>,
+  discoveryRoots: readonly DiscoveryRoot[],
+): Promise<UpdateEvidence> {
+  if (installation.ownership.kind === "plugin")
+    return {
+      kind: "unsupported",
+      reason:
+        "Plugin-owned Skills update only through their complete Plugin boundary",
+    };
+  if (installation.ownership.kind !== "manager")
+    return {
+      kind: "unsupported",
+      reason: "only a supported Owner operation can authorize Update",
+    };
+  if (installation.ownership.confidence !== "declared")
+    return unresolvedUpdate("managed Update requires declared Owner evidence");
+  if (installation.status !== "active")
+    return unresolvedUpdate(
+      "managed Update requires a complete active Installation",
+    );
+  if (installation.identity.strongEvidence.length === 0)
+    return unresolvedUpdate(
+      "managed Update requires strong Skill identity evidence",
+    );
+  if (record.adapter.schemaVersion === 1)
+    return {
+      kind: "unsupported",
+      reason: "Adapter schema version 1 provides no Update authority",
+    };
+  const operations = record.adapter.lifecycleOperations.filter(
+    (
+      operation,
+    ): operation is CompiledAdapterLifecycleOperationV2 & {
+      readonly lifecycle: "update";
+    } =>
+      operation.adapterSchemaVersion === 2 &&
+      operation.lifecycle === "update" &&
+      sourceMatches(
+        operation.source,
+        record.manifest.id,
+        record.adapter,
+        installation,
+        activeRootIds,
+      ) &&
+      operation.ownerKind === installation.ownership.kind,
+  );
+  if (operations.length === 0)
+    return {
+      kind: "unsupported",
+      reason: "the Owner has no declared managed Update operation",
+    };
+  if (operations.length !== 1)
+    return {
+      kind: "unresolved",
+      reason:
+        "more than one managed Update operation matches this Owner record",
+    };
+  const operation = operations[0]!;
+  const externalId = text(
+    select(record.manifest.fields.externalId, record.value, record.key),
+  );
+  if (externalId === null)
+    return unresolvedUpdate("the Owner selector is missing or malformed");
+  if (installation.source === null)
+    return unresolvedUpdate("the recorded source policy is missing");
+  const values = valuesFor(record, installation, externalId);
+  const arguments_ = resolveArguments(
+    operation.invocation.kind === "direct"
+      ? operation.invocation.command.arguments
+      : operation.invocation.arguments,
+    values,
+  );
+  if (arguments_ === null)
+    return unresolvedUpdate("the structured Owner invocation is incomplete");
+  const workingDirectory = await resolveWorkingDirectory(
+    operation,
+    record,
+    installation,
+  );
+  if (workingDirectory === null)
+    return unresolvedUpdate(
+      "the required working directory is unsafe or missing",
+    );
+  const effects = await resolveUpdateEffects(
+    operation,
+    record,
+    installation,
+    runner,
+    discoveryRoots,
+  );
+  if (effects === null)
+    return unresolvedUpdate("a declared Update effect is unsafe or unresolved");
+  const verifications = await resolveUpdateVerifications(
+    operation,
+    record,
+    installation,
+    values,
+  );
+  if (verifications === null)
+    return unresolvedUpdate(
+      "Update verification evidence is incomplete or unsafe",
+    );
+  const revisions = verifications.filter(
+    (
+      verification,
+    ): verification is Extract<
+      ManagedUpdateVerificationEvidence,
+      { readonly kind: "revision-content-hash" | "revision-manifest-value" }
+    > => verification.kind.startsWith("revision-"),
+  );
+  const currentRevision = await Promise.all(
+    revisions.map((revision) => revisionFor(revision, installation)),
+  );
+  if (
+    currentRevision.length === 0 ||
+    currentRevision.some((revision) => revision === null)
+  )
+    return unresolvedUpdate("the current local revision cannot be read safely");
+  const localChanges = await localChangesFor(operation, record, installation);
+  if (localChanges === null)
+    return unresolvedUpdate("local-change evidence is malformed or unreadable");
+  const ownerRecordDigest = digest(
+    Buffer.from(stringifyModel(record.value, 0), "utf8"),
+  );
+  const adapterHash =
+    record.adapter.source.kind === "local"
+      ? record.adapter.source.contentHash
+      : record.adapter.id;
+  return {
+    kind: "managed",
+    operation: {
+      adapterId: record.adapter.id,
+      operationId: operation.operationId,
+      availability: probesAvailable(operation.requiresProbes, activeProbes)
+        ? { kind: "available" }
+        : {
+            kind: "unavailable",
+            reason: "required Adapter probe is unavailable",
+          },
+      trust:
+        record.adapter.trust.kind === "approved" ||
+        record.adapter.trust.kind === "built-in"
+          ? { kind: "trusted" }
+          : {
+              kind: "blocked",
+              adapterId: record.adapter.id,
+              contentHash:
+                record.adapter.source.kind === "local"
+                  ? record.adapter.source.contentHash
+                  : "",
+            },
+      owner: installation.ownership,
+      externalId,
+      invocation:
+        operation.invocation.kind === "direct"
+          ? {
+              kind: "direct",
+              command: {
+                executable: operation.invocation.command.executable,
+                arguments: arguments_,
+              },
+              workingDirectory,
+            }
+          : {
+              kind: "ephemeral-package",
+              packageExecution: {
+                runner: operation.invocation.runner,
+                packageName: operation.invocation.packageName,
+                packageVersion: operation.invocation.packageVersion,
+                adapterHash,
+                mayDownload: true,
+              },
+              packageArguments: arguments_,
+              workingDirectory,
+            },
+      source: installation.source,
+      ref: null,
+      scope: installation.scope,
+      currentRevision: currentRevision.filter(
+        (
+          revision,
+        ): revision is import("../model/types.js").UpdateRevisionEvidence =>
+          revision !== null,
+      ) as [
+        import("../model/types.js").UpdateRevisionEvidence,
+        ...import("../model/types.js").UpdateRevisionEvidence[],
+      ],
+      ownerRecordDigest,
+      effects,
+      network: operation.network,
+      packageDownload:
+        operation.invocation.kind === "ephemeral-package"
+          ? {
+              kind: "possible",
+              packageName: operation.invocation.packageName,
+              packageVersion: operation.invocation.packageVersion,
+            }
+          : { kind: "none" },
+      localChanges,
+      verifications,
+    },
+  };
+}
+
+function unresolvedUpdate(reason: string): UpdateEvidence {
+  return { kind: "unresolved", reason };
+}
+
+async function resolveWorkingDirectory(
+  operation: CompiledAdapterLifecycleOperationV2 & {
+    readonly lifecycle: "update";
+  },
+  record: BoundRecord,
+  installation: Installation,
+): Promise<
+  | { readonly kind: "exact"; readonly path: string }
+  | { readonly kind: "isolated-temporary" }
+  | null
+> {
+  if (operation.workingDirectory.kind === "isolated-temporary")
+    return { kind: "isolated-temporary" };
+  const path = await resolveRuntimePath(
+    operation.workingDirectory,
+    record,
+    installation,
+  );
+  if (path === null) return null;
+  const stats = await lstat(path).catch(() => null);
+  return stats?.isDirectory() ? { kind: "exact", path } : null;
+}
+
+async function resolveUpdateEffects(
+  operation: CompiledAdapterLifecycleOperationV2 & {
+    readonly lifecycle: "update";
+  },
+  record: BoundRecord,
+  installation: Installation,
+  runner: InventoryCommandRunner,
+  discoveryRoots: readonly DiscoveryRoot[],
+): Promise<readonly ManagedUpdateEffect[] | null> {
+  const effects: ManagedUpdateEffect[] = [];
+  for (const effect of operation.effects) {
+    const path = await resolveRuntimePath(effect, record, installation, true);
+    if (path === null) return null;
+    const evidence = await protectionForUpdateEffect(
+      path,
+      runner,
+      discoveryRoots,
+    );
+    if (evidence === null) return null;
+    effects.push({ kind: effect.kind, path, ...evidence });
+  }
+  return new Set(effects.map((effect) => pathKey(effect.path))).size ===
+    effects.length
+    ? effects.sort((left, right) => compareText(left.path, right.path))
+    : null;
+}
+
+async function protectionForUpdateEffect(
+  path: string,
+  runner: InventoryCommandRunner,
+  discoveryRoots: readonly DiscoveryRoot[],
+): Promise<{
+  readonly exists: boolean;
+  readonly protection: ProtectionStatus;
+} | null> {
+  const system = await systemProtectionFor(path, discoveryRoots);
+  if (system === null) return null;
+  const stats = await lstat(path).catch(() => null);
+  if (stats !== null) {
+    const protection = await protectionFor(path, runner);
+    return protection === null
+      ? null
+      : { exists: true, protection: { ...protection, system } };
+  }
+  let parent = dirname(path);
+  let parentStats = await lstat(parent).catch(() => null);
+  while (parentStats === null) {
+    const next = dirname(parent);
+    if (next === parent) return null;
+    parent = next;
+    parentStats = await lstat(parent).catch(() => null);
+  }
+  if (!parentStats.isDirectory() || parentStats.isSymbolicLink()) return null;
+  let writable = true;
+  try {
+    await access(parent, constants.W_OK);
+  } catch {
+    writable = false;
+  }
+  return {
+    exists: false,
+    protection: {
+      git: await inspectGitProtection(path, false, runner),
+      system,
+      filesystem: writable
+        ? { kind: "writable" }
+        : {
+            kind: "read-only",
+            reason: "filesystem denied write access to the nearest parent",
+          },
+    },
+  };
+}
+
+async function systemProtectionFor(
+  path: string,
+  discoveryRoots: readonly DiscoveryRoot[],
+): Promise<ProtectionStatus["system"] | null> {
+  const matches: { readonly path: string; readonly agentId: string }[] = [];
+  for (const root of discoveryRoots) {
+    if (
+      root.kind === "system" &&
+      (await canonicallyPotentiallyWithinBase(path, root.path))
+    )
+      matches.push({ path: root.path, agentId: root.agentId });
+  }
+  if (matches.length === 0) return { kind: "none" };
+  matches.sort((left, right) => right.path.length - left.path.length);
+  const mostSpecific = matches[0];
+  if (
+    typeof mostSpecific?.agentId !== "string" ||
+    matches.some(
+      (match) =>
+        match.path.length === mostSpecific.path.length &&
+        match.agentId !== mostSpecific.agentId,
+    )
+  )
+    return null;
+  return { kind: "system-skill", agentId: mostSpecific.agentId };
+}
+
+async function resolveUpdateVerifications(
+  operation: CompiledAdapterLifecycleOperationV2 & {
+    readonly lifecycle: "update";
+  },
+  record: BoundRecord,
+  installation: Installation,
+  values: Readonly<Record<string, string | null>>,
+): Promise<readonly ManagedUpdateVerificationEvidence[] | null> {
+  const rules = operation.verificationRules.map((id) =>
+    record.adapter.verificationRules.find((rule) => rule.id === id),
+  );
+  if (rules.some((rule) => rule === undefined)) return null;
+  const result: ManagedUpdateVerificationEvidence[] = [];
+  for (const rule of rules) {
+    if (rule === undefined) return null;
+    if (rule.kind === "path-present") {
+      if (!(await canonicallyWithinBase(rule.path, rule.pathBase))) return null;
+      result.push({ kind: "path-present", path: rule.path });
+    } else if (rule.kind === "manifest-record-present") {
+      const selected = select(rule.selector, record.value, record.key);
+      if (
+        rule.manifestId !== record.manifest.id ||
+        !isPresentPrimitive(selected)
+      )
+        return null;
+      result.push({
+        kind: "record-present",
+        path: record.manifest.path,
+        format: record.manifest.format,
+        recordPointer: record.pointer,
+      });
+    } else if (rule.kind === "owner-state-present") {
+      const selected = text(select(rule.externalId, record.value, record.key));
+      if (rule.ownerKind !== installation.ownership.kind || selected === null)
+        return null;
+      result.push({ kind: "owner-state-present", externalId: selected });
+    } else if (rule.kind === "revision-evidence") {
+      if (rule.evidence.kind === "content-hash") {
+        const path = await resolveRuntimePath(
+          rule.evidence,
+          record,
+          installation,
+        );
+        if (path === null) return null;
+        result.push({ kind: "revision-content-hash", path });
+      } else {
+        const selected = select(
+          rule.evidence.selector,
+          record.value,
+          record.key,
+        );
+        if (
+          rule.evidence.manifestId !== record.manifest.id ||
+          !isRevisionPrimitive(selected)
+        )
+          return null;
+        result.push({
+          kind: "revision-manifest-value",
+          path: record.manifest.path,
+          format: record.manifest.format,
+          recordPointer: record.pointer,
+          value: selected,
+        });
+      }
+    } else if (rule.kind === "command") {
+      const arguments_ = resolveArguments(rule.command.arguments, values);
+      if (arguments_ === null) return null;
+      result.push({
+        kind: "command-succeeds",
+        command: { executable: rule.command.executable, arguments: arguments_ },
+        successExitCodes: rule.successExitCodes,
+      });
+    } else return null;
+  }
+  return result;
+}
+
+async function revisionFor(
+  verification: Extract<
+    ManagedUpdateVerificationEvidence,
+    { readonly kind: "revision-content-hash" | "revision-manifest-value" }
+  >,
+  installation: Installation,
+): Promise<import("../model/types.js").UpdateRevisionEvidence | null> {
+  if (verification.kind === "revision-manifest-value")
+    return {
+      kind: "owner-value",
+      path: verification.path,
+      format: verification.format,
+      recordPointer: verification.recordPointer,
+      value: verification.value,
+    };
+  const actual = await hashPath(verification.path);
+  if (actual === null) return null;
+  if (
+    samePath(verification.path, installation.location.path) &&
+    installation.contentHash !== actual.digest
+  )
+    return null;
+  return { kind: "content-hash", path: verification.path, digest: actual };
+}
+
+async function localChangesFor(
+  operation: CompiledAdapterLifecycleOperationV2 & {
+    readonly lifecycle: "update";
+  },
+  record: BoundRecord,
+  installation: Installation,
+): Promise<import("../model/types.js").UpdateLocalChangeEvidence | null> {
+  const evidence = operation.localChangeEvidence;
+  if (evidence.kind === "unavailable") return evidence;
+  if (evidence.manifestId !== record.manifest.id) return null;
+  const selected = select(evidence.expectedDigest, record.value, record.key);
+  if (typeof selected !== "string" || !/^[a-f\d]{64}$/i.test(selected))
+    return null;
+  const path = await resolveRuntimePath(evidence, record, installation);
+  if (path === null) return null;
+  const actualDigest = await hashPath(path);
+  if (actualDigest === null) return null;
+  const expectedDigest: Sha256Digest = {
+    algorithm: "sha256",
+    digest: selected.toLowerCase(),
+  };
+  return {
+    kind:
+      expectedDigest.digest === actualDigest.digest ? "unchanged" : "changed",
+    path,
+    expectedDigest,
+    actualDigest,
+  };
+}
+
+async function resolveRuntimePath(
+  path: CompiledAdapterRuntimePath,
+  record: BoundRecord,
+  installation: Installation,
+  allowMissing = false,
+): Promise<string | null> {
+  if ("path" in path)
+    return (await (allowMissing
+      ? canonicallyPotentiallyWithinBase(path.path, path.pathBase)
+      : canonicallyWithinBase(path.path, path.pathBase)))
+      ? path.path
+      : null;
+  const resolved =
+    path.value === "installationPath"
+      ? installation.location.path
+      : path.value === "manifestPath"
+        ? record.manifest.path
+        : installation.scope.kind === "workspace"
+          ? installation.scope.workspacePath
+          : null;
+  return resolved !== null && isAbsolute(resolved) ? resolved : null;
+}
+
+async function hashPath(path: string): Promise<Sha256Digest | null> {
+  const stats = await lstat(path).catch(() => null);
+  if (stats === null || stats.isSymbolicLink()) return null;
+  if (stats.isDirectory()) {
+    const directoryDigest = await hashSkillDirectory(path).catch(() => null);
+    return directoryDigest === null
+      ? null
+      : { algorithm: "sha256", digest: directoryDigest };
+  }
+  if (!stats.isFile() || stats.nlink !== 1) return null;
+  const stable = await readStableRegularFile(path, stats);
+  return stable === null ? null : digest(stable.bytes);
+}
+
+function isRevisionPrimitive(value: unknown): value is string | number {
+  return (
+    (typeof value === "string" && value.trim().length > 0) ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+function isPresentPrimitive(
+  value: unknown,
+): value is boolean | number | string {
+  return (
+    typeof value === "boolean" ||
+    (typeof value === "string" && value.trim().length > 0) ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
 }
 
 function sourceMatches(
@@ -987,6 +1565,28 @@ async function canonicallyWithinBase(
 ): Promise<boolean> {
   try {
     return inside(await realpath(base), await realpath(path));
+  } catch {
+    return false;
+  }
+}
+/** Missing declared paths inherit a canonical parent without following a future target. */
+async function canonicallyPotentiallyWithinBase(
+  path: string,
+  base: string,
+): Promise<boolean> {
+  const existing = await lstat(path).catch(() => null);
+  if (existing !== null) return canonicallyWithinBase(path, base);
+  let parent = dirname(path);
+  while ((await lstat(parent).catch(() => null)) === null) {
+    const next = dirname(parent);
+    if (next === parent) return false;
+    parent = next;
+  }
+  try {
+    const canonicalBase = await realpath(base);
+    const canonicalParent = await realpath(parent);
+    const candidate = resolve(canonicalParent, relative(parent, path));
+    return inside(canonicalBase, candidate);
   } catch {
     return false;
   }

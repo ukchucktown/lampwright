@@ -162,6 +162,10 @@ function pluginBoundary(
           "this Plugin boundary has no supported native availability control",
       },
     },
+    update: {
+      kind: "unsupported",
+      reason: "fixture Plugin has no supported Owner Update operation",
+    },
     removal: managerRemoval({
       managed: {
         adapterId: "fixture-adapter",

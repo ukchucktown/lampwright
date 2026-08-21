@@ -320,6 +320,25 @@ const managedRemovalInvocationSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const updateWorkingDirectorySchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("exact"), path: absoluteFilesystemPath }),
+  z.strictObject({ kind: z.literal("isolated-temporary") }),
+]);
+
+const managedUpdateInvocationSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("direct"),
+    command: executableCommandSchema,
+    workingDirectory: updateWorkingDirectorySchema,
+  }),
+  z.strictObject({
+    kind: z.literal("ephemeral-package"),
+    packageExecution: packageExecutionSchema,
+    packageArguments: z.array(commandArgument),
+    workingDirectory: updateWorkingDirectorySchema,
+  }),
+]);
+
 export const sha256DigestSchema = z.strictObject({
   algorithm: z.literal("sha256"),
   digest: z.string().regex(/^[a-f\d]{64}$/i, "expected a SHA-256 digest"),
@@ -359,6 +378,113 @@ const adapterExecutionTrustSchema = z.discriminatedUnion("kind", [
     kind: z.literal("blocked"),
     adapterId: nonEmptyString,
     contentHash: nonEmptyString,
+  }),
+]);
+
+const updateRevisionEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("owner-value"),
+    path: absoluteFilesystemPath,
+    format: declarativeDocumentFormatSchema,
+    recordPointer,
+    value: z.union([nonEmptyString, z.number().finite()]),
+  }),
+  z.strictObject({
+    kind: z.literal("content-hash"),
+    path: absoluteFilesystemPath,
+    digest: sha256DigestSchema,
+  }),
+]);
+
+const updateLocalChangeEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.enum(["unchanged", "changed"]),
+    path: absoluteFilesystemPath,
+    expectedDigest: sha256DigestSchema,
+    actualDigest: sha256DigestSchema,
+  }),
+  z.strictObject({ kind: z.literal("unavailable"), reason: nonEmptyString }),
+]);
+
+const managedUpdateEffectSchema = z.strictObject({
+  kind: z.enum(["mutation-root", "configuration-path"]),
+  path: absoluteFilesystemPath,
+  exists: z.boolean(),
+  protection: protectionStatusSchema,
+});
+
+const managedUpdateVerificationEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("path-present"),
+    path: absoluteFilesystemPath,
+  }),
+  z.strictObject({
+    kind: z.literal("record-present"),
+    path: absoluteFilesystemPath,
+    format: declarativeDocumentFormatSchema,
+    recordPointer,
+  }),
+  z.strictObject({
+    kind: z.literal("owner-state-present"),
+    externalId: nonEmptyString,
+  }),
+  z.strictObject({
+    kind: z.literal("revision-content-hash"),
+    path: absoluteFilesystemPath,
+  }),
+  z.strictObject({
+    kind: z.literal("revision-manifest-value"),
+    path: absoluteFilesystemPath,
+    format: declarativeDocumentFormatSchema,
+    recordPointer,
+    value: z.union([nonEmptyString, z.number().finite()]),
+  }),
+  z.strictObject({
+    kind: z.literal("command-succeeds"),
+    command: executableCommandSchema,
+    successExitCodes: z.array(z.number().int().min(0).max(255)).min(1),
+  }),
+]);
+
+const managedUpdateEvidenceSchema = z.strictObject({
+  adapterId: nonEmptyString,
+  operationId: nonEmptyString,
+  availability: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("available") }),
+    z.strictObject({ kind: z.literal("unavailable"), reason: nonEmptyString }),
+  ]),
+  trust: adapterExecutionTrustSchema,
+  owner: managedOwnershipSchema,
+  externalId: nonEmptyString,
+  invocation: managedUpdateInvocationSchema,
+  source: sourceReferenceSchema,
+  ref: nonEmptyString.nullable(),
+  scope: scopeSchema,
+  currentRevision: z.array(updateRevisionEvidenceSchema).min(1),
+  ownerRecordDigest: sha256DigestSchema,
+  effects: z.array(managedUpdateEffectSchema).min(1),
+  network: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("none") }),
+    z.strictObject({ kind: z.literal("required"), reason: nonEmptyString }),
+  ]),
+  packageDownload: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("none") }),
+    z.strictObject({
+      kind: z.literal("possible"),
+      packageName: exactPackageName,
+      packageVersion: exactPackageVersion,
+    }),
+  ]),
+  localChanges: updateLocalChangeEvidenceSchema,
+  verifications: z.array(managedUpdateVerificationEvidenceSchema).min(1),
+});
+
+export const updateEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("unsupported"), reason: nonEmptyString }),
+  z.strictObject({ kind: z.literal("unresolved"), reason: nonEmptyString }),
+  z.strictObject({
+    kind: z.literal("managed"),
+    operation: managedUpdateEvidenceSchema,
   }),
 ]);
 
@@ -765,6 +891,7 @@ export const installationSchema = z
     modifiedAt: timestamp.nullable(),
     ownership: ownershipSchema,
     protection: protectionStatusSchema,
+    update: updateEvidenceSchema,
     removal: removalEvidenceSchema,
     tags: z.array(nonEmptyString),
     metadata: jsonObject,
@@ -930,6 +1057,7 @@ const pluginBoundarySchema = z.strictObject({
   installationIds: z.array(modelId),
   resources: z.array(pluginResourceSchema),
   availability: pluginAvailabilitySchema,
+  update: updateEvidenceSchema,
   removal: removalEvidenceSchema,
 });
 

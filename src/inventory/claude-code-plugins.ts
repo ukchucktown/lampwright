@@ -402,6 +402,10 @@ async function materializePlugin(input: {
               : "Claude Code Plugin availability evidence is not materialized",
         },
       },
+      update: {
+        kind: "unsupported",
+        reason: "Claude Code Plugin Update support is not materialized",
+      },
       removal: {
         managed,
         fallback:
@@ -498,6 +502,11 @@ async function materializeSkill(input: {
       confidence: "declared",
     },
     protection,
+    update: {
+      kind: "unsupported",
+      reason:
+        "Plugin-owned Skills update only through their complete Plugin boundary",
+    },
     removal: {
       managed: null,
       fallback: {

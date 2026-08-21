@@ -107,6 +107,10 @@ export function buildInstallation(
       system: { kind: "none" },
       filesystem: { kind: "writable" },
     },
+    update: {
+      kind: "unsupported",
+      reason: "fixture ownership has no supported Owner Update operation",
+    },
     removal: {
       managed: null,
       fallback: {
@@ -283,6 +287,10 @@ export function buildPluginBoundary(
             reason:
               "this Plugin boundary has no supported native availability control",
           },
+        },
+        update: {
+          kind: "unsupported",
+          reason: "fixture Plugin has no supported Owner Update operation",
         },
         removal: {
           managed: {

@@ -23,7 +23,9 @@ import {
   type Installation,
   type InventoryScanEnvironment,
   loadAdapters,
+  type AdapterDefinition,
   type AdapterDefinitionV1,
+  type AdapterDefinitionV2,
 } from "../src/index.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
@@ -80,11 +82,326 @@ function adapterBases(
 
 async function writeAdapter(
   environment: Awaited<ReturnType<typeof createTestEnvironment>>,
-  definition: AdapterDefinitionV1,
+  definition: AdapterDefinition,
 ): Promise<string> {
   const path = join(environment.temporary, `${definition.id}.jsonc`);
   await writeFile(path, JSON.stringify(definition), "utf8");
   return path;
+}
+
+function updateAdapterDefinition(
+  options: {
+    readonly verificationPath?: readonly string[];
+    readonly ephemeral?: boolean;
+    readonly exactWorkingDirectory?: boolean;
+  } = {},
+): AdapterDefinitionV2 {
+  return {
+    schemaVersion: 2,
+    id: "fixture.update-evidence",
+    name: "Update evidence fixture",
+    platforms: [supportedPlatform()],
+    roots: [
+      {
+        id: "root",
+        kind: "user",
+        agentId: "fixture",
+        path: {
+          default: { base: "home", segments: [".update-fixture"] },
+        },
+      },
+    ],
+    manifests: [
+      {
+        id: "registry",
+        rootId: "root",
+        path: {
+          default: { base: "state", segments: ["update-registry.json"] },
+        },
+        format: "json",
+        records: { pointer: "/skills", collection: "object-values" },
+        fields: {
+          skillPath: { kind: "pointer", pointer: "/path" },
+          sourceId: { kind: "pointer", pointer: "/source" },
+          sourceUrl: { kind: "pointer", pointer: "/url" },
+          externalId: { kind: "pointer", pointer: "/external" },
+        },
+      },
+    ],
+    ownershipRules: [
+      {
+        id: "owner",
+        source: { kind: "manifest", manifestId: "registry" },
+        ownership: {
+          kind: "manager",
+          managerId: { kind: "literal", value: "fixture-manager" },
+        },
+        confidence: "declared",
+      },
+    ],
+    groupingRules: [
+      {
+        id: "identity",
+        manifestId: "registry",
+        evidence: {
+          kind: "source",
+          sourceId: { kind: "pointer", pointer: "/source" },
+          skillPath: { kind: "pointer", pointer: "/path" },
+        },
+      },
+    ],
+    lifecycleOperations: [
+      {
+        id: "update",
+        lifecycle: "update",
+        ownerKind: "manager",
+        operationId: "update",
+        source: { kind: "manifest", manifestId: "registry" },
+        workingDirectory: options.exactWorkingDirectory
+          ? {
+              kind: "exact",
+              path: {
+                kind: "static",
+                path: {
+                  default: { base: "home", segments: [".update-fixture"] },
+                },
+              },
+            }
+          : { kind: "isolated-temporary" },
+        invocation: options.ephemeral
+          ? {
+              kind: "ephemeral-package",
+              runner: "npx",
+              packageName: "fixture-manager",
+              packageVersion: "1.2.3",
+              mayDownload: true,
+              arguments: [
+                { kind: "literal", value: "update" },
+                { kind: "value", from: "externalId" },
+              ],
+            }
+          : {
+              kind: "direct",
+              command: {
+                default: {
+                  executable: "fixture-manager",
+                  arguments: [
+                    { kind: "literal", value: "update" },
+                    { kind: "value", from: "externalId" },
+                  ],
+                },
+              },
+            },
+        network: {
+          kind: "required",
+          reason: "The Owner retrieves the recorded source revision.",
+        },
+        effects: [
+          {
+            kind: "mutation-root",
+            path: { kind: "value", from: "installationPath" },
+          },
+          {
+            kind: "configuration-path",
+            path: {
+              kind: "static",
+              path: {
+                default: { base: "state", segments: ["future-config.json"] },
+              },
+            },
+          },
+          {
+            kind: "configuration-path",
+            path: {
+              kind: "static",
+              path: {
+                default: {
+                  base: "home",
+                  segments: ["system-skills", "runtime", "policy.json"],
+                },
+              },
+            },
+          },
+        ],
+        localChangeEvidence: {
+          kind: "content-hash-match",
+          algorithm: "sha256",
+          path: { kind: "value", from: "installationPath" },
+          manifestId: "registry",
+          expectedDigest: { kind: "pointer", pointer: "/digest" },
+        },
+        verificationRules: [
+          "command-check",
+          "current-content",
+          "current-owner-value",
+          "owner-record",
+          "skill-present",
+        ],
+      },
+    ],
+    verificationRules: [
+      {
+        id: "command-check",
+        kind: "command",
+        command: {
+          default: {
+            executable: "fixture-manager",
+            arguments: [
+              { kind: "literal", value: "show" },
+              { kind: "value", from: "externalId" },
+            ],
+          },
+        },
+        successExitCodes: [0],
+      },
+      {
+        id: "current-content",
+        kind: "revision-evidence",
+        evidence: {
+          kind: "content-hash",
+          path: { kind: "value", from: "installationPath" },
+        },
+      },
+      {
+        id: "current-owner-value",
+        kind: "revision-evidence",
+        evidence: {
+          kind: "manifest-value",
+          manifestId: "registry",
+          selector: { kind: "pointer", pointer: "/revision" },
+        },
+      },
+      {
+        id: "owner-record",
+        kind: "manifest-record-present",
+        manifestId: "registry",
+        selector: { kind: "pointer", pointer: "/external" },
+      },
+      {
+        id: "skill-present",
+        kind: "path-present",
+        path: {
+          default: {
+            base: "home",
+            segments: options.verificationPath ?? [".update-fixture", "fish"],
+          },
+        },
+      },
+    ],
+  };
+}
+
+async function prepareUpdateFixture(
+  options: {
+    readonly revision?: unknown;
+    readonly verificationPath?: readonly string[];
+    readonly ephemeral?: boolean;
+    readonly exactWorkingDirectory?: boolean;
+  } = {},
+) {
+  const environment = await createTestEnvironment();
+  const skillRoot = join(environment.home, ".update-fixture");
+  const skillPath = join(skillRoot, "fish");
+  const systemRoot = join(environment.home, "system-skills");
+  await createSkill(skillPath, { name: "fish" });
+  await createSkill(join(systemRoot, "runtime"), { name: "runtime" });
+  await writeFile(
+    join(systemRoot, "runtime", "policy.json"),
+    JSON.stringify({ locked: true }),
+    "utf8",
+  );
+  const initial = await createScanner(
+    unusedDefaultEnvironment(environment),
+  ).scan({
+    roots: [
+      {
+        kind: "user",
+        path: skillRoot,
+        agentId: "fixture",
+        adapterId: null,
+      },
+    ],
+  });
+  const contentHash = initial.installations[0]?.contentHash;
+  if (contentHash === null || contentHash === undefined)
+    throw new Error("fixture content hash is unavailable");
+  const manifestPath = join(environment.state, "update-registry.json");
+  const writeManifest = async (digestValue = contentHash): Promise<void> => {
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        skills: {
+          fish: {
+            path: "fish",
+            source: "fixture/source",
+            url: "https://example.com/fixture/source",
+            external: "fixture/fish",
+            digest: digestValue,
+            revision: options.revision ?? "1.0.0",
+          },
+        },
+      }),
+      "utf8",
+    );
+  };
+  await writeManifest();
+  const definition = updateAdapterDefinition({
+    ...(options.verificationPath === undefined
+      ? {}
+      : { verificationPath: options.verificationPath }),
+    ...(options.ephemeral === undefined
+      ? {}
+      : { ephemeral: options.ephemeral }),
+    ...(options.exactWorkingDirectory === undefined
+      ? {}
+      : { exactWorkingDirectory: options.exactWorkingDirectory }),
+  });
+  const adapterPath = await writeAdapter(environment, definition);
+  const catalog = await loadAdapters({
+    localAdapterPaths: [adapterPath],
+    platform: supportedPlatform(),
+    pathBases: adapterBases(environment),
+    approvals: [
+      {
+        adapterId: definition.id,
+        contentHash: createHash("sha256")
+          .update(await readFile(adapterPath))
+          .digest("hex"),
+      },
+    ],
+  });
+  const commands: InventoryCommand[] = [];
+  const scanner = createInventoryScanner({
+    now: () => fixedTime,
+    environment: unusedDefaultEnvironment(environment),
+    commandRunner: {
+      async run(command) {
+        commands.push(command);
+        return { exitCode: null, stdout: "" };
+      },
+    },
+    adapterCatalog: catalog,
+  });
+  const request = {
+    roots: [
+      {
+        kind: "system" as const,
+        path: systemRoot,
+        agentId: "fixture-runtime",
+        adapterId: null,
+      },
+    ],
+  };
+  return {
+    environment,
+    scanner,
+    request,
+    commands,
+    contentHash,
+    skillPath,
+    systemRoot,
+    writeManifest,
+  };
 }
 
 function createGitCommandRunner(
@@ -616,6 +933,10 @@ describe("Inventory scan", () => {
       managerId: "fixture-manager",
       confidence: "declared",
     });
+    expect(installation?.update).toEqual({
+      kind: "unsupported",
+      reason: "Adapter schema version 1 provides no Update authority",
+    });
     expect(installation?.removal.managed).toMatchObject({
       externalId: "fixture/fish",
       invocation: {
@@ -794,6 +1115,196 @@ describe("Inventory scan", () => {
       confidence: "inferred",
     });
     expect(generic?.removal.managed).toBeNull();
+  });
+
+  it("materializes complete immutable managed Update evidence without invoking the Owner", async () => {
+    const fixture = await prepareUpdateFixture({ exactWorkingDirectory: true });
+    const before = await snapshotDirectory(fixture.environment.root);
+    const inventory = await fixture.scanner.scan(fixture.request);
+    const installation = installationByName(inventory.installations, "fish");
+
+    expect(installation.update).toMatchObject({
+      kind: "managed",
+      operation: {
+        adapterId: "fixture.update-evidence",
+        operationId: "update",
+        availability: { kind: "available" },
+        owner: {
+          kind: "manager",
+          managerId: "fixture-manager",
+          confidence: "declared",
+        },
+        externalId: "fixture/fish",
+        invocation: {
+          kind: "direct",
+          command: {
+            executable: "fixture-manager",
+            arguments: ["update", "fixture/fish"],
+          },
+          workingDirectory: {
+            kind: "exact",
+            path: join(fixture.environment.home, ".update-fixture"),
+          },
+        },
+        source: {
+          id: "fixture/source",
+          url: "https://example.com/fixture/source",
+        },
+        ref: null,
+        scope: { kind: "user" },
+        network: { kind: "required" },
+        packageDownload: { kind: "none" },
+        localChanges: {
+          kind: "unchanged",
+          path: fixture.skillPath,
+          expectedDigest: { algorithm: "sha256", digest: fixture.contentHash },
+          actualDigest: { algorithm: "sha256", digest: fixture.contentHash },
+        },
+      },
+    });
+    expect(installation.update.kind).toBe("managed");
+    if (installation.update.kind !== "managed") return;
+    expect(installation.update.operation.currentRevision).toEqual(
+      expect.arrayContaining([
+        {
+          kind: "content-hash",
+          path: fixture.skillPath,
+          digest: { algorithm: "sha256", digest: fixture.contentHash },
+        },
+        {
+          kind: "owner-value",
+          path: join(fixture.environment.state, "update-registry.json"),
+          format: "json",
+          recordPointer: "/skills/fish",
+          value: "1.0.0",
+        },
+      ]),
+    );
+    expect(installation.update.operation.ownerRecordDigest.digest).toMatch(
+      /^[a-f\d]{64}$/,
+    );
+    expect(installation.update.operation.effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "configuration-path",
+          path: join(fixture.environment.state, "future-config.json"),
+          exists: false,
+          protection: expect.objectContaining({
+            filesystem: { kind: "writable" },
+          }),
+        }),
+        expect.objectContaining({
+          path: join(fixture.systemRoot, "runtime", "policy.json"),
+          exists: true,
+          protection: expect.objectContaining({
+            system: {
+              kind: "system-skill",
+              agentId: "fixture-runtime",
+            },
+          }),
+        }),
+      ]),
+    );
+    expect(
+      installation.update.operation.verifications.map(
+        (verification) => verification.kind,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "command-succeeds",
+        "path-present",
+        "record-present",
+        "revision-content-hash",
+        "revision-manifest-value",
+      ]),
+    );
+    expect(Object.isFrozen(installation.update.operation.effects)).toBe(true);
+    expect(
+      fixture.commands.some(
+        (command) => command.executable === "fixture-manager",
+      ),
+    ).toBe(false);
+    expect(await snapshotDirectory(fixture.environment.root)).toEqual(before);
+  });
+
+  it("closes local-change and semantic Inventory evidence over Owner record changes", async () => {
+    const fixture = await prepareUpdateFixture();
+    const unchanged = await fixture.scanner.scan(fixture.request);
+    await fixture.writeManifest("f".repeat(64));
+    const changed = await fixture.scanner.scan(fixture.request);
+    const installation = installationByName(changed.installations, "fish");
+
+    expect(installation.update).toMatchObject({
+      kind: "managed",
+      operation: {
+        localChanges: {
+          kind: "changed",
+          expectedDigest: { digest: "f".repeat(64) },
+          actualDigest: { digest: fixture.contentHash },
+        },
+      },
+    });
+    expect(changed.id).not.toBe(unchanged.id);
+  });
+
+  it("materializes an exact ephemeral-package Update invocation and disclosures", async () => {
+    const fixture = await prepareUpdateFixture({ ephemeral: true });
+    const inventory = await fixture.scanner.scan(fixture.request);
+    const installation = installationByName(inventory.installations, "fish");
+
+    expect(installation.update).toMatchObject({
+      kind: "managed",
+      operation: {
+        invocation: {
+          kind: "ephemeral-package",
+          packageExecution: {
+            runner: "npx",
+            packageName: "fixture-manager",
+            packageVersion: "1.2.3",
+            mayDownload: true,
+          },
+          packageArguments: ["update", "fixture/fish"],
+          workingDirectory: { kind: "isolated-temporary" },
+        },
+        network: { kind: "required" },
+        packageDownload: {
+          kind: "possible",
+          packageName: "fixture-manager",
+          packageVersion: "1.2.3",
+        },
+      },
+    });
+  });
+
+  it("keeps unsafe or malformed Update evidence unresolved without partial authority", async () => {
+    const unsafe = await prepareUpdateFixture({
+      verificationPath: ["verification-parent", "escaped", "fish"],
+    });
+    const outside = join(unsafe.environment.temporary, "outside-verification");
+    await createSkill(join(outside, "fish"), { name: "outside" });
+    await mkdir(join(unsafe.environment.home, "verification-parent"), {
+      recursive: true,
+    });
+    await createDirectoryLink(
+      outside,
+      join(unsafe.environment.home, "verification-parent", "escaped"),
+    );
+    const unsafeInventory = await unsafe.scanner.scan(unsafe.request);
+    expect(
+      installationByName(unsafeInventory.installations, "fish").update,
+    ).toEqual({
+      kind: "unresolved",
+      reason: "Update verification evidence is incomplete or unsafe",
+    });
+
+    const malformed = await prepareUpdateFixture({ revision: { tag: "v1" } });
+    const malformedInventory = await malformed.scanner.scan(malformed.request);
+    expect(
+      installationByName(malformedInventory.installations, "fish").update,
+    ).toEqual({
+      kind: "unresolved",
+      reason: "Update verification evidence is incomplete or unsafe",
+    });
   });
   it("turns manifest grouping and hard dependencies into observable inventory and planning outcomes", async () => {
     const environment = await createTestEnvironment();

@@ -291,6 +291,7 @@ async function scanWithOptions(
     options.commandRunner,
     adapterRoots.probes,
     adapterRoots.rootIds,
+    roots,
   );
   const readAvailabilityDocument = createAvailabilityDocumentReader(
     options.commandRunner,
@@ -401,6 +402,10 @@ function blockForInvalidVercelLock(installation: Installation): Installation {
     ownership: { kind: "unknown", confidence: "unknown" },
     suspension: {
       kind: "unavailable",
+      reason: "the Vercel skills lock is invalid or unsafe to read",
+    },
+    update: {
+      kind: "unresolved",
       reason: "the Vercel skills lock is invalid or unsafe to read",
     },
     removal: {
@@ -1225,6 +1230,13 @@ function createInstallation(
     modifiedAt,
     ownership,
     protection,
+    update: {
+      kind: "unsupported",
+      reason:
+        ownership.kind === "plugin"
+          ? "Plugin-owned Skills update only through their complete Plugin boundary"
+          : "filesystem ownership has no supported Owner Update operation",
+    },
     removal: {
       managed: null,
       fallback: {
@@ -1312,6 +1324,10 @@ async function createPluginBoundaries(
           reason:
             "this Plugin boundary has no supported native availability control",
         },
+      },
+      update: {
+        kind: "unsupported",
+        reason: "this Plugin boundary has no supported Owner Update operation",
       },
       removal: {
         managed: null,

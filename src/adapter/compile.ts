@@ -477,12 +477,28 @@ function compileVerification(
   sourcePath_: string | null,
 ): CompiledAdapterVerificationV2 {
   switch (verification.kind) {
-    case "path-absent":
-    case "path-present": {
+    case "path-absent": {
       const { path, ...base } = verification;
       return {
         ...normalizeDeclaration(base),
         path: compilePath(
+          selectVariant(
+            path,
+            platform,
+            sourcePath_,
+            `verification ${verification.id}`,
+          ),
+          platform,
+          bases,
+          sourcePath_,
+        ),
+      };
+    }
+    case "path-present": {
+      const { path, ...base } = verification;
+      return {
+        ...normalizeDeclaration(base),
+        ...compileCompiledPath(
           selectVariant(
             path,
             platform,

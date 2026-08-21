@@ -51,6 +51,89 @@ const fixtureRecordHash = {
   digest: "b".repeat(64),
 };
 
+function managedUpdateInstallation() {
+  const base = buildInstallation();
+  const owner = {
+    kind: "manager" as const,
+    managerId: "fixture-manager",
+    confidence: "declared" as const,
+  };
+  const source = { id: "fixture/source", url: null };
+  return parseInstallation({
+    ...base,
+    source,
+    manager: { id: owner.managerId },
+    ownership: owner,
+    suspension: {
+      kind: "unavailable",
+      reason: "fixture Manager has no suspension authority",
+    },
+    update: {
+      kind: "managed",
+      operation: {
+        adapterId: base.adapterId,
+        operationId: "update",
+        availability: { kind: "available" },
+        trust: { kind: "trusted" },
+        owner,
+        externalId: "fixture/skill",
+        invocation: {
+          kind: "direct",
+          command: {
+            executable: "fixture-manager",
+            arguments: ["update", "fixture/skill"],
+          },
+          workingDirectory: { kind: "isolated-temporary" },
+        },
+        source,
+        ref: null,
+        scope: base.scope,
+        currentRevision: [
+          {
+            kind: "owner-value",
+            path: "/fixtures/manager/record.json",
+            format: "json",
+            recordPointer: "/skills/fixture-skill",
+            value: "1.0.0",
+          },
+        ],
+        ownerRecordDigest: fixtureRecordHash,
+        effects: [
+          {
+            kind: "mutation-root",
+            path: base.location.path,
+            exists: true,
+            protection: base.protection,
+          },
+        ],
+        network: { kind: "none" },
+        packageDownload: { kind: "none" },
+        localChanges: {
+          kind: "unavailable",
+          reason: "the fixture Owner has no content digest",
+        },
+        verifications: [
+          {
+            kind: "revision-manifest-value",
+            path: "/fixtures/manager/record.json",
+            format: "json",
+            recordPointer: "/skills/fixture-skill",
+            value: "1.0.0",
+          },
+          {
+            kind: "command-succeeds",
+            command: {
+              executable: "fixture-manager",
+              arguments: ["show", "fixture/skill"],
+            },
+            successExitCodes: [0],
+          },
+        ],
+      },
+    },
+  });
+}
+
 const declarativeRecord = {
   id: "cleanup-fixture-skill",
   location: {
@@ -666,6 +749,106 @@ describe("core model boundary validation", () => {
     ).toThrow(/absolute filesystem path/);
   });
 
+  it("validates complete managed Installation Update evidence", () => {
+    const valid = managedUpdateInstallation();
+    expect(valid.update.kind).toBe("managed");
+    expect(Object.isFrozen(valid.update)).toBe(true);
+    if (valid.update.kind !== "managed") throw new Error("fixture is invalid");
+    const operation = valid.update.operation;
+
+    expect(() => parseInstallation({ ...valid, status: "broken" })).toThrow(
+      /requires active status/,
+    );
+    const inferredOwner = {
+      kind: "manager" as const,
+      managerId: "fixture-manager",
+      confidence: "inferred" as const,
+    };
+    expect(() =>
+      parseInstallation({
+        ...valid,
+        ownership: inferredOwner,
+        update: {
+          kind: "managed",
+          operation: { ...operation, owner: inferredOwner },
+        },
+      }),
+    ).toThrow(/requires declared Manager ownership/);
+    expect(() => parseInstallation({ ...valid, source: null })).toThrow(
+      /requires a recorded source/,
+    );
+    expect(() =>
+      parseInstallation({
+        ...valid,
+        identity: { ...valid.identity, strongEvidence: [] },
+      }),
+    ).toThrow(/requires strong identity evidence/);
+  });
+
+  it("matches unique Update revisions, effects, and command exit codes", () => {
+    const valid = managedUpdateInstallation();
+    if (valid.update.kind !== "managed") throw new Error("fixture is invalid");
+    const operation = valid.update.operation;
+    const revision = operation.currentRevision[0];
+    expect(revision).toBeDefined();
+
+    expect(() =>
+      parseInstallation({
+        ...valid,
+        update: {
+          kind: "managed",
+          operation: {
+            ...operation,
+            currentRevision: [revision, revision],
+          },
+        },
+      }),
+    ).toThrow(/current Update revisions must be unique/);
+    expect(() =>
+      parseInstallation({
+        ...valid,
+        update: {
+          kind: "managed",
+          operation: {
+            ...operation,
+            currentRevision: [{ ...revision, value: "2.0.0" }],
+          },
+        },
+      }),
+    ).toThrow(/must match revision verifications exactly/);
+    expect(() =>
+      parseInstallation({
+        ...valid,
+        update: {
+          kind: "managed",
+          operation: {
+            ...operation,
+            effects: [
+              { ...operation.effects[0], path: "C:\\Fixtures\\Update" },
+              { ...operation.effects[0], path: "c:/fixtures/update" },
+            ],
+          },
+        },
+      }),
+    ).toThrow(/effect paths must be unique/);
+    expect(() =>
+      parseInstallation({
+        ...valid,
+        update: {
+          kind: "managed",
+          operation: {
+            ...operation,
+            verifications: operation.verifications.map((verification) =>
+              verification.kind === "command-succeeds"
+                ? { ...verification, successExitCodes: [0, 0] }
+                : verification,
+            ),
+          },
+        },
+      }),
+    ).toThrow(/success exit codes must be unique/);
+  });
+
   it("requires plugin-owned installations to have one consistent boundary", () => {
     const child = buildInstallation({
       classification: "managed-plugin-resource",
@@ -699,6 +882,7 @@ describe("core model boundary validation", () => {
             exposedTo: child.exposedTo,
             runtimeDefault: false,
             availability: unsupportedPluginAvailability(),
+            update: child.update,
             ownership: child.ownership,
             installationIds: [child.id],
             resources: [
@@ -733,6 +917,7 @@ describe("core model boundary validation", () => {
             exposedTo: child.exposedTo,
             runtimeDefault: false,
             availability: unsupportedPluginAvailability(),
+            update: child.update,
             ownership: child.ownership,
             installationIds: [child.id],
             resources: [
@@ -888,6 +1073,7 @@ describe("core model boundary validation", () => {
           exposedTo: child.exposedTo,
           runtimeDefault: false,
           availability: unsupportedPluginAvailability(),
+          update: child.update,
           ownership: child.ownership,
           installationIds: [child.id],
           resources: [],
@@ -954,6 +1140,7 @@ describe("core model boundary validation", () => {
             exposedTo: first.exposedTo,
             runtimeDefault: false,
             availability: unsupportedPluginAvailability(),
+            update: first.update,
             ownership: first.ownership,
             installationIds: [first.id, sibling.id],
             resources: [],
