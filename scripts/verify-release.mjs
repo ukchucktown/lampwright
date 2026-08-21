@@ -13,6 +13,11 @@ assertEqual(
 assertEqual("Git ref type", process.env.GITHUB_REF_TYPE, "tag");
 assertEqual("Git tag", process.env.GITHUB_REF_NAME, expectedTag);
 assertEqual(
+  "GitHub release confirmation",
+  process.env.GITHUB_RELEASE_CONFIRMATION,
+  expectedTag,
+);
+assertEqual(
   "GitHub repository",
   process.env.GITHUB_REPOSITORY,
   "ukchucktown/lampwright",
