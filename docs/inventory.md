@@ -267,6 +267,25 @@ Injected `configDirectory` and `agentHomeDirectories` keep XDG and supported
 manager environment overrides explicit and make tests independent of the
 developer's real paths.
 
+### Vercel Update evidence
+
+Inventory emits Managed Update evidence only for a complete active Vercel
+record with a supported source type. A direct operation uses the installed
+`skills` executable. If that executable is absent, a global operation can use
+the exact `skills@1.5.22` package through `npx`. A project operation has no
+package fallback because the Manager derives Scope from the workspace.
+
+The evidence records the exact lock key, source, ref, Scope, revision values,
+network use, and process request. The effect set includes the lock file and
+every bounded agent path that `skills@1.5.22` can change or create. Existing
+copies, symbolic links, and Windows junctions keep their exact locations in
+this set. An absent path has protection evidence from its nearest safe parent.
+
+A project `computedHash` proves whether local content changed. Proven local
+changes withhold Update authority. Global source-tree hashes cannot prove local
+content, so Inventory reports that comparison as unavailable. Scanning reads
+these local values but never contacts the recorded source.
+
 ## Gemini CLI reconciliation
 
 Gemini discovery is bounded to extension Skills, user

@@ -1,0 +1,384 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Update CLI > requires confirmation, forwards exact trust grants, and envelopes the report > updated Update report JSON 1`] = `
+"{
+  "kind": "update-report",
+  "report": {
+    "actionResults": [
+      {
+        "actionId": "update-action-2e525f46db8d29e6f69cf4f5",
+        "completedAt": "2026-08-21T12:01:00.000Z",
+        "details": {},
+        "startedAt": "2026-08-21T12:00:00.000Z",
+        "status": "succeeded"
+      }
+    ],
+    "completedAt": "2026-08-21T12:01:00.000Z",
+    "finalInventoryId": "inventory-1",
+    "inventoryId": "inventory-1",
+    "planId": "update-plan-f1974a147c3012fb12707b4e",
+    "rescanError": null,
+    "schemaVersion": 1,
+    "startedAt": "2026-08-21T12:00:00.000Z",
+    "status": "succeeded",
+    "targetResults": [
+      {
+        "actionIds": [
+          "update-action-2e525f46db8d29e6f69cf4f5"
+        ],
+        "reason": null,
+        "status": "updated",
+        "target": {
+          "installationId": "installation-1",
+          "kind": "installation"
+        }
+      }
+    ],
+    "verificationResults": [
+      {
+        "changed": true,
+        "checkId": "update-check-554bb33518348ac90a471184",
+        "details": {},
+        "status": "passed"
+      }
+    ]
+  },
+  "schemaVersion": 1
+}
+"
+`;
+
+exports[`Update CLI > returns a deterministic zero-mutation plan and a complete human review > managed Update plan JSON 1`] = `
+"{
+  "kind": "update-plan",
+  "plan": {
+    "actions": [
+      {
+        "affectedInstallationIds": [
+          "installation-1"
+        ],
+        "approvals": [
+          {
+            "kind": "confirmation"
+          },
+          {
+            "adapterHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "package-trust",
+            "packageName": "@fixture/manager",
+            "packageVersion": "1.2.3",
+            "runner": "npx"
+          }
+        ],
+        "availabilityExpectation": {
+          "harnessStatuses": [
+            {
+              "harnessId": "fixture-agent",
+              "installationId": "installation-1",
+              "status": "enabled",
+              "strongEvidence": [
+                {
+                  "canonicalPath": "/fixtures/skills/example-skill",
+                  "kind": "canonical-target",
+                  "strength": "strong"
+                }
+              ]
+            }
+          ],
+          "pluginStatus": null
+        },
+        "dependsOn": [],
+        "id": "update-action-2e525f46db8d29e6f69cf4f5",
+        "kind": "managed-update",
+        "operation": {
+          "adapterId": "fixture-adapter",
+          "availability": {
+            "kind": "available"
+          },
+          "currentRevision": [
+            {
+              "format": "json",
+              "kind": "owner-value",
+              "path": "/fixtures/manager.json",
+              "recordPointer": "/skills/fixture/revision",
+              "value": 1
+            }
+          ],
+          "effects": [
+            {
+              "exists": true,
+              "kind": "mutation-root",
+              "path": "/fixtures/skills/installation-1",
+              "protection": {
+                "filesystem": {
+                  "kind": "writable"
+                },
+                "git": {
+                  "kind": "outside-worktree"
+                },
+                "system": {
+                  "kind": "none"
+                }
+              }
+            },
+            {
+              "exists": true,
+              "kind": "configuration-path",
+              "path": "/fixtures/manager.json",
+              "protection": {
+                "filesystem": {
+                  "kind": "writable"
+                },
+                "git": {
+                  "kind": "outside-worktree"
+                },
+                "system": {
+                  "kind": "none"
+                }
+              }
+            }
+          ],
+          "externalId": "fixture-lock-key",
+          "invocation": {
+            "kind": "ephemeral-package",
+            "packageArguments": [
+              "update",
+              "fixture-lock-key",
+              "--yes"
+            ],
+            "packageExecution": {
+              "adapterHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "mayDownload": true,
+              "packageName": "@fixture/manager",
+              "packageVersion": "1.2.3",
+              "runner": "npx"
+            },
+            "workingDirectory": {
+              "kind": "isolated-temporary"
+            }
+          },
+          "localChanges": {
+            "kind": "unavailable",
+            "reason": "fixture cannot compare local content"
+          },
+          "network": {
+            "kind": "required",
+            "reason": "Owner fetches recorded source"
+          },
+          "operationId": "update",
+          "owner": {
+            "confidence": "declared",
+            "kind": "manager",
+            "managerId": "fixture-manager"
+          },
+          "ownerRecordDigest": {
+            "algorithm": "sha256",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "packageDownload": {
+            "kind": "possible",
+            "packageName": "@fixture/manager",
+            "packageVersion": "1.2.3"
+          },
+          "ref": "main",
+          "scope": {
+            "kind": "workspace",
+            "workspacePath": "/fixtures/workspace"
+          },
+          "source": {
+            "id": "fixture-source",
+            "url": "https://example.test/source"
+          },
+          "trust": {
+            "kind": "trusted"
+          },
+          "verifications": [
+            {
+              "format": "json",
+              "kind": "revision-manifest-value",
+              "path": "/fixtures/manager.json",
+              "recordPointer": "/skills/fixture/revision",
+              "value": 1
+            }
+          ]
+        },
+        "selectedInstallations": [
+          {
+            "id": "installation-1",
+            "lifecycle": {
+              "adapterId": "fixture-adapter",
+              "externalId": "fixture-lock-key",
+              "operationId": "update",
+              "owner": {
+                "confidence": "declared",
+                "kind": "manager",
+                "managerId": "fixture-manager"
+              },
+              "ref": "main",
+              "scope": {
+                "kind": "workspace",
+                "workspacePath": "/fixtures/workspace"
+              },
+              "source": {
+                "id": "fixture-source",
+                "url": "https://example.test/source"
+              }
+            },
+            "location": {
+              "artifactType": {
+                "kind": "directory"
+              },
+              "canonicalPath": "/fixtures/skills/installation-1",
+              "path": "/fixtures/skills/installation-1"
+            },
+            "ownership": {
+              "confidence": "declared",
+              "kind": "manager",
+              "managerId": "fixture-manager"
+            },
+            "pluginBoundaryId": null,
+            "scope": {
+              "kind": "workspace",
+              "workspacePath": "/fixtures/workspace"
+            },
+            "source": {
+              "id": "fixture-source",
+              "url": "https://example.test/source"
+            },
+            "strongEvidence": [
+              {
+                "canonicalPath": "/fixtures/skills/example-skill",
+                "kind": "canonical-target",
+                "strength": "strong"
+              }
+            ]
+          }
+        ],
+        "selectedPlugin": null,
+        "target": {
+          "installationId": "installation-1",
+          "kind": "installation"
+        }
+      }
+    ],
+    "blocks": [],
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "id": "update-plan-f1974a147c3012fb12707b4e",
+    "intent": {
+      "force": false,
+      "target": {
+        "installationId": "installation-1",
+        "kind": "installation"
+      }
+    },
+    "inventoryId": "inventory-1",
+    "schemaVersion": 1,
+    "targets": [
+      {
+        "installationId": "installation-1",
+        "kind": "installation"
+      }
+    ],
+    "verificationChecks": [
+      {
+        "actionId": "update-action-2e525f46db8d29e6f69cf4f5",
+        "availabilityExpectation": {
+          "harnessStatuses": [
+            {
+              "harnessId": "fixture-agent",
+              "installationId": "installation-1",
+              "status": "enabled",
+              "strongEvidence": [
+                {
+                  "canonicalPath": "/fixtures/skills/example-skill",
+                  "kind": "canonical-target",
+                  "strength": "strong"
+                }
+              ]
+            }
+          ],
+          "pluginStatus": null
+        },
+        "currentRevision": [
+          {
+            "format": "json",
+            "kind": "owner-value",
+            "path": "/fixtures/manager.json",
+            "recordPointer": "/skills/fixture/revision",
+            "value": 1
+          }
+        ],
+        "id": "update-check-554bb33518348ac90a471184",
+        "identity": {
+          "strongEvidence": [
+            {
+              "canonicalPath": "/fixtures/skills/example-skill",
+              "kind": "canonical-target",
+              "strength": "strong"
+            }
+          ],
+          "weakEvidence": [
+            {
+              "kind": "name",
+              "normalizedName": "example-skill",
+              "strength": "weak"
+            }
+          ]
+        },
+        "installationId": "installation-1",
+        "owner": {
+          "confidence": "declared",
+          "kind": "manager",
+          "managerId": "fixture-manager"
+        },
+        "pluginBoundaryId": null,
+        "pluginId": null,
+        "ref": "main",
+        "scope": {
+          "kind": "workspace",
+          "workspacePath": "/fixtures/workspace"
+        },
+        "source": {
+          "id": "fixture-source",
+          "url": "https://example.test/source"
+        },
+        "target": {
+          "installationId": "installation-1",
+          "kind": "installation"
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "actionId": "update-action-2e525f46db8d29e6f69cf4f5",
+        "kind": "network-access",
+        "reason": "Owner fetches recorded source",
+        "target": {
+          "installationId": "installation-1",
+          "kind": "installation"
+        }
+      },
+      {
+        "actionId": "update-action-2e525f46db8d29e6f69cf4f5",
+        "kind": "package-download",
+        "packageName": "@fixture/manager",
+        "packageVersion": "1.2.3",
+        "target": {
+          "installationId": "installation-1",
+          "kind": "installation"
+        }
+      },
+      {
+        "installationId": "installation-1",
+        "kind": "local-change-unavailable",
+        "reason": "fixture cannot compare local content",
+        "target": {
+          "installationId": "installation-1",
+          "kind": "installation"
+        }
+      }
+    ]
+  },
+  "schemaVersion": 1
+}
+"
+`;

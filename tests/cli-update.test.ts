@@ -341,6 +341,7 @@ describe("Update CLI", () => {
 
     const first = formatCliOutput(output.output, true);
     expect(formatCliOutput(output.output, true)).toBe(first);
+    expect(first).toMatchSnapshot("managed Update plan JSON");
     const human = formatCliOutput(output.output, false);
     for (const expected of [
       "Update Plan: Installation installation-1",
@@ -432,6 +433,9 @@ describe("Update CLI", () => {
         adapterHash,
       },
     ]);
+    expect(formatCliOutput(executed.output, true)).toMatchSnapshot(
+      "updated Update report JSON",
+    );
   });
 
   it.each([

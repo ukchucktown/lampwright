@@ -1,7 +1,7 @@
 {
   "name": "lampwright",
   "version": "0.1.1",
-  "description": "Discover, reversibly disable, enable, and safely remove AI agent skills.",
+  "description": "Discover, update, reversibly disable, enable, and safely remove AI agent skills.",
   "license": "MIT",
   "type": "module",
   "bin": {
