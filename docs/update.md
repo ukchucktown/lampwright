@@ -328,10 +328,15 @@ explicit Installation, Logical Skill, Installation Group, or complete Plugin
 selector. It does not accept `--all`, `--force`, `--brute-force`, or
 `--include-plugins`.
 
-The terminal UI adds an Update review for one selected target. The review shows
-the current evidence, the Owner, the source policy, the affected boundary, the
-network disclosure, the lack of automatic rollback, and the verification
-summary. The terminal UI does not add an Updates view or a remote update badge.
+Press `u` in the terminal UI to review Update for exactly one staged or focused
+Inventory or Native Disable target. A fully staged Group is one target.
+Suspended entries direct the operator to Enable first. Plugin child rows and
+System Skills remain read-only. The review shows the current evidence, the
+Owner, source policy, affected boundary, network disclosure, lack of automatic
+rollback, and verification summary. The report shows every target status.
+Escape runs a fresh Inventory scan, reads Disabled Storage, and returns to
+Inventory with the result. The terminal UI does not add an Updates view, remote
+check, or remote update badge.
 
 The CLI and the terminal UI call the same Planning and Execution interfaces.
 Neither presentation module invokes an Owner or interprets Update evidence.

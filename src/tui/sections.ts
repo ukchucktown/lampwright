@@ -139,7 +139,7 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       key: "plugins",
       label: "Plugins",
       detail:
-        "select a custom Plugin parent; enter reviews removal and d reviews disable",
+        "select a custom Plugin parent: enter reviews removal, d reviews disable, and u reviews Update",
       selectable: inventoryPlugins.some((plugin) => !plugin.runtimeDefault),
       target: null,
       entries: [...inventoryPlugins]
@@ -198,7 +198,7 @@ export function pluginEntries(
     name: pluginDisplayName(plugin),
     description: plugin.runtimeDefault
       ? `Agent-supplied Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources.`
-      : `Custom Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources. Enter reviews complete removal; d reviews whole-Plugin disable while everything remains installed.`,
+      : `Custom Plugin with ${String(ownedSkills.length)} owned Skills and ${String(plugin.resources.length)} other known resources. Enter reviews complete removal. Press d for whole-Plugin disable or u for complete Update.`,
     exposedTo: [...plugin.exposedTo].sort(compare),
     paths: [...new Set(resources)],
     owner: plugin.adapterId ?? "plugin",

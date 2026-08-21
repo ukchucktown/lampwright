@@ -26,13 +26,19 @@ export {
   searchResults,
   searchRows,
 } from "./search.js";
-export { approvalGrants, TuiController } from "./controller.js";
+export {
+  approvalGrants,
+  TuiController,
+  updateApprovalGrants,
+} from "./controller.js";
 export {
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
   browseTabHitboxes,
   renderTui,
   renderBrowseLines,
+  updatePlanScrollMetrics,
+  updateReportScrollMetrics,
 } from "./render.js";
 export { runTui } from "./runtime.js";
 export {

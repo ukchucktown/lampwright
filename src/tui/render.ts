@@ -9,6 +9,12 @@ import type {
   RemovalPlan,
   VerificationCheck,
 } from "../model/types.js";
+import type {
+  UpdateAction,
+  UpdateBlock,
+  UpdateTarget,
+  UpdateWarning,
+} from "../update/types.js";
 import {
   currentSection,
   detailPane,
@@ -37,6 +43,8 @@ import type {
   TuiSearchState,
   TuiSection,
   TuiState,
+  TuiUpdatePlanState,
+  TuiUpdateReportState,
 } from "./types.js";
 
 export function renderTui(
@@ -59,6 +67,10 @@ export function renderTui(
     return renderAvailabilityExecuting(state, style);
   if (state.screen === "availability-report")
     return renderAvailabilityReport(state, style);
+  if (state.screen === "update-plan") return renderUpdatePlan(state, style);
+  if (state.screen === "update-executing")
+    return renderUpdateExecuting(state, style);
+  if (state.screen === "update-report") return renderUpdateReport(state, style);
   if (state.screen === "trash-review") return renderTrashReview(state, style);
   if (state.screen === "trash-executing")
     return `${style.title("Lampwright — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
@@ -757,6 +769,411 @@ export function availabilityReportScrollMetrics(
   );
 }
 
+function renderUpdatePlan(state: TuiUpdatePlanState, style: TuiPaint): string {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return renderCompactAvailability(state.browse.model.viewport, style);
+  return renderTrashScrollable(
+    updatePlanBodyLines(state, style),
+    updatePlanFooterLines(state, style),
+    state.scrollOffset,
+    state.browse.model.viewport,
+  );
+}
+
+function updatePlanBodyLines(
+  state: TuiUpdatePlanState,
+  style: TuiPaint,
+): readonly string[] {
+  const { plan } = state;
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const lines: string[] = [
+    style.title("Lampwright — Review Update"),
+    "",
+    style.title(`Update ${state.label}?`),
+    plan.blocks.length === 0
+      ? plan.warnings.length === 0
+        ? style.success("READY TO UPDATE")
+        : style.warning("REVIEW BEFORE UPDATE")
+      : style.error("CANNOT UPDATE"),
+    "",
+  ];
+  if (plan.blocks.length > 0)
+    lines.push(
+      style.error("Why Update cannot run"),
+      ...plan.blocks.flatMap((block) =>
+        wrapPlanLine(`! ${describeUpdateBlock(block)}`, width).map(style.error),
+      ),
+      "",
+    );
+  if (plan.warnings.length > 0)
+    lines.push(
+      style.warning("Review these warnings"),
+      ...plan.warnings.flatMap((warning) =>
+        wrapPlanLine(`! ${describeUpdateWarning(warning)}`, width).map(
+          style.warning,
+        ),
+      ),
+      "",
+    );
+  for (const action of plan.actions)
+    lines.push(
+      style.title("Reviewed Owner action"),
+      ...updateActionLines(action).flatMap((line) =>
+        wrapPlanLine(line, width).map(style.muted),
+      ),
+      "",
+    );
+  if (plan.verificationChecks.length > 0)
+    lines.push(
+      style.title("After Update, Lampwright will verify"),
+      ...plan.verificationChecks.flatMap((check) =>
+        [
+          `• ${describeUpdateTarget(check.target)} keeps its strong identity, Owner, source, ref, Scope, boundary, and availability.`,
+          `  Current revision: ${check.currentRevision.map(describeUpdateRevision).join(" · ")}`,
+          ...describeUpdateAvailabilityExpectation(
+            check.availabilityExpectation,
+          ),
+        ].flatMap((line) => wrapPlanLine(line, width).map(style.muted)),
+      ),
+      "",
+    );
+  lines.push(
+    style.warning("Automatic rollback is unavailable."),
+    ...wrapPlanLine(
+      "Lampwright does not copy the old content into Trash or Disabled Storage. A failed Update stops for review.",
+      width,
+    ).map(style.warning),
+  );
+  if (state.technicalDetails)
+    lines.push(
+      "",
+      style.info("Technical details"),
+      ...wrapPlanLine(`Plan ID: ${plan.id}`, width).map(style.muted),
+      ...wrapPlanLine(`Inventory ID: ${plan.inventoryId}`, width).map(
+        style.muted,
+      ),
+      ...wrapPlanLine(
+        `Target: ${describeUpdateTarget(plan.intent.target)}`,
+        width,
+      ).map(style.muted),
+      ...plan.actions.flatMap((action) =>
+        wrapPlanLine(`Action ID: ${action.id}`, width).map(style.muted),
+      ),
+      ...plan.verificationChecks.flatMap((check) =>
+        wrapPlanLine(`Check ID: ${check.id}`, width).map(style.muted),
+      ),
+    );
+  return lines;
+}
+
+function updateActionLines(action: UpdateAction): readonly string[] {
+  const operation = action.operation;
+  const owner =
+    operation.owner.kind === "manager"
+      ? `Manager ${operation.owner.managerId}`
+      : `Plugin ${operation.owner.pluginId}`;
+  const network =
+    operation.network.kind === "required"
+      ? `required — ${operation.network.reason}`
+      : "not required by the reviewed operation";
+  const packageUse =
+    operation.packageDownload.kind === "possible"
+      ? `${operation.packageDownload.packageName}@${operation.packageDownload.packageVersion} may download or use a cache`
+      : "none";
+  return [
+    `• Owner: ${owner}`,
+    `• Authority: Adapter ${operation.adapterId} · operation ${operation.operationId} · selector ${operation.externalId}`,
+    `• Invocation: ${describeUpdateInvocation(operation.invocation)}`,
+    `• Source: ${operation.source.id}${operation.source.url === null ? "" : ` (${operation.source.url})`}`,
+    `• Ref: ${operation.ref ?? "not pinned"}`,
+    `• Scope: ${describeUpdateScope(operation.scope)}`,
+    "• Current local revision evidence:",
+    ...operation.currentRevision.map(
+      (revision) => `  - ${describeUpdateRevision(revision)}`,
+    ),
+    `• Owner record digest: ${operation.ownerRecordDigest.algorithm}:${operation.ownerRecordDigest.digest}`,
+    "• Affected lifecycle boundary:",
+    ...operation.effects.map(
+      (effect) =>
+        `  - ${effect.kind} ${effect.path} · ${effect.exists ? "present" : "absent"} · ${describeUpdateProtection(effect.protection)}`,
+    ),
+    `• Network: ${network}`,
+    `• Ephemeral package: ${packageUse}`,
+    `• Adapter trust: ${operation.trust.kind === "trusted" ? "trusted" : `blocked ${operation.trust.adapterId}:${operation.trust.contentHash}`}`,
+    `• Local changes: ${operation.localChanges.kind}${operation.localChanges.kind === "unavailable" ? ` — ${operation.localChanges.reason}` : ` at ${operation.localChanges.path}`}`,
+    "• Required approvals:",
+    ...action.approvals.map((approval) => `  - ${describeApproval(approval)}`),
+    "• Approved verification evidence:",
+    ...operation.verifications.map(
+      (verification) => `  - ${describeUpdateVerification(verification)}`,
+    ),
+  ];
+}
+
+function updatePlanFooterLines(
+  state: TuiUpdatePlanState,
+  style: TuiPaint,
+): readonly string[] {
+  if (state.plan.blocks.length > 0)
+    return [style.error("Blocked — Esc returns without changing anything.")];
+  const details = state.technicalDetails
+    ? "hide technical details"
+    : "technical details";
+  return [
+    style.success("Nothing has changed yet."),
+    style.muted(
+      `y update · d ${details} · Esc returns to the previous view · q quits`,
+    ),
+  ];
+}
+
+export function updatePlanScrollMetrics(state: TuiUpdatePlanState): {
+  readonly pageRows: number;
+  readonly maximumOffset: number;
+} {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return { pageRows: 0, maximumOffset: 0 };
+  const style = createPaint(plainTuiTheme);
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    updatePlanBodyLines(state, style).length,
+    updatePlanFooterLines(state, style).length,
+  );
+}
+
+function renderUpdateExecuting(
+  state: Extract<TuiState, { screen: "update-executing" }>,
+  style: TuiPaint,
+): string {
+  return `${style.title("Lampwright — Updating")}\n\n${style.info(`Updating ${state.label}…`)}\n${style.muted(`${String(state.plan.actions.length)} approved Owner action(s)`)}\n${style.muted("The final Inventory scan and verification must finish before results appear.")}\n`;
+}
+
+function renderUpdateReport(
+  state: TuiUpdateReportState,
+  style: TuiPaint,
+): string {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return renderCompactAvailability(state.browse.model.viewport, style);
+  return renderTrashScrollable(
+    updateReportBodyLines(state, style),
+    [style.muted("d technical details · Esc refreshes Inventory · q quits")],
+    state.scrollOffset,
+    state.browse.model.viewport,
+    "report",
+  );
+}
+
+function updateReportBodyLines(
+  state: TuiUpdateReportState,
+  style: TuiPaint,
+): readonly string[] {
+  const { report } = state;
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const lines: string[] = [
+    style.title("Lampwright — Update result"),
+    "",
+    report.status === "succeeded"
+      ? style.success(`${state.label}: completed`)
+      : report.status === "partial"
+        ? style.warning(`${state.label}: completed only in part`)
+        : style.error(`${state.label}: ${report.status}`),
+    "",
+  ];
+  for (const result of report.targetResults) {
+    const paint =
+      result.status === "updated" || result.status === "unchanged"
+        ? style.success
+        : result.status === "partially-updated"
+          ? style.warning
+          : style.error;
+    lines.push(
+      ...wrapPlanLine(
+        `${result.status === "updated" || result.status === "unchanged" ? "✓" : "!"} ${describeUpdateTarget(result.target)}: ${result.status}${result.reason === null ? "" : ` — ${result.reason}`}`,
+        width,
+      ).map(paint),
+    );
+    if (result.status === "unchanged")
+      lines.push(
+        ...wrapPlanLine(
+          "  The Owner completed, but observable local revision evidence did not change.",
+          width,
+        ).map(style.muted),
+      );
+  }
+  lines.push(
+    report.rescanError === null
+      ? style.success("Final Inventory scan completed.")
+      : style.error(
+          `Final Inventory scan failed: ${report.rescanError.message}`,
+        ),
+  );
+  for (const result of report.actionResults)
+    if (result.status !== "succeeded")
+      lines.push(
+        ...wrapPlanLine(
+          `Owner action ${result.status}: ${"error" in result ? result.error.message : "reason" in result ? result.reason : "did not finish"}`,
+          width,
+        ).map(result.status === "failed" ? style.error : style.warning),
+      );
+  const passed = report.verificationResults.filter(
+    (result) => result.status === "passed",
+  ).length;
+  lines.push(
+    style.muted(
+      `${String(passed)} of ${String(report.verificationResults.length)} verification check(s) passed.`,
+    ),
+  );
+  for (const result of report.verificationResults)
+    if (result.status !== "passed")
+      lines.push(
+        ...wrapPlanLine(
+          `Verification ${result.status}: ${"error" in result ? result.error.message : result.reason}`,
+          width,
+        ).map(result.status === "failed" ? style.error : style.warning),
+      );
+  if (state.technicalDetails)
+    lines.push(
+      "",
+      style.info("Technical details"),
+      ...wrapPlanLine(`Plan ID: ${report.planId}`, width).map(style.muted),
+      ...wrapPlanLine(`Inventory ID: ${report.inventoryId}`, width).map(
+        style.muted,
+      ),
+      ...wrapPlanLine(
+        `Final Inventory ID: ${report.finalInventoryId ?? "unavailable"}`,
+        width,
+      ).map(style.muted),
+      ...report.actionResults.flatMap((result) =>
+        wrapPlanLine(`Action ${result.actionId}: ${result.status}`, width).map(
+          style.muted,
+        ),
+      ),
+      ...report.verificationResults.flatMap((result) =>
+        wrapPlanLine(`Check ${result.checkId}: ${result.status}`, width).map(
+          style.muted,
+        ),
+      ),
+    );
+  return lines;
+}
+
+export function updateReportScrollMetrics(state: TuiUpdateReportState): {
+  readonly pageRows: number;
+  readonly maximumOffset: number;
+} {
+  if (
+    state.browse.model.viewport.rows < 7 ||
+    state.browse.model.viewport.columns < 20
+  )
+    return { pageRows: 0, maximumOffset: 0 };
+  const style = createPaint(plainTuiTheme);
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    updateReportBodyLines(state, style).length,
+    1,
+  );
+}
+
+function describeUpdateBlock(block: UpdateBlock): string {
+  return `${block.kind}${block.path === null ? "" : ` at ${block.path}`}: ${block.reason} (not overridable)`;
+}
+
+function describeUpdateWarning(warning: UpdateWarning): string {
+  if (warning.kind === "package-download")
+    return `${warning.kind}: ${warning.packageName}@${warning.packageVersion} may download or use a cache`;
+  if (warning.kind === "soft-reference")
+    return `${warning.kind}: ${warning.reference.evidence}`;
+  if (warning.kind === "hard-dependency")
+    return `${warning.kind}: ${warning.dependency.reason}`;
+  if (warning.kind === "plugin-impact")
+    return `${warning.kind}: Plugin ${warning.pluginId} and ${String(warning.installationIds.length)} owned Installation(s)`;
+  return `${warning.kind}: ${warning.reason}`;
+}
+
+function describeUpdateInvocation(
+  invocation: UpdateAction["operation"]["invocation"],
+): string {
+  const directory =
+    invocation.workingDirectory.kind === "exact"
+      ? ` from ${invocation.workingDirectory.path}`
+      : " from an isolated temporary directory";
+  if (invocation.kind === "direct")
+    return `${describeCommand(invocation.command)}${directory}`;
+  const use = invocation.packageExecution;
+  return `${use.runner} ${use.packageName}@${use.packageVersion} ${invocation.packageArguments.map(quoteArgument).join(" ")}${directory} · approval ${use.adapterHash}`;
+}
+
+function describeUpdateScope(
+  scope: UpdateAction["operation"]["scope"],
+): string {
+  if (scope.kind === "workspace") return `workspace ${scope.workspacePath}`;
+  if (scope.kind === "agent") return `agent ${scope.agentId}`;
+  return scope.kind;
+}
+
+function describeUpdateRevision(
+  revision: UpdateAction["operation"]["currentRevision"][number],
+): string {
+  if (revision.kind === "content-hash")
+    return `content digest ${revision.digest.digest} at ${revision.path}`;
+  return `${revision.format} value ${String(revision.value)} at ${revision.path} ${revision.recordPointer}`;
+}
+
+function describeUpdateProtection(
+  protection: UpdateAction["operation"]["effects"][number]["protection"],
+): string {
+  return `Git ${protection.git.kind} · System ${protection.system.kind} · filesystem ${protection.filesystem.kind}`;
+}
+
+function describeUpdateVerification(
+  verification: UpdateAction["operation"]["verifications"][number],
+): string {
+  if (verification.kind === "command-succeeds")
+    return `command succeeds: ${describeCommand(verification.command)} with exit ${verification.successExitCodes.join(", ")}`;
+  if (verification.kind === "owner-state-present")
+    return `Owner state present: ${verification.externalId}`;
+  if (verification.kind === "record-present")
+    return `record present: ${verification.format} ${verification.path} ${verification.recordPointer}`;
+  if (verification.kind === "revision-manifest-value")
+    return `revision manifest value: ${verification.format} ${String(verification.value)} at ${verification.path} ${verification.recordPointer}`;
+  if (verification.kind === "revision-content-hash")
+    return `revision content hash at ${verification.path}`;
+  return `path present: ${verification.path}`;
+}
+
+function describeUpdateAvailabilityExpectation(
+  expectation: UpdateAction["availabilityExpectation"],
+): readonly string[] {
+  const lines = expectation.harnessStatuses.map(
+    (item) =>
+      `  Harness ${item.harnessId} for Installation ${item.installationId} must remain ${item.status}.`,
+  );
+  if (expectation.pluginStatus !== null)
+    lines.push(`  Plugin must remain ${expectation.pluginStatus}.`);
+  return lines.length === 0
+    ? ["  No Harness or Plugin availability state is recorded."]
+    : lines;
+}
+
+function describeUpdateTarget(target: UpdateTarget): string {
+  if (target.kind === "installation")
+    return `Installation ${target.installationId}`;
+  if (target.kind === "logical-skill")
+    return `Logical Skill ${target.logicalSkillId}`;
+  if (target.kind === "source-group")
+    return `Installation Group ${target.groupId}`;
+  return `Plugin ${target.pluginBoundaryId}`;
+}
+
 function renderCompactAvailability(
   viewport: TuiBrowseState["model"]["viewport"],
   style: TuiPaint,
@@ -1038,6 +1455,8 @@ export function renderBrowseLines(
                     { text: " · enter", paint: style.title },
                     { text: " remove", paint: style.muted },
                   ]),
+              { text: " · u", paint: style.title },
+              { text: " update", paint: style.muted },
             ],
       usable,
       style.muted,
