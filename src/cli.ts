@@ -13,6 +13,7 @@ import {
   createExecutionModule,
   createFileExecutionAuditWriter,
   createFilePackageTrustStore,
+  createFileUpdateExecutionAuditWriter,
   systemExecutionProcessRunner,
 } from "./execution/index.js";
 import type {
@@ -40,12 +41,15 @@ import type {
   RemovalPlan,
 } from "./model/types.js";
 import { parseExecutionApprovals } from "./model/validation.js";
+import type { UpdateIntent, UpdatePlan, UpdateReport } from "./update/index.js";
 import {
   plan,
   planAvailability,
+  planUpdate,
   PlanningError,
   resolveAvailabilitySelectors,
   resolveTargetSelectors,
+  resolveUpdateSelector,
 } from "./planning/index.js";
 import { createQuarantineModule } from "./quarantine/index.js";
 import type {
@@ -80,6 +84,14 @@ export interface CliDependencies {
     plan: AvailabilityPlan,
     approvals: readonly ApprovalRequirement[],
   ) => Promise<AvailabilityReport>;
+  readonly planUpdate?: (
+    inventory: Inventory,
+    intent: UpdateIntent,
+  ) => UpdatePlan;
+  readonly executeUpdate?: (
+    plan: UpdatePlan,
+    approvals: readonly ApprovalRequirement[],
+  ) => Promise<UpdateReport>;
 }
 export interface CliResult {
   readonly exitCode: number;
@@ -109,6 +121,7 @@ Usage:
   lampwright scan [--json] [--adapter <path>]
   lampwright disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
   lampwright enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
+  lampwright update <selector> [--dry-run] [--yes] [--json] [--adapter <path>]
   lampwright remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
   lampwright restore <entry-id> [--dry-run] [--yes] [--json]
   lampwright purge <entry-id...> [--dry-run] [--yes] [--json]
@@ -116,6 +129,7 @@ Usage:
 Selectors:
   Availability: installation:<installation-id>  logical-skill:<logical-skill-id>
                 group:<group-id>  plugin:<plugin-boundary-id>
+  Update:       exactly one installation, logical-skill, group, or plugin selector
   Enable only:  disabled-entry:<entry-id>
   Removal also: source:<source-id>  plugin:<plugin-boundary-id>
 
@@ -167,6 +181,7 @@ export async function runCli(
         0,
       );
     if (parsed.command === "remove") return await remove(parsed, dependencies);
+    if (parsed.command === "update") return await update(parsed, dependencies);
     if (parsed.command === "disable" || parsed.command === "enable")
       return await availability(parsed, dependencies);
     if (parsed.command === "restore" || parsed.command === "purge")
@@ -206,6 +221,7 @@ type Parsed = {
     | "scan"
     | "disable"
     | "enable"
+    | "update"
     | "remove"
     | "restore"
     | "purge";
@@ -268,7 +284,15 @@ function parseArguments(argv: readonly string[]): Parsed {
     };
   }
   if (
-    ["scan", "disable", "enable", "remove", "restore", "purge"].includes(first)
+    [
+      "scan",
+      "disable",
+      "enable",
+      "update",
+      "remove",
+      "restore",
+      "purge",
+    ].includes(first)
   )
     command = first as Parsed["command"];
   else throw new Error(`unknown command: ${first}`);
@@ -338,6 +362,12 @@ function parseArguments(argv: readonly string[]): Parsed {
     throw new Error(`${command} does not accept removal-only options`);
   if (command === "enable" && force)
     throw new Error("enable does not accept --force");
+  if (command === "update" && values.length !== 1)
+    throw new Error("update requires exactly one selector");
+  if (command === "update" && (all || includePlugins || force || bruteForce))
+    throw new Error(
+      "update does not accept --all, --include-plugins, --force, or --brute-force",
+    );
   return {
     command,
     dryRun,
@@ -351,6 +381,108 @@ function parseArguments(argv: readonly string[]): Parsed {
     packageTrusts,
     values,
   };
+}
+
+async function update(
+  args: Parsed,
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const scanned = await scanWithContext(
+    args.adapters,
+    args.adapterTrusts,
+    dependencies,
+  );
+  const target = resolveUpdateSelector(scanned.inventory, args.values[0]!);
+  const planner = dependencies.planUpdate ?? planUpdate;
+  const updatePlan = planner(scanned.inventory, { target, force: false });
+  const planEnvelope = {
+    schemaVersion: 1 as const,
+    kind: "update-plan" as const,
+    plan: updatePlan,
+  };
+  if (args.dryRun || updatePlan.blocks.length > 0)
+    return result(planEnvelope, updatePlan.blocks.length === 0 ? 0 : 3);
+  if (!args.yes)
+    return result(
+      {
+        schemaVersion: 1,
+        kind: "confirmation-required",
+        operation: "update",
+        plan: updatePlan,
+      },
+      3,
+    );
+  const approvals = updateGrants(updatePlan, scanned.newAdapterTrusts, args);
+  if (!hasRequiredUpdateTrust(updatePlan, approvals))
+    return result(
+      {
+        schemaVersion: 1,
+        kind: "confirmation-required",
+        operation: "update",
+        plan: updatePlan,
+      },
+      3,
+    );
+  if (
+    dependencies.executeUpdate === undefined &&
+    (dependencies.scan !== undefined || dependencies.planUpdate !== undefined)
+  )
+    throw new Error(
+      "executeUpdate must be injected with Update CLI scan or Planning dependencies",
+    );
+  const report =
+    dependencies.executeUpdate === undefined
+      ? await productionExecuteUpdate(
+          updatePlan,
+          args.adapters,
+          args.adapterTrusts,
+          scanned.newAdapterTrusts,
+          approvals,
+        )
+      : await dependencies.executeUpdate(updatePlan, approvals);
+  return result(
+    { schemaVersion: 1, kind: "update-report", report },
+    executionExitCode(report),
+  );
+}
+
+function hasRequiredUpdateTrust(
+  updatePlan: UpdatePlan,
+  grants: readonly ApprovalRequirement[],
+): boolean {
+  const required = updatePlan.actions
+    .flatMap((action) => action.approvals)
+    .filter(
+      (approval) =>
+        approval.kind === "adapter-trust" || approval.kind === "package-trust",
+    );
+  return required.every((requirement) =>
+    grants.some(
+      (grant) => stringifyModel(grant, 0) === stringifyModel(requirement, 0),
+    ),
+  );
+}
+
+function updateGrants(
+  updatePlan: UpdatePlan,
+  adapterTrusts: readonly AdapterTrustApproval[],
+  args: Parsed,
+): readonly ApprovalRequirement[] {
+  const ordinary = updatePlan.actions
+    .flatMap((action) => action.approvals)
+    .filter(
+      (approval) =>
+        approval.kind !== "adapter-trust" && approval.kind !== "package-trust",
+    );
+  return uniqueApprovals([
+    ...ordinary,
+    ...adapterTrusts.map((approval): ApprovalRequirement => ({
+      kind: "adapter-trust",
+      adapterId: approval.adapterId,
+      contentHash: approval.contentHash,
+    })),
+    ...args.packageTrusts,
+  ]);
 }
 
 async function remove(
@@ -502,15 +634,21 @@ async function availability(
 function availabilityGrants(
   availabilityPlan: AvailabilityPlan,
 ): readonly ApprovalRequirement[] {
-  return availabilityPlan.actions
-    .flatMap((action) => action.approvals)
-    .filter(
-      (approval, index, all) =>
-        all.findIndex(
-          (candidate) =>
-            stringifyModel(candidate, 0) === stringifyModel(approval, 0),
-        ) === index,
-    );
+  return uniqueApprovals(
+    availabilityPlan.actions.flatMap((action) => action.approvals),
+  );
+}
+
+function uniqueApprovals(
+  approvals: readonly ApprovalRequirement[],
+): readonly ApprovalRequirement[] {
+  return approvals.filter(
+    (approval, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          stringifyModel(candidate, 0) === stringifyModel(approval, 0),
+      ) === index,
+  );
 }
 
 function suspendedEntryIds(
@@ -802,6 +940,37 @@ async function productionExecuteAvailability(
       createFileAvailabilityExecutionAuditWriter(stateRoot),
   }).executeAvailability(availabilityPlan, { grants: approvals });
 }
+
+async function productionExecuteUpdate(
+  updatePlan: UpdatePlan,
+  adapterPaths: readonly string[],
+  adapterTrusts: readonly AdapterTrustApproval[],
+  newAdapterTrusts: readonly AdapterTrustApproval[],
+  approvals: readonly ApprovalRequirement[],
+): Promise<UpdateReport> {
+  const stateRoot = defaultLocalStateRoot();
+  const adapterTrustStore = createFileAdapterTrustStore(stateRoot);
+  for (const approval of newAdapterTrusts)
+    await adapterTrustStore.trust(approval);
+  return createExecutionModule({
+    scan: () => scan(adapterPaths, adapterTrusts),
+    replan: plan,
+    replanUpdate: planUpdate,
+    quarantine: createQuarantineModule(),
+    processRunner: systemExecutionProcessRunner,
+    inspectGitProtection: (path, artifactType) =>
+      inspectGitProtection(
+        path,
+        artifactType?.kind === "directory",
+        systemCommandRunner,
+      ),
+    auditWriter: createFileExecutionAuditWriter(stateRoot),
+    updateAuditWriter: createFileUpdateExecutionAuditWriter(stateRoot),
+    packageTrustStore: createFilePackageTrustStore(stateRoot),
+    now: () => new Date(),
+    stateRoot,
+  }).executeUpdate(updatePlan, { grants: approvals });
+}
 function parseAdapterTrust(value: string | undefined): AdapterTrustApproval {
   const match = value?.match(/^([^\s]+):([a-f\d]{64})$/);
   if (match === undefined || match === null)
@@ -978,8 +1147,9 @@ function human(output: unknown): string {
   if (output.kind === "removal-plan") return humanRemovalPlan(output.plan);
   if (output.kind === "availability-plan")
     return humanAvailabilityPlan(output.plan);
+  if (output.kind === "update-plan") return humanUpdatePlan(output.plan);
   if (output.kind === "confirmation-required")
-    return `${humanPlan(output.plan)}Confirmation required for ${String(output.operation)}. ${output.operation === "remove" ? "Supply every approval flag shown above before executing." : "Re-run with --yes after reviewing this plan."}\n`;
+    return `${humanPlan(output.plan)}Confirmation required for ${String(output.operation)}. ${output.operation === "remove" || output.operation === "update" ? "Supply every approval flag shown above before executing." : "Re-run with --yes after reviewing this plan."}\n`;
   if (output.kind === "execution-report" && isRecord(output.report)) {
     const report = output.report;
     const fallbackCount = Array.isArray(report.fallbackPlans)
@@ -998,6 +1168,8 @@ function human(output: unknown): string {
       : [];
     return `Availability ${String(output.operation)} ${String(output.report.status)}.${entryIds.length > 0 ? ` Enable later with ${entryIds.map((id) => `disabled-entry:${id}`).join(", ")}.` : ""}\n`;
   }
+  if (output.kind === "update-report" && isRecord(output.report))
+    return humanUpdateReport(output.report);
   if (output.kind === "quarantine-plan") return humanQuarantinePlan(output);
   if (output.kind === "restore-result" && isRecord(output.result))
     return output.result.status === "blocked"
@@ -1027,7 +1199,228 @@ function humanPlan(plan: unknown): string {
     (plan.intent.operation === "disable" || plan.intent.operation === "enable")
   )
     return humanAvailabilityPlan(plan);
+  if (isRecord(plan.intent) && isRecord(plan.intent.target))
+    return humanUpdatePlan(plan);
   return humanRemovalPlan(plan);
+}
+
+function humanUpdatePlan(plan: unknown): string {
+  if (!isRecord(plan)) return "Update Plan unavailable.\n";
+  const target =
+    isRecord(plan.intent) && isRecord(plan.intent.target)
+      ? describeTarget(plan.intent.target)
+      : "unknown target";
+  const actions = Array.isArray(plan.actions)
+    ? plan.actions.filter(isRecord)
+    : [];
+  const blocks = Array.isArray(plan.blocks) ? plan.blocks.filter(isRecord) : [];
+  const warnings = Array.isArray(plan.warnings)
+    ? plan.warnings.filter(isRecord)
+    : [];
+  const checks = Array.isArray(plan.verificationChecks)
+    ? plan.verificationChecks.filter(isRecord)
+    : [];
+  const lines = [
+    `Update Plan: ${target}; ${actions.length} Owner action(s), ${blocks.length} block(s), ${warnings.length} warning(s).`,
+  ];
+  for (const action of actions) {
+    const operation = isRecord(action.operation) ? action.operation : {};
+    lines.push(`Action ${String(action.id)}:`);
+    lines.push(`- Owner: ${describeOwner(operation.owner)}`);
+    lines.push(
+      `- Authority: Adapter ${String(operation.adapterId)}, operation ${String(operation.operationId)}, external selector ${String(operation.externalId)}`,
+    );
+    lines.push(
+      `- Owner invocation: ${describeInvocation(operation.invocation)}`,
+    );
+    lines.push(
+      `- Source policy: ${describeSource(operation.source)}; ref ${operation.ref === null ? "not pinned" : String(operation.ref)}; ${describeScope(operation.scope)}`,
+    );
+    const revisions = Array.isArray(operation.currentRevision)
+      ? operation.currentRevision.filter(isRecord)
+      : [];
+    lines.push("- Current local evidence:");
+    lines.push(
+      ...(revisions.length === 0
+        ? ["  - unavailable"]
+        : revisions.map((revision) => `  - ${describeRevision(revision)}`)),
+    );
+    const effects = Array.isArray(operation.effects)
+      ? operation.effects.filter(isRecord)
+      : [];
+    lines.push("- Affected boundary:");
+    lines.push(
+      ...(effects.length === 0
+        ? ["  - none declared"]
+        : effects.map(
+            (effect) =>
+              `  - ${String(effect.kind)} ${String(effect.path)} (${effect.exists === true ? "present" : "absent"}; ${describeProtection(effect.protection)})`,
+          )),
+    );
+    const network = isRecord(operation.network) ? operation.network : {};
+    lines.push(
+      network.kind === "required"
+        ? `- Network: required; ${String(network.reason)}`
+        : "- Network: not required by the reviewed operation",
+    );
+    const packageDownload = isRecord(operation.packageDownload)
+      ? operation.packageDownload
+      : {};
+    lines.push(
+      packageDownload.kind === "possible"
+        ? `- Ephemeral package: ${String(packageDownload.packageName)}@${String(packageDownload.packageVersion)} may download or use a cache`
+        : "- Ephemeral package: none",
+    );
+    lines.push(`- Adapter trust: ${describeTrust(operation.trust)}`);
+    const verifications = Array.isArray(operation.verifications)
+      ? operation.verifications.filter(isRecord)
+      : [];
+    lines.push("- Verification after execution:");
+    lines.push(
+      ...(verifications.length === 0
+        ? ["  - none declared"]
+        : verifications.map(
+            (verification) => `  - ${describeVerification(verification)}`,
+          )),
+    );
+  }
+  if (blocks.length > 0) {
+    lines.push("Absolute blocks:");
+    lines.push(...blocks.map((block) => `- ${describeBlock(block)}`));
+  }
+  if (warnings.length > 0) {
+    lines.push("Warnings:");
+    lines.push(
+      ...warnings.map((warning) => `- ${describeUpdateWarning(warning)}`),
+    );
+  }
+  lines.push(
+    `Verification Plan: ${checks.length} Inventory check(s) must preserve identity, source policy, boundary, and availability.`,
+  );
+  lines.push(
+    "Automatic rollback: unavailable. A failed Update stops for review.",
+  );
+  const guidance = approvalGuidance(plan).trimEnd();
+  if (guidance.length > 0) lines.push(guidance);
+  return `${lines.join("\n")}\n`;
+}
+
+function humanUpdateReport(report: Record<string, unknown>): string {
+  const targets = Array.isArray(report.targetResults)
+    ? report.targetResults.filter(isRecord)
+    : [];
+  const checks = Array.isArray(report.verificationResults)
+    ? report.verificationResults.filter(isRecord)
+    : [];
+  const lines = [`Update ${String(report.status)}.`];
+  for (const target of targets) {
+    lines.push(
+      `Target ${describeTarget(target.target)}: ${String(target.status)}${typeof target.reason === "string" ? `; ${target.reason}` : ""}.`,
+    );
+  }
+  const passed = checks.filter((check) => check.status === "passed").length;
+  lines.push(`Verification: ${passed}/${checks.length} check(s) passed.`);
+  if (targets.some((target) => target.status === "unchanged"))
+    lines.push(
+      "The Owner completed, but the observable local revision evidence did not change.",
+    );
+  if (report.rescanError !== null && isRecord(report.rescanError))
+    lines.push(
+      `Final Inventory failed: ${String(report.rescanError.message)}.`,
+    );
+  return `${lines.join("\n")}\n`;
+}
+
+function describeTarget(value: unknown): string {
+  if (!isRecord(value)) return "unknown target";
+  if (value.kind === "installation")
+    return `Installation ${String(value.installationId)}`;
+  if (value.kind === "logical-skill")
+    return `Logical Skill ${String(value.logicalSkillId)}`;
+  if (value.kind === "source-group")
+    return `Installation Group ${String(value.groupId)}`;
+  if (value.kind === "plugin")
+    return `Plugin ${String(value.pluginBoundaryId)}`;
+  return `unknown target ${String(value.kind)}`;
+}
+
+function describeOwner(value: unknown): string {
+  if (!isRecord(value)) return "unresolved";
+  if (value.kind === "manager") return `Manager ${String(value.managerId)}`;
+  if (value.kind === "plugin") return `Plugin ${String(value.pluginId)}`;
+  return String(value.kind);
+}
+
+function describeSource(value: unknown): string {
+  if (!isRecord(value)) return "unresolved source";
+  return `${String(value.id)}${typeof value.url === "string" ? ` (${value.url})` : ""}`;
+}
+
+function describeInvocation(value: unknown): string {
+  if (!isRecord(value)) return "unresolved";
+  const workingDirectory = isRecord(value.workingDirectory)
+    ? value.workingDirectory.kind === "exact"
+      ? ` from ${String(value.workingDirectory.path)}`
+      : " from an isolated temporary directory"
+    : "";
+  if (value.kind === "direct" && isRecord(value.command))
+    return `${String(value.command.executable)} ${Array.isArray(value.command.arguments) ? value.command.arguments.map(String).join(" ") : ""}${workingDirectory}`;
+  if (value.kind === "ephemeral-package" && isRecord(value.packageExecution))
+    return `${String(value.packageExecution.runner)} ${String(value.packageExecution.packageName)}@${String(value.packageExecution.packageVersion)} ${Array.isArray(value.packageArguments) ? value.packageArguments.map(String).join(" ") : ""}${workingDirectory}`;
+  return "unresolved";
+}
+
+function describeScope(value: unknown): string {
+  if (!isRecord(value)) return "Scope unresolved";
+  if (value.kind === "workspace")
+    return `workspace Scope ${String(value.workspacePath)}`;
+  if (value.kind === "agent") return `agent Scope ${String(value.agentId)}`;
+  return `${String(value.kind)} Scope`;
+}
+
+function describeRevision(value: Record<string, unknown>): string {
+  if (value.kind === "content-hash" && isRecord(value.digest))
+    return `content digest ${String(value.digest.digest)} at ${String(value.path)}`;
+  return `${String(value.format)} value ${String(value.value)} at ${String(value.path)} ${String(value.recordPointer)}`;
+}
+
+function describeProtection(value: unknown): string {
+  if (!isRecord(value)) return "protection unresolved";
+  const git = isRecord(value.git) ? String(value.git.kind) : "unresolved Git";
+  const system = isRecord(value.system)
+    ? String(value.system.kind)
+    : "unresolved System";
+  const filesystem = isRecord(value.filesystem)
+    ? String(value.filesystem.kind)
+    : "unresolved filesystem";
+  return `Git ${git}, System ${system}, filesystem ${filesystem}`;
+}
+
+function describeTrust(value: unknown): string {
+  if (!isRecord(value)) return "unresolved";
+  return value.kind === "trusted"
+    ? "trusted"
+    : `blocked for ${String(value.adapterId)}:${String(value.contentHash)}`;
+}
+
+function describeVerification(value: Record<string, unknown>): string {
+  if (value.kind === "command-succeeds" && isRecord(value.command))
+    return `approved command ${String(value.command.executable)} ${Array.isArray(value.command.arguments) ? value.command.arguments.map(String).join(" ") : ""}`;
+  const detail =
+    typeof value.path === "string"
+      ? value.path
+      : typeof value.externalId === "string"
+        ? value.externalId
+        : "reviewed locator";
+  return `${String(value.kind)} ${detail}`;
+}
+
+function describeUpdateWarning(value: Record<string, unknown>): string {
+  if (value.kind === "package-download")
+    return `ephemeral package ${String(value.packageName)}@${String(value.packageVersion)} may download or use a cache`;
+  if (typeof value.reason === "string")
+    return `${String(value.kind)}: ${value.reason}`;
+  return String(value.kind);
 }
 
 function humanAvailabilityPlan(plan: unknown): string {

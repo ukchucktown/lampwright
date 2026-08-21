@@ -6,6 +6,9 @@
     { "$ref": "#/$defs/inventory" },
     { "$ref": "#/$defs/availabilityPlanEnvelope" },
     { "$ref": "#/$defs/availabilityReportEnvelope" },
+    { "$ref": "#/$defs/updatePlanEnvelope" },
+    { "$ref": "#/$defs/updateReportEnvelope" },
+    { "$ref": "#/$defs/updateConfirmationEnvelope" },
     { "$ref": "#/$defs/removalPlanEnvelope" },
     { "$ref": "#/$defs/confirmationEnvelope" },
     { "$ref": "#/$defs/executionReportEnvelope" },
@@ -144,6 +147,113 @@
           "type": "array",
           "items": { "type": "object" }
         }
+      },
+      "additionalProperties": false
+    },
+    "updatePlan": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "id",
+        "inventoryId",
+        "createdAt",
+        "intent",
+        "targets",
+        "actions",
+        "blocks",
+        "warnings",
+        "verificationChecks"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "minLength": 1 },
+        "intent": { "type": "object" },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "type": "object" }
+        },
+        "actions": { "type": "array", "items": { "type": "object" } },
+        "blocks": { "type": "array", "items": { "type": "object" } },
+        "warnings": { "type": "array", "items": { "type": "object" } },
+        "verificationChecks": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "updateReport": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "planId",
+        "inventoryId",
+        "finalInventoryId",
+        "rescanError",
+        "startedAt",
+        "completedAt",
+        "status",
+        "actionResults",
+        "targetResults",
+        "verificationResults"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "planId": { "type": "string", "minLength": 1 },
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "finalInventoryId": { "type": ["string", "null"] },
+        "rescanError": { "type": ["object", "null"] },
+        "startedAt": { "type": "string", "minLength": 1 },
+        "completedAt": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["succeeded", "partial", "failed", "blocked"]
+        },
+        "actionResults": { "type": "array", "items": { "type": "object" } },
+        "targetResults": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "type": "object" }
+        },
+        "verificationResults": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "updatePlanEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "update-plan" },
+        "plan": { "$ref": "#/$defs/updatePlan" }
+      },
+      "additionalProperties": false
+    },
+    "updateReportEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "report"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "update-report" },
+        "report": { "$ref": "#/$defs/updateReport" }
+      },
+      "additionalProperties": false
+    },
+    "updateConfirmationEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "operation", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "confirmation-required" },
+        "operation": { "const": "update" },
+        "plan": { "$ref": "#/$defs/updatePlan" }
       },
       "additionalProperties": false
     },

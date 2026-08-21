@@ -322,9 +322,11 @@ The CLI adds this command:
 lampwright update <target>
 ```
 
-The command accepts the existing `--json`, `--dry-run`, `--yes`, and `--adapter`
-options. The first version requires an explicit target and does not accept
-`--all`.
+The command accepts `--json`, `--dry-run`, `--yes`, `--adapter`,
+`--trust-adapter`, and `--trust-package`. The first version requires exactly one
+explicit Installation, Logical Skill, Installation Group, or complete Plugin
+selector. It does not accept `--all`, `--force`, `--brute-force`, or
+`--include-plugins`.
 
 The terminal UI adds an Update review for one selected target. The review shows
 the current evidence, the Owner, the source policy, the affected boundary, the
@@ -336,9 +338,18 @@ Neither presentation module invokes an Owner or interprets Update evidence.
 
 ## Stable output
 
-The stable JSON schema adds Update Plan and Update Report envelopes. The schema
+The stable JSON schema adds `update-plan` and `update-report` envelopes. The schema
 uses deterministic target, action, warning, block, approval, and verification
 ordering. A dry-run returns a complete Update Plan and creates no local state.
+An Update confirmation uses the existing `confirmation-required` envelope with
+`operation: "update"`.
+
+Target results map to CLI exit statuses as follows:
+
+- `updated` and `unchanged` use `0`.
+- `partially-updated`, `failed`, and `unresolved` use `1`.
+- `blocked` uses `3`.
+- Invalid command usage uses `2`.
 
 ## Acceptance criteria
 
