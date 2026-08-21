@@ -40,6 +40,63 @@ async function skill(path: string, name: string): Promise<void> {
 }
 
 describe("Gemini CLI adapter", () => {
+  it("deduplicates coincident home and workspace roots through Inventory", async () => {
+    const environment = await fixture();
+    const path = join(environment.home, ".gemini", "skills", "native");
+    await skill(path, "native");
+    await writeFile(
+      join(environment.home, ".gemini", "settings.json"),
+      JSON.stringify({ skills: { disabled: ["native"] } }),
+      "utf8",
+    );
+
+    const inventory = await createInventoryScanner({
+      now: () => new Date(0),
+      environment: {
+        homeDirectory: environment.home,
+        workspaceDirectory: environment.home,
+      },
+      commandRunner: {
+        async run(command) {
+          return command.executable === "gemini"
+            ? { exitCode: 0, stdout: "1" }
+            : { exitCode: 1, stdout: "" };
+        },
+      },
+    }).scan({});
+
+    const installations = inventory.installations.filter(
+      (item) => item.agentId === "gemini-cli",
+    );
+    expect(installations).toHaveLength(1);
+    expect(installations[0]!.scope).toMatchObject({
+      kind: "workspace",
+      workspacePath: environment.home,
+    });
+    const exposure = installations[0]!.harnessExposures.find(
+      (item) => item.harnessId === "gemini-cli",
+    )!;
+    expect(exposure.status).toBe("disabled");
+    expect(exposure.control).toMatchObject({
+      kind: "native",
+      mechanism: "gemini-disabled-skills",
+      writableLayerPaths: [join(environment.home, ".gemini", "settings.json")],
+    });
+    expect(
+      exposure.control.kind === "native" ? exposure.control.layers : [],
+    ).toHaveLength(1);
+    expect(
+      exposure.control.kind === "native"
+        ? exposure.control.layers[0]?.documentScope
+        : null,
+    ).toBe("user");
+    expect(
+      exposure.control.kind === "native"
+        ? exposure.control.layers[0]?.applies
+        : null,
+    ).toBe(true);
+  });
+
   it("checks executable presence without invoking Gemini during Inventory", async () => {
     const environment = await fixture();
     const path = join(environment.home, ".gemini", "skills", "native");

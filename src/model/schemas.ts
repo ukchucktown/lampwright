@@ -589,19 +589,20 @@ export const harnessExposureSchema = z
     if (control.mechanism === "gemini-disabled-skills") {
       if (
         control.selector.kind !== "name" ||
-        control.layers.length !== 2 ||
+        (control.layers.length !== 1 && control.layers.length !== 2) ||
         control.layers
           .map((layer) => layer.format)
           .some((format) => format !== "jsonc") ||
-        control.layers.map((layer) => layer.documentScope).join(",") !==
-          "user,workspace" ||
+        !["user", "user,workspace"].includes(
+          control.layers.map((layer) => layer.documentScope).join(","),
+        ) ||
         control.layers[0]?.applies !== true ||
         values.some(
           (value) => value !== null && value.kind !== "gemini-disabled-skills",
         )
       )
         fail(
-          "Gemini native evidence must contain user and workspace JSONC layers",
+          "Gemini native evidence must contain a user JSONC layer and, when distinct, a workspace JSONC layer",
         );
     }
     if (
@@ -620,7 +621,7 @@ export const harnessExposureSchema = z
                 ["user", "local-workspace"].includes(layer.documentScope),
               )
               .map(({ index }) => index)
-          : [0, 1];
+          : control.layers.map((_, index) => index);
     const expectedWritablePaths = expectedWritableIndexes
       .map((index) => control.layers[index]?.path)
       .filter((path): path is string => path !== undefined);
