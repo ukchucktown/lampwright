@@ -155,3 +155,52 @@ Availability audit records contain the approved plan, exact grants, and full
 report. They are written lazily only when a native commit or Disabled Storage
 operation is actually attempted. Freshness rejection, missing approval, and a
 live protection failure therefore create no local state.
+
+## Update execution
+
+The same module executes an approved Update Plan:
+
+```ts
+const report = await execution.executeUpdate(plan, { grants });
+```
+
+Update Execution scans Inventory and calls the injected pure Update planner
+before the first mutation. It compares the complete semantic plan and excludes
+only `createdAt`. A stale plan, a forged command, a changed effect, or a changed
+approval returns a blocked report without an Owner invocation or an audit
+write.
+
+Execution invokes only the structured command in the approved action. The
+process runner never uses a shell. A direct operation uses the approved exact
+directory or a new isolated directory. An ephemeral operation uses the exact
+package version, a Lampwright-owned cache, and its approved exact or isolated
+directory. Every Owner process receives the Lampwright privacy environment.
+
+The scheduler continues independent actions after an Owner failure. It blocks
+an action when one of its dependencies did not succeed. Update Execution does
+not create a filesystem fallback, a Remove plan, a Quarantine entry, or a
+Disabled Storage entry.
+
+After an attempted action, Execution scans Inventory again. The final scan
+must prove that the strong identity, source, ref, Scope, Owner, and availability
+state did not change. The final operation must also retain every approved
+verification locator. Execution runs only a structured verification command
+from the approved plan, never a command from the final Inventory.
+
+A new independent Installation or Plugin inside an approved mutation root
+fails verification. Strong identity alone does not identify a selected
+boundary. Execution also compares the location, source, ref, Scope, Owner, and
+exact Owner selector. The selected complete Plugin boundary can contain changed
+children. For other targets, a new Harness Exposure fails verification.
+
+The report uses `updated` only when all represented local revisions changed.
+It uses `unchanged` when all Owner commands succeed and no represented revision
+changes. The value `unchanged` does not claim that a remote source is current.
+A mixed result uses `partially-updated`. Owner failures use `failed`, approval
+and plan blocks use `blocked`, and an unproved final state uses `unresolved`.
+A final scan failure cannot produce an `updated` result.
+
+An Update audit record contains the approved plan, the exact grants, and the
+complete report. Execution writes this record only after an Owner process
+starts. Freshness rejection, a missing approval, and a live protection failure
+create no Update audit state.

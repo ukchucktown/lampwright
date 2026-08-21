@@ -16,6 +16,11 @@ import type {
   AvailabilityPlan,
   AvailabilityReport,
 } from "../availability/types.js";
+import type {
+  UpdateIntent,
+  UpdatePlan,
+  UpdateReport,
+} from "../update/types.js";
 
 export type Approvals = ExecutionApprovals;
 
@@ -25,6 +30,7 @@ export interface ExecutionModule {
     plan: AvailabilityPlan,
     approvals: Approvals,
   ): Promise<AvailabilityReport>;
+  executeUpdate(plan: UpdatePlan, approvals: Approvals): Promise<UpdateReport>;
 }
 
 export interface ExecutionProcessRequest {
@@ -70,6 +76,17 @@ export interface AvailabilityExecutionAuditWriter {
   write(record: AvailabilityExecutionAuditRecord): Promise<void>;
 }
 
+export interface UpdateExecutionAuditRecord {
+  readonly schemaVersion: 1;
+  readonly plan: UpdatePlan;
+  readonly approvals: ExecutionApprovals;
+  readonly report: UpdateReport;
+}
+
+export interface UpdateExecutionAuditWriter {
+  write(record: UpdateExecutionAuditRecord): Promise<void>;
+}
+
 export type PackageTrustDecision = Omit<
   Extract<ApprovalRequirement, { kind: "package-trust" }>,
   "kind"
@@ -101,6 +118,11 @@ export interface ExecutionModuleOptions {
     intent: AvailabilityIntent,
   ) => AvailabilityPlan;
   readonly availabilityAuditWriter?: AvailabilityExecutionAuditWriter;
+  readonly replanUpdate?: (
+    inventory: Inventory,
+    intent: UpdateIntent,
+  ) => UpdatePlan;
+  readonly updateAuditWriter?: UpdateExecutionAuditWriter;
 }
 
 export type ExecutionErrorCode =

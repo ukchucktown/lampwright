@@ -44,12 +44,16 @@ import type {
 } from "./types.js";
 import { ExecutionModuleError } from "./types.js";
 import { executeAvailabilityPlan } from "./availability.js";
+import { executeUpdatePlan } from "./update.js";
 
 export function createExecutionModule(
   options: ExecutionModuleOptions,
 ): ExecutionModule {
   validateOptions(options);
   return {
+    async executeUpdate(plan, approvals) {
+      return executeUpdatePlan(plan, approvals, options);
+    },
     async executeAvailability(plan, approvals) {
       return executeAvailabilityPlan(plan, approvals, options);
     },

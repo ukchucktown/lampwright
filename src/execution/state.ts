@@ -23,6 +23,8 @@ import {
   parseAvailabilityReport,
 } from "../availability/validation.js";
 import type { AvailabilityExecutionAuditWriter } from "./types.js";
+import { parseUpdatePlan, parseUpdateReport } from "../update/validation.js";
+import type { UpdateExecutionAuditWriter } from "./types.js";
 
 export function createFileExecutionAuditWriter(
   stateRoot: string,
@@ -102,6 +104,48 @@ export function createFileAvailabilityExecutionAuditWriter(
       const parsed = { schemaVersion: 1 as const, plan, approvals, report };
       const directory = join(stateRoot, "audit", "availability-v1");
       await ensureStateDirectory(stateRoot, ["audit", "availability-v1"]);
+      const timestamp = report.completedAt.replaceAll(/[^0-9]/g, "");
+      const path = join(directory, `${timestamp}-${randomUUID()}.json`);
+      await writeFile(path, `${stringifyModel(parsed)}\n`, { flag: "wx" });
+    },
+  };
+}
+
+export function createFileUpdateExecutionAuditWriter(
+  stateRoot: string,
+): UpdateExecutionAuditWriter {
+  requireAbsoluteStateRoot(stateRoot);
+  return {
+    async write(record) {
+      const plan = parseUpdatePlan(record.plan);
+      const approvals = parseExecutionApprovals(record.approvals);
+      const report = parseUpdateReport(record.report);
+      if (
+        record.schemaVersion !== 1 ||
+        report.planId !== plan.id ||
+        report.inventoryId !== plan.inventoryId ||
+        !sameValues(
+          report.actionResults.map((result) => result.actionId),
+          plan.actions.map((action) => action.id),
+        ) ||
+        !sameValues(
+          report.targetResults.map((result) => result.target),
+          plan.targets,
+        ) ||
+        (report.rescanError === null
+          ? !sameValues(
+              report.verificationResults.map((result) => result.checkId),
+              plan.verificationChecks.map((check) => check.id),
+            )
+          : report.verificationResults.length !== 0)
+      )
+        throw new ExecutionModuleError(
+          "audit-failed",
+          "audit record does not match its Update Plan",
+        );
+      const parsed = { schemaVersion: 1 as const, plan, approvals, report };
+      const directory = join(stateRoot, "audit", "update-v1");
+      await ensureStateDirectory(stateRoot, ["audit", "update-v1"]);
       const timestamp = report.completedAt.replaceAll(/[^0-9]/g, "");
       const path = join(directory, `${timestamp}-${randomUUID()}.json`);
       await writeFile(path, `${stringifyModel(parsed)}\n`, { flag: "wx" });

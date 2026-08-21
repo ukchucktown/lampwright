@@ -87,7 +87,7 @@ export const weakIdentityEvidenceSchema = z.discriminatedUnion("kind", [
   hashIdentityEvidenceSchema,
 ]);
 
-const skillIdentitySchema = z.strictObject({
+export const skillIdentitySchema = z.strictObject({
   strongEvidence: z.array(strongIdentityEvidenceSchema),
   weakEvidence: z.array(weakIdentityEvidenceSchema),
 });
@@ -97,7 +97,7 @@ const logicalSkillIdentitySchema = z.strictObject({
   weakEvidence: z.array(weakIdentityEvidenceSchema),
 });
 
-const scopeSchema = z.discriminatedUnion("kind", [
+export const scopeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("user") }),
   z.strictObject({
     kind: z.literal("workspace"),
@@ -135,7 +135,7 @@ const unknownOwnershipSchema = z.strictObject({
   confidence: z.literal("unknown"),
 });
 
-const ownershipSchema = z.discriminatedUnion("kind", [
+export const ownershipSchema = z.discriminatedUnion("kind", [
   filesystemOwnershipSchema,
   managerOwnershipSchema,
   pluginOwnershipSchema,
@@ -143,7 +143,7 @@ const ownershipSchema = z.discriminatedUnion("kind", [
   unknownOwnershipSchema,
 ]);
 
-const managedOwnershipSchema = z.discriminatedUnion("kind", [
+export const managedOwnershipSchema = z.discriminatedUnion("kind", [
   managerOwnershipSchema,
   pluginOwnershipSchema,
 ]);
@@ -188,7 +188,7 @@ const artifactTypeSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const artifactLocationSchema = z.strictObject({
+export const artifactLocationSchema = z.strictObject({
   path: nonEmptyString,
   canonicalPath: nonEmptyString.nullable(),
   artifactType: artifactTypeSchema,
@@ -211,7 +211,7 @@ const suspensionEvidenceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("unavailable"), reason: nonEmptyString }),
 ]);
 
-const sourceReferenceSchema = z.strictObject({
+export const sourceReferenceSchema = z.strictObject({
   id: nonEmptyString,
   url: z.url().nullable(),
 });
@@ -381,7 +381,7 @@ const adapterExecutionTrustSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const updateRevisionEvidenceSchema = z.discriminatedUnion("kind", [
+export const updateRevisionEvidenceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("owner-value"),
     path: absoluteFilesystemPath,
@@ -446,7 +446,7 @@ const managedUpdateVerificationEvidenceSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const managedUpdateEvidenceSchema = z.strictObject({
+export const managedUpdateEvidenceSchema = z.strictObject({
   adapterId: nonEmptyString,
   operationId: nonEmptyString,
   availability: z.discriminatedUnion("kind", [
