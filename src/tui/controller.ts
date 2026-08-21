@@ -5,9 +5,11 @@ import type {
 } from "../availability/types.js";
 import type {
   ApprovalRequirement,
+  Inventory,
   RemovalPlan,
   RemovalPlanIntent,
 } from "../model/types.js";
+import type { UpdateTarget } from "../update/types.js";
 import type {
   PurgeOperationPreview,
   QuarantineModule,
@@ -27,6 +29,8 @@ import {
   reportScrollMetrics,
   trashReportScrollMetrics,
   trashReviewScrollMetrics,
+  updatePlanScrollMetrics,
+  updateReportScrollMetrics,
 } from "./render.js";
 import {
   createDisabledSections,
@@ -45,6 +49,8 @@ import type {
   TuiExecutingState,
   TuiPlanState,
   TuiReportState,
+  TuiUpdatePlanState,
+  TuiUpdateReportState,
   TuiTrashReviewState,
   TuiSearchState,
   TuiState,
@@ -56,6 +62,7 @@ export class TuiController {
   private execution: Promise<void> | null = null;
   private trashExecution: Promise<void> | null = null;
   private availabilityExecution: Promise<void> | null = null;
+  private updateExecution: Promise<void> | null = null;
 
   constructor(
     private readonly dependencies: TuiDependencies,
@@ -126,7 +133,8 @@ export class TuiController {
         state.screen === "trash-review" ||
         state.screen === "trash-report" ||
         state.screen === "trash-executing" ||
-        state.screen === "availability-executing"
+        state.screen === "availability-executing" ||
+        state.screen === "update-executing"
       ) {
         const resized = {
           ...state,
@@ -154,7 +162,11 @@ export class TuiController {
       this.stateValue = resizeState(state, action.viewport);
       return;
     }
-    if (state.screen === "executing" || state.screen === "trash-executing")
+    if (
+      state.screen === "executing" ||
+      state.screen === "trash-executing" ||
+      state.screen === "update-executing"
+    )
       return;
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
@@ -164,6 +176,10 @@ export class TuiController {
         await this.availabilityPlanAction(state, action);
       else if (state.screen === "availability-report")
         await this.availabilityReportAction(state, action);
+      else if (state.screen === "update-plan")
+        await this.updatePlanAction(state, action);
+      else if (state.screen === "update-report")
+        await this.updateReportAction(state, action);
       else if (state.screen === "trash-review")
         await this.trashReviewAction(state, action);
       else if (state.screen === "trash-report")
@@ -263,6 +279,33 @@ export class TuiController {
         .catch((error: unknown) => this.fail(error));
     }
     await this.availabilityExecution;
+  }
+
+  async waitForUpdateExecution(): Promise<void> {
+    if (
+      this.updateExecution === null &&
+      this.stateValue.screen === "update-executing"
+    ) {
+      const state = this.stateValue;
+      const execute = this.dependencies.executeUpdate;
+      if (execute === undefined) return;
+      this.updateExecution = execute(
+        state.plan,
+        updateApprovalGrants(state.plan),
+      )
+        .then((report) => {
+          this.stateValue = {
+            screen: "update-report",
+            browse: state.browse,
+            report,
+            label: state.label,
+            technicalDetails: false,
+            scrollOffset: 0,
+          };
+        })
+        .catch((error: unknown) => this.fail(error));
+    }
+    await this.updateExecution;
   }
 
   private async browseAction(
@@ -417,6 +460,13 @@ export class TuiController {
       await this.openAvailabilityReview(state, "enable");
       return;
     }
+    if (
+      action.kind === "update-review" &&
+      ((state.view ?? "inventory") === "inventory" || state.view === "disabled")
+    ) {
+      this.openUpdateReview(state);
+      return;
+    }
     if (state.view !== "inventory") return;
     if (action.kind !== "select" && action.kind !== "confirm") return;
     const targets = this.targetsFor(state);
@@ -440,6 +490,39 @@ export class TuiController {
       technicalDetails: false,
       scrollOffset: 0,
       returnReport: null,
+    };
+  }
+
+  private openUpdateReview(state: TuiBrowseState): void {
+    const planner = this.dependencies.planUpdate;
+    if (planner === undefined) {
+      this.stateValue = {
+        ...state,
+        model: {
+          ...state.model,
+          notice: "Update is unavailable in this host.",
+        },
+      };
+      return;
+    }
+    const resolved = updateSelection(state);
+    if (resolved.target === null) {
+      this.stateValue = {
+        ...state,
+        model: { ...state.model, notice: resolved.notice },
+      };
+      return;
+    }
+    this.stateValue = {
+      screen: "update-plan",
+      browse: browseSnapshot(state),
+      plan: planner(state.inventory, {
+        target: resolved.target,
+        force: false,
+      }),
+      label: updateTargetLabel(state.inventory, resolved.target),
+      technicalDetails: false,
+      scrollOffset: 0,
     };
   }
 
@@ -782,6 +865,152 @@ export class TuiController {
     }
   }
 
+  private async updatePlanAction(
+    state: TuiUpdatePlanState,
+    action: TuiAction,
+  ): Promise<void> {
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: null };
+      return;
+    }
+    if (action.kind === "cancel") {
+      this.stateValue = { screen: "browse", ...state.browse };
+      return;
+    }
+    if (action.kind === "toggle-details") {
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const metrics = updatePlanScrollMetrics(state);
+      const distance =
+        action.kind === "page" ? Math.max(1, metrics.pageRows) : 1;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + action.delta * distance),
+        ),
+      };
+      return;
+    }
+    if (
+      action.kind !== "confirm" ||
+      state.plan.blocks.length > 0 ||
+      this.dependencies.executeUpdate === undefined
+    )
+      return;
+    this.updateExecution = null;
+    this.stateValue = {
+      screen: "update-executing",
+      browse: state.browse,
+      plan: state.plan,
+      label: state.label,
+    };
+  }
+
+  private async updateReportAction(
+    state: TuiUpdateReportState,
+    action: TuiAction,
+  ): Promise<void> {
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: state.report };
+      return;
+    }
+    if (action.kind === "cancel") {
+      await this.refreshAfterUpdate(state);
+      return;
+    }
+    if (action.kind === "toggle-details") {
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const metrics = updateReportScrollMetrics(state);
+      const distance =
+        action.kind === "page" ? Math.max(1, metrics.pageRows) : 1;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + action.delta * distance),
+        ),
+      };
+    }
+  }
+
+  private async refreshAfterUpdate(state: TuiUpdateReportState): Promise<void> {
+    try {
+      const inventory = await this.dependencies.scan();
+      const disabledEntries =
+        this.dependencies.listDisabled === undefined
+          ? []
+          : await this.dependencies.listDisabled();
+      const oldSnapshots = state.browse.viewSnapshots ?? {};
+      const inventoryOld =
+        state.browse.view === "inventory"
+          ? state.browse
+          : oldSnapshots.inventory;
+      const disabledOld =
+        state.browse.view === "disabled" ? state.browse : oldSnapshots.disabled;
+      const statuses = state.report.targetResults
+        .map((result) => result.status)
+        .join(" · ");
+      const inventorySnapshot: TuiViewSnapshot = {
+        inventory,
+        model: {
+          ...preserveBrowseModel(
+            inventoryOld?.model ?? state.browse.model,
+            createTuiSections(inventory),
+          ),
+          notice: `Update result — ${state.label}: ${statuses}.`,
+        },
+        view: "inventory",
+        disabledEntries,
+        ...(state.browse.operations === undefined
+          ? {}
+          : { operations: state.browse.operations }),
+      };
+      const disabledSnapshot: TuiViewSnapshot = {
+        inventory,
+        model: preserveBrowseModel(
+          disabledOld?.model ?? state.browse.model,
+          createDisabledSections(inventory, disabledEntries),
+        ),
+        view: "disabled",
+        disabledEntries,
+        ...(state.browse.operations === undefined
+          ? {}
+          : { operations: state.browse.operations }),
+      };
+      const viewSnapshots = {
+        ...Object.fromEntries(
+          Object.entries(oldSnapshots).map(([view, snapshot]) => [
+            view,
+            snapshot === undefined ? snapshot : { ...snapshot, inventory },
+          ]),
+        ),
+        inventory: inventorySnapshot,
+        disabled: disabledSnapshot,
+      };
+      this.stateValue = {
+        screen: "browse",
+        ...inventorySnapshot,
+        viewSnapshots,
+      };
+    } catch {
+      this.stateValue = { screen: "done", report: state.report };
+    }
+  }
+
   private async openView(
     state: TuiBrowseState,
     view: import("./types.js").TuiBrowseView,
@@ -1106,7 +1335,10 @@ function resizeState(
     | TuiReportState
     | TuiAvailabilityPlanState
     | TuiAvailabilityReportState
-    | import("./types.js").TuiAvailabilityExecutingState,
+    | import("./types.js").TuiAvailabilityExecutingState
+    | TuiUpdatePlanState
+    | TuiUpdateReportState
+    | import("./types.js").TuiUpdateExecutingState,
   viewport: TuiBrowseState["model"]["viewport"],
 ):
   | TuiBrowseState
@@ -1116,7 +1348,10 @@ function resizeState(
   | TuiReportState
   | TuiAvailabilityPlanState
   | TuiAvailabilityReportState
-  | import("./types.js").TuiAvailabilityExecutingState {
+  | import("./types.js").TuiAvailabilityExecutingState
+  | TuiUpdatePlanState
+  | TuiUpdateReportState
+  | import("./types.js").TuiUpdateExecutingState {
   if (state.screen === "browse")
     return { screen: "browse", ...resizeBrowse(state, viewport) };
   if (state.screen === "search")
@@ -1160,6 +1395,28 @@ function resizeState(
   }
   if (state.screen === "availability-executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "update-report") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        updateReportScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
+  if (state.screen === "update-plan") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        updatePlanScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
+  if (state.screen === "update-executing")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   return {
@@ -1180,6 +1437,21 @@ export function availabilityApprovalGrants(
 ): readonly ApprovalRequirement[] {
   return availabilityPlan.actions
     .flatMap((action) => action.approvals)
+    .filter(
+      (approval, index, approvals) =>
+        approvals.findIndex(
+          (candidate) =>
+            stringifyModel(candidate, 0) === stringifyModel(approval, 0),
+        ) === index,
+    );
+}
+
+export function updateApprovalGrants(
+  updatePlan: import("../update/types.js").UpdatePlan,
+): readonly ApprovalRequirement[] {
+  return updatePlan.actions
+    .flatMap((action) => action.approvals)
+    .filter((approval) => approval.kind !== "adapter-trust")
     .filter(
       (approval, index, approvals) =>
         approvals.findIndex(
@@ -1327,6 +1599,102 @@ function browseSelectionLabel(model: TuiBrowseState["model"]): string {
     );
   }
   return `${String(model.selected.size)} selected capabilities`;
+}
+
+function updateSelection(state: TuiBrowseState): {
+  readonly target: UpdateTarget | null;
+  readonly notice: string;
+} {
+  const entries = state.model.sections.flatMap((section) => section.entries);
+  const selectedEntries = entries.filter((entry) =>
+    state.model.selected.has(entry.key),
+  );
+  if (
+    state.view === "disabled" &&
+    selectedEntries.some((entry) => entry.key.startsWith("disabled-entry:"))
+  )
+    return {
+      target: null,
+      notice: "Enable a Suspended target before Update.",
+    };
+  if (selectedEntries.length > 0) {
+    const targets =
+      state.view === "disabled"
+        ? disabledSelectionTargets(state.model.sections, state.model.selected)
+        : selectionTargets(state.model.sections, state.model.selected);
+    if (targets.length !== 1)
+      return {
+        target: null,
+        notice: "Update requires exactly one target.",
+      };
+    const target = targets[0]!;
+    return {
+      target:
+        state.view === "disabled"
+          ? availabilityUpdateTarget(state.inventory, target)
+          : (target as UpdateTarget),
+      notice: "",
+    };
+  }
+  const entry = currentEntry(state.model);
+  if (entry === null)
+    return { target: null, notice: "Nothing eligible is focused." };
+  if (entry.key.startsWith("disabled-entry:"))
+    return {
+      target: null,
+      notice: "Enable a Suspended target before Update.",
+    };
+  if (entry.rowKind === "plugin-skill")
+    return {
+      target: null,
+      notice: "Plugin-owned Skills are read-only. Select the complete Plugin.",
+    };
+  if (entry.key.startsWith("finding:"))
+    return { target: null, notice: "System Skills are read-only." };
+  const target =
+    state.view === "disabled"
+      ? availabilityUpdateTarget(
+          state.inventory,
+          entry.availabilityTargets?.[0],
+        )
+      : entry.target;
+  return target === undefined || target === null
+    ? { target: null, notice: "This row is read-only for Update." }
+    : { target, notice: "" };
+}
+
+function availabilityUpdateTarget(
+  inventory: Inventory,
+  target: AvailabilityTarget | undefined,
+): UpdateTarget | null {
+  if (target === undefined) return null;
+  if (target.kind !== "source-group") return target;
+  const group = inventory.groups.find((item) => item.id === target.groupId);
+  return group === undefined
+    ? null
+    : { kind: "source-group", groupId: group.id };
+}
+
+function updateTargetLabel(inventory: Inventory, target: UpdateTarget): string {
+  if (target.kind === "installation")
+    return (
+      inventory.installations.find((item) => item.id === target.installationId)
+        ?.skill.name ?? "selected Installation"
+    );
+  if (target.kind === "logical-skill")
+    return (
+      inventory.logicalSkills.find((item) => item.id === target.logicalSkillId)
+        ?.skill.name ?? "selected Logical Skill"
+    );
+  if (target.kind === "source-group")
+    return (
+      inventory.groups.find((item) => item.id === target.groupId)?.label ??
+      "selected Installation Group"
+    );
+  return (
+    inventory.plugins.find((item) => item.id === target.pluginBoundaryId)
+      ?.pluginId ?? "selected Plugin"
+  );
 }
 
 function movedCursor(current: number, length: number, delta: number): number {

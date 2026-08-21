@@ -25,6 +25,11 @@ import type {
   AvailabilityTarget,
 } from "../availability/types.js";
 import type { DisabledEntry } from "../disabled-storage/types.js";
+import type {
+  UpdateIntent,
+  UpdatePlan,
+  UpdateReport,
+} from "../update/types.js";
 
 export interface TuiDependencies {
   readonly scan: () => Promise<Inventory>;
@@ -49,6 +54,15 @@ export interface TuiDependencies {
     plan: AvailabilityPlan,
     approvals: readonly ApprovalRequirement[],
   ) => Promise<AvailabilityReport>;
+  /** Update values are optional for source compatibility with embedders. */
+  readonly planUpdate?: (
+    inventory: Inventory,
+    intent: UpdateIntent,
+  ) => UpdatePlan;
+  readonly executeUpdate?: (
+    plan: UpdatePlan,
+    approvals: readonly ApprovalRequirement[],
+  ) => Promise<UpdateReport>;
   /** Injected for deterministic retention display and expiry classification. */
   readonly now?: () => Date;
 }
@@ -310,6 +324,31 @@ export interface TuiAvailabilityReportState {
   readonly scrollOffset: number;
 }
 
+export interface TuiUpdatePlanState {
+  readonly screen: "update-plan";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: UpdatePlan;
+  readonly label: string;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+}
+
+export interface TuiUpdateExecutingState {
+  readonly screen: "update-executing";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: UpdatePlan;
+  readonly label: string;
+}
+
+export interface TuiUpdateReportState {
+  readonly screen: "update-report";
+  readonly browse: TuiBrowseSnapshot;
+  readonly report: UpdateReport;
+  readonly label: string;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+}
+
 export interface TuiErrorState {
   readonly screen: "error";
   readonly message: string;
@@ -317,7 +356,7 @@ export interface TuiErrorState {
 
 export interface TuiDoneState {
   readonly screen: "done";
-  readonly report: ExecutionReport | AvailabilityReport | null;
+  readonly report: ExecutionReport | AvailabilityReport | UpdateReport | null;
 }
 
 export type TuiState =
@@ -330,6 +369,9 @@ export type TuiState =
   | TuiAvailabilityPlanState
   | TuiAvailabilityExecutingState
   | TuiAvailabilityReportState
+  | TuiUpdatePlanState
+  | TuiUpdateExecutingState
+  | TuiUpdateReportState
   | TuiTrashReviewState
   | TuiTrashExecutingState
   | TuiTrashReportState
@@ -379,6 +421,7 @@ export type TuiAction =
   | { readonly kind: "switch-view"; readonly view: TuiBrowseView }
   | { readonly kind: "disable-review" }
   | { readonly kind: "enable-review" }
+  | { readonly kind: "update-review" }
   | { readonly kind: "restore-review" }
   | { readonly kind: "purge-review" }
   | { readonly kind: "quit" };
@@ -386,11 +429,12 @@ export type TuiAction =
 export type TuiOutcome =
   | {
       readonly status: "completed";
-      readonly report: ExecutionReport | AvailabilityReport;
+      readonly report: ExecutionReport | AvailabilityReport | UpdateReport;
     }
   | {
       readonly status: "cancelled";
-      readonly report: ExecutionReport | AvailabilityReport | null;
+      readonly report:
+        ExecutionReport | AvailabilityReport | UpdateReport | null;
     }
   | { readonly status: "failed"; readonly message: string };
 

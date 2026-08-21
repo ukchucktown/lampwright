@@ -2,9 +2,9 @@
 
 Running `lampwright` with no arguments opens the interactive inventory. The
 terminal UI is a thin presentation layer over Inventory, Planning, Execution,
-and Disabled Storage. Browsing reads immutable Inventory/Disabled values;
-reviews request complete Removal or Availability Plans; confirmation passes
-their exact approval requirements to Execution.
+and Disabled Storage. Browsing reads immutable Inventory/Disabled values.
+Reviews request complete Removal, Availability, or Update Plans. Confirmation
+passes the exact action approval requirements to Execution.
 
 ## Layout
 
@@ -12,9 +12,9 @@ The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl-t` cycles the
 three views and each header label is clickable. Each view retains its own
 cursor, panes, scrolling, search, and additive selection through search,
 review, report, resize, and tab round-trips.
-Embedding hosts receive the actual final report type: Removal completion returns
-an `ExecutionReport`, while disable/enable completion returns an
-`AvailabilityReport`.
+Embedding hosts receive the actual final report type. Removal completion returns
+an `ExecutionReport`. Disable or Enable completion returns an
+`AvailabilityReport`. Update completion returns an `UpdateReport`.
 
 Inventory omits an ordinary Skill only when every Harness Exposure represented
 by its Installation is disabled; partially disabled Skills remain visible.
@@ -34,6 +34,14 @@ disabled or enabled. System Skills remain protected in every view.
 The same name-only regular-expression search is available in Disabled; results
 come only from its per-exposure and per-entry projection, and applying or
 cancelling search restores that view's independent position and selection.
+
+Press `u` in Inventory or Disabled to review Update for exactly one staged
+target. With no staged target, `u` uses the focused row. A fully staged Group is
+one complete target. Planning must prove that Update preserves a Native Disable
+target's availability state. A Suspended entry directs the operator to Enable
+it first. Plugin child rows and System Skills remain
+read-only. Select a complete supported Plugin boundary to review Plugin Update.
+Update adds no Updates view, remote check, or update-available badge.
 
 Availability review distinguishes **Native** configuration control from
 **Suspended** filesystem storage, names affected harnesses, and presents every
@@ -165,7 +173,8 @@ Sections come from declared evidence, never from a name or a path:
 - `Plugins`, listing each Plugin boundary, its owned Skill names and resources,
   and the agent harness tied to it. A custom Plugin boundary can be selected
   for complete Plugin removal with Enter or whole-Plugin Native Disable with
-  `d`. A Plugin the agent runtime ships with itself is marked and cannot be
+  `d`. Press `u` to review Update of the complete supported Plugin. A Plugin the
+  agent runtime ships with itself is marked and cannot be
   selected. Each boundary is followed by read-only Skill rows; focusing one
   shows only that Skill's description and paths in the bottom pane. This keeps
   large Plugins navigable through the ordinary entry scrollbar without turning
@@ -217,10 +226,10 @@ targets. Custom Plugin rows resolve to their complete Plugin boundary; their
 detail and review name the owned Skills and other known resources that removal
 affects. Their indented Skill rows are for inspection and never select the
 whole Plugin. The same parent row resolves to a complete Plugin Availability
-Target for `d`, while Enter remains Removal. Runtime-default Plugin and System
-Skill rows remain visible but have no mutable target. With nothing selected,
-`enter` reviews the removable row under the cursor and does nothing on an
-informational row.
+Target for `d` and a complete Plugin Update Target for `u`. Enter remains
+Removal. Runtime-default Plugin and System Skill rows remain visible but have
+no mutable target. With nothing selected, `enter` reviews the removable row
+under the cursor and does nothing on an informational row.
 
 `q` exits the TUI immediately from every screen except search, where it is valid
 regex input; Ctrl-C remains an alternate exit everywhere. In the inventory,
@@ -292,21 +301,47 @@ It is offered for separate review only and never runs automatically: select it,
 open it with `f`, then confirm it independently. It has its own targets,
 actions, verification checks, identifiers, and approval boundary.
 
+### Update review and report
+
+Update review shows the exact Owner, current revision, source, ref, Scope,
+invocation, effects, network use, and ephemeral package trust. It also shows
+every block, warning, and verification check. The review states that Update has
+no automatic rollback and creates no Trash or Disabled Storage copy. The body
+supports the same details, paging, wheel scrolling, and resize clamping as the
+other plan screens. A blocked plan cannot be confirmed.
+
+Pressing `y` grants the approval requirements shown for Update actions, except
+Adapter trust. Adapter trust must already exist before execution. Pressing `y`
+never grants Adapter trust.
+The executing screen remains non-interactive until the shared Execution module
+returns an `UpdateReport`.
+
+The report shows every target and its status: `updated`, `unchanged`,
+`partially-updated`, `blocked`, `failed`, or `unresolved`. An `unchanged` result
+means only that local verification found no proven change. It does not mean that
+the target is up-to-date with a remote source. Press Escape to run a fresh
+Inventory scan and read Disabled Storage. Lampwright then returns to Inventory
+and shows the saved target label with its result. The refresh preserves the
+other view snapshots.
+
 ## Limited terminals
 
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
 `detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
-`disable`, `disabled`, `trash`, and `quit`. In Disabled, `enable` opens review;
-`inventory` and `trash` switch peer views, and navigation, selection, and
+`disable`, `update`, `disabled`, `trash`, and `quit`. In Disabled, `enable` opens
+review. `update` opens Update review in Inventory or Disabled. The `inventory`
+and `trash` commands switch peer views. Navigation, selection, and
 `search <regex>` match Inventory. Search accepts a regex, `up`, `down`, `take`,
 `all`, `clear`, `done`, and `cancel`. Removal and Availability plan screens
 accept `yes`, `no`, `details`, `up`, `down`, `pageup`, `pagedown`, `force`, and
-`quit` (`force` has no effect where the plan does not permit it). Report screens
-accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`; Availability
-reports also accept `back` to refresh Inventory and Disabled before returning,
-while Removal reports add `previous`, `next`, and `fallback`. End-of-input
-cancels safely.
+`quit` (`force` has no effect where the plan does not permit it). Update plan
+screens accept the same commands, but `force` has no effect. Report screens
+accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`. Availability
+reports also accept `back`. This command refreshes Inventory and Disabled, and
+then returns to Inventory. Update reports accept `back` and use the same refresh.
+Removal reports add `previous`, `next`, and `fallback`. End-of-input cancels
+safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 
@@ -321,7 +356,9 @@ and interaction tests. `TuiDependencies` requires Removal `scan`, `plan`, and
 `execute` functions and optionally accepts Availability `listDisabled`,
 `planAvailability`, and `executeAvailability` functions. These use the public
 Inventory, DisabledEntry, Removal/Availability Plan, ApprovalRequirement,
-ExecutionReport, and AvailabilityReport values. `TuiTerminal` consumes
+ExecutionReport, and AvailabilityReport values. Optional `planUpdate` and
+`executeUpdate` functions use the public Update Plan and Update Report values.
+`TuiTerminal` consumes
 rendered state through `render`, supplies semantic `TuiAction` values through
 `readAction`, and is always closed when the session ends.
 

@@ -1100,6 +1100,9 @@ async function main(): Promise<void> {
             approvals,
             disabledStorage,
           ),
+        planUpdate,
+        executeUpdate: (updatePlan, approvals) =>
+          productionExecuteUpdate(updatePlan, [], [], [], approvals),
       },
       createNodeTuiTerminal(),
     );
