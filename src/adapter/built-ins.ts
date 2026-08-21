@@ -229,6 +229,24 @@ export function vercelSkillsRemovalArguments(
   );
 }
 
+function updateArgumentTemplates(scope: "global" | "project") {
+  return [
+    { kind: "literal" as const, value: "update" },
+    { kind: "value" as const, from: "externalId" as const },
+    { kind: "literal" as const, value: `--${scope}` },
+    { kind: "literal" as const, value: "--yes" },
+  ];
+}
+
+export function vercelSkillsUpdateArguments(
+  scope: "global" | "project",
+  externalId: string,
+): readonly string[] {
+  return updateArgumentTemplates(scope).map((argument) =>
+    argument.kind === "literal" ? argument.value : externalId,
+  );
+}
+
 const vercelSkills = {
   schemaVersion: 1,
   id: VERCEL_SKILLS_ADAPTER_ID,
@@ -285,6 +303,47 @@ const vercelSkills = {
 const vercelSkillsContent = `${JSON.stringify(vercelSkills, null, 2)}\n`;
 export const VERCEL_SKILLS_ADAPTER_HASH = createHash("sha256")
   .update(vercelSkillsContent)
+  .digest("hex");
+
+// Vercel reconciliation needs conditional lock locations and a dynamic set of
+// agent artifacts that the generic v2 Adapter schema cannot declare. The
+// package-owned scanner therefore materializes Update authority directly. Its
+// ephemeral trust decision is bound to this closed operation policy instead of
+// the v1 removal-only Adapter document.
+const vercelSkillsUpdateAuthority = {
+  adapterId: VERCEL_SKILLS_ADAPTER_ID,
+  operations: (["global", "project"] as const).map((scope) => ({
+    operationId: `update-${scope}-skill`,
+    direct: {
+      executable: VERCEL_SKILLS_EXECUTABLE,
+      arguments: updateArgumentTemplates(scope),
+    },
+    ephemeral:
+      scope === "global"
+        ? {
+            runner: "npx",
+            packageName: VERCEL_SKILLS_PACKAGE_NAME,
+            packageVersion: VERCEL_SKILLS_PACKAGE_VERSION,
+            mayDownload: true,
+            arguments: updateArgumentTemplates(scope),
+            workingDirectory: "isolated-temporary",
+          }
+        : null,
+    workingDirectory:
+      scope === "project" ? "exact-recorded-workspace" : "isolated-temporary",
+  })),
+  effects: {
+    mutationRoots:
+      "every bounded agent candidate with materialized existence and protection",
+    configurationPaths: "exact resolved lock",
+  },
+  network: "required",
+  preserves: ["source", "ref", "scope", "owner", "strong-identity"],
+  verifies: ["artifact-presence", "lock-record", "content", "lock-revision"],
+} as const;
+const vercelSkillsUpdateAuthorityContent = `${JSON.stringify(vercelSkillsUpdateAuthority, null, 2)}\n`;
+export const VERCEL_SKILLS_UPDATE_AUTHORITY_HASH = createHash("sha256")
+  .update(vercelSkillsUpdateAuthorityContent)
   .digest("hex");
 
 const claudeCodePluginsContent = `${JSON.stringify(claudeCodePlugins, null, 2)}\n`;

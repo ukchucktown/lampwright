@@ -279,8 +279,19 @@ installed executable because the Manager derives project Scope from its current
 directory.
 
 The plan names every known artifact and Manager record that the operation can
-change. The plan warns when Inventory cannot prove that the installed content
-matches the Owner record. Proven local changes block Update.
+change. The plan also names each bounded agent path that the nested Manager
+operation can create. Each absent path includes `exists: false` and protection
+evidence from its nearest existing parent. Final presence checks apply only to
+artifacts that existed before Update. The plan warns when Inventory cannot
+prove that the installed content matches the Owner record. Proven local changes
+block Update.
+
+The version 1 declarative Vercel Adapter grants Managed Removal authority only.
+Trusted package reconciliation code materializes Vercel Update authority
+because conditional lock locations and a dynamic set of agent artifacts cannot
+fit the declarative operation. The global ephemeral approval binds to the exact
+Update arguments, package version, and effect policy that the package code
+materializes. The approval does not reuse the version 1 Removal Adapter hash.
 
 ### Claude Code Plugins
 
