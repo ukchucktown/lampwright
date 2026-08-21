@@ -13,3 +13,4 @@ export type {
 } from "./filesystem/artifact-filesystem.js";
 export * from "./state/index.js";
 export * from "./tui/index.js";
+export * from "./update/index.js";

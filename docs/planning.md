@@ -217,3 +217,49 @@ Exact ephemeral package execution adds matching package-trust approval and a
 possible-download warning. V1 accepts only the closed `npx` runner, a valid npm
 package identifier, and an exact Semantic Version; direct commands remain a
 separate invocation variant.
+
+## Update planning
+
+The Update planner accepts one explicit target:
+
+```ts
+planUpdate(inventory: Inventory, intent: UpdateIntent): UpdatePlan
+```
+
+`UpdateIntent` contains one Installation, Logical Skill, Installation Group,
+or complete Plugin boundary. The intent model has no bulk target or remote
+discovery variant. The planner reads only the normalized Update evidence in
+Inventory and performs no I/O.
+
+Planning expands a Logical Skill or an Installation Group into its exact
+members. Every member must contain complete Managed Update evidence. An
+unsupported or unresolved member blocks the complete target and produces no
+action. A Plugin-owned child Skill, a System Skill, a runtime-default Plugin,
+an unavailable operation, an untrusted Adapter, a protected effect, proven
+local changes, unresolved availability, and a dependency cycle also block the
+complete target. Every Update block is absolute, so `force` does not create an
+action for a blocked target.
+
+Each action contains the complete Owner operation from Inventory. This value
+includes the exact invocation, the working directory, the source policy, the
+current revisions, the effects, the network disclosure, the package
+disclosure, the local-change state, and the verification evidence. Direct
+invocations require an exact directory or a new isolated directory. Ephemeral
+invocations also name the exact package tuple and require the matching package
+approval.
+
+The planner orders selected Hard Dependencies at the action level. A failure
+therefore stops dependent actions, but an independent branch continues.
+Hard Dependencies, Soft References, network access, package downloads, and
+whole-Plugin effects remain visible as warnings. Each mutation root must cover
+every selected artifact that the Owner can change. A root that contains a
+known unselected Installation or Plugin boundary blocks the complete target.
+The plan records the full lifecycle facts for each selected boundary. Execution
+uses those facts to reject a new independent Installation or Plugin.
+
+Each verification check records the strong identity, the source, the ref, the
+Scope, the Owner, and the current revision. The check also records each
+resolved Harness Exposure state. A complete Plugin check records the Plugin
+availability state and every represented child exposure. A non-Plugin check
+also records the exact exposure set. This evidence lets a fresh scan prove that
+Update kept the prior availability state.
