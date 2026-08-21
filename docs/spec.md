@@ -1,13 +1,26 @@
 # Lampwright v1 specification
 
 Status: Accepted product direction; implementation under active refinement
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 ## 1. Summary
 
-`lampwright` is a cross-platform terminal application that discovers, disables, enables, and safely removes AI agent skills regardless of whether they were installed as standalone files, by a skill manager, or through an agent plugin system.
+`lampwright` is a cross-platform terminal application that discovers, updates,
+disables, enables, and safely removes AI agent skills regardless of whether
+they were installed as standalone files, by a skill manager, or through an
+agent plugin system.
 
-The application is outcome-oriented: a user chooses a logical skill, one physical installation, or a containing plugin and asks Lampwright to control that target in the selected scope. Disabling prefers a harness-supported control and may suspend a complete planner-authorized artifact set when no safe native control exists. For an explicitly supported Manager-owned Installation, suspension preserves the Manager record and displaces every declared discovery artifact. Removal determines ownership, prefers the owner's supported uninstall operation, and offers a separately confirmed recoverable filesystem fallback when managed removal is unavailable or fails.
+The application is outcome-oriented: a user chooses a logical skill, one
+physical installation, or a containing plugin and asks Lampwright to control
+that target in the selected scope. Update asks the current Owner to refresh an
+existing lifecycle boundary under its recorded source policy. Disabling
+prefers a harness-supported control and may suspend a complete
+planner-authorized artifact set when no safe native control exists. For an
+explicitly supported Manager-owned Installation, suspension preserves the
+Manager record and displaces every declared discovery artifact. Removal
+determines ownership, prefers the owner's supported uninstall operation, and
+offers a separately confirmed recoverable filesystem fallback when managed
+removal is unavailable or fails.
 
 The primary interface is an interactive terminal UI. The supported npm
 invocation is version-pinned as `npx lampwright@0.1.0` for the first release.
@@ -27,7 +40,10 @@ automation and agent sessions.
 8. **Project source is protected.** Files inside a Git worktree are immutable unless Git classifies them as ignored.
 9. **Pluggable support without executable extensions.** Tool support is described through local, versioned JSONC adapters.
 10. **Cross-platform behavior.** macOS, Linux, and Windows are first-class; adapters do not assume a shell or POSIX paths.
-11. **Small command surface.** The interface stays focused on scan, disable, enable, remove, restore, and purge.
+11. **Owner-controlled Update.** Update uses the current Owner operation and
+    never uses a filesystem or remove-and-install substitute.
+12. **Small command surface.** The interface stays focused on scan, update,
+    disable, enable, remove, restore, and purge.
 
 ## 3. Goals
 
@@ -35,6 +51,8 @@ automation and agent sessions.
 - Search installed skills by normalized and tool-specific metadata.
 - Distinguish logical skills from their physical installations.
 - Explain who owns each installation and what else would be affected by removal.
+- Update an existing Manager-owned Installation or complete Plugin boundary
+  through its current Owner.
 - Disable unused standalone and explicitly supported Manager-owned Skills without deleting their content, and enable them again.
 - Remove standalone, manager-owned, and independently selectable plugin-owned skills.
 - Explicitly uninstall a non-default containing Plugin selected from Inventory
@@ -56,6 +74,11 @@ automation and agent sessions.
 - Silently uninstalling plugins as part of an ordinary remove-all operation.
 - Providing transactional rollback across external managers.
 - Measuring or promising an exact token saving from disabled Skills.
+- Finding remote updates during Inventory scan, browse, Planning, or dry-run.
+- Synchronizing arbitrary filesystem-owned Skills with remote sources.
+- Constructing Update from Remove followed by Install.
+- Updating every target through one `--all` intent.
+- Providing automatic rollback for an Owner Update.
 
 ## 5. Runtime and distribution
 
@@ -209,6 +232,7 @@ An adapter may declare:
 - Ownership and grouping rules
 - Hard-dependency declarations
 - Managed removal actions
+- Managed Update actions in Adapter schema version 2
 - Native enable and disable actions when the harness exposes a safe declarative
   lifecycle control
 - Ephemeral package runner actions
@@ -233,6 +257,10 @@ The first release supports:
 5. Gemini CLI standalone skills and extensions
 
 The generic fallback remains available when no adapter claims ownership.
+
+Adapter schema version 1 remains valid and grants no Update authority. Adapter
+schema version 2 distinguishes Managed Removal from Managed Update. It retains
+the structured command, local trust, protection, and verification requirements.
 
 ## 9. Removal planning
 
@@ -303,6 +331,28 @@ safeguards, but never ownership, completeness, Git, System Skill, filesystem,
 integrity, collision, or configuration-protection blocks. A Manager-created
 replacement at a displaced path is an Enable conflict and is never overwritten.
 
+### 9.4 Update planning
+
+Every Update mutation starts with an Update Plan from a fresh Inventory. Update
+uses only a supported Owner lifecycle operation. Planning never constructs an
+Update from filesystem replacement or from Remove followed by Install.
+
+An Update Target is one Logical Skill, Installation, declared Installation
+Group, or complete Plugin boundary. A Logical Skill or Installation Group
+requires safe Update authority for every represented Installation. Plugin-owned
+Skills are not independent Update Targets.
+
+Inventory materializes the exact Owner invocation, current revision evidence,
+recorded source and ref, declared mutation roots, network disclosure, trust,
+and verification evidence. Planning uses only that local evidence. It does not
+contact a remote source or claim that an update is available.
+
+Planning blocks System Skills, runtime-default Plugins, Suspended Disable
+entries, Git-protected effects, read-only effects, ambiguous selectors,
+untrusted commands, proven local changes, and incomplete Owner evidence. Force
+does not override these blocks. [Owner-managed Update](./update.md) defines the
+complete target and plan rules.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal
@@ -340,6 +390,24 @@ Enabling never overwrites an occupied or changed destination. A final rescan
 and Disabled Storage listing verify every affected exposure and report blocked,
 partial, failed, unchanged, disabled, or enabled outcomes honestly.
 
+### 10.6 Managed Update execution
+
+Execution accepts only the structured Owner invocation and the declared effects
+in an approved fresh Update Plan. The Owner operation may access the network
+only after the plan discloses that behavior. Execution uses the same freshness,
+trust, process, protection, audit, dependency, and rescan rules as Managed
+Removal.
+
+Update has no brute-force fallback. Update also has no automatic rollback in
+the first version. Quarantine and Disabled Storage do not store Update
+preimages.
+
+A final rescan reports `updated`, `unchanged`, `partially-updated`, `blocked`,
+`failed`, or `unresolved`. Lampwright reports `updated` only when observable
+revision or content evidence changes and the lifecycle identity stays stable.
+Lampwright does not describe `unchanged` as `up-to-date` without verifiable
+remote revision evidence.
+
 ## 11. Quarantine and local state
 
 Read-only scans, TUI browsing, and dry runs create no files.
@@ -349,6 +417,7 @@ Persistent state is created lazily only for:
 - Local adapter trust decisions
 - Ephemeral package trust decisions
 - Removal audit records
+- Update audit records
 - Quarantine manifests and content
 - Disabled Storage manifests and suspended content
 - Optional rebuildable search cache
@@ -378,6 +447,7 @@ The intended minimal command surface is:
 ```console
 lampwright                  # interactive fuzzy-search UI
 lampwright scan             # print inventory
+lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # disable selected target(s) without removal
 lampwright enable <target>  # enable native or suspended target(s)
 lampwright remove <target>  # plan and remove selected target(s)
@@ -393,7 +463,10 @@ Shared automation options include:
 - `--force` to override removable safety blocks such as dependencies or ambiguity
 - `--adapter <path>` to load a local adapter
 
-The exact target-selector syntax will be finalized with the core inventory model. Interactive and non-interactive paths must call the same planners, executors, and Disabled Storage module.
+The first Update version requires an explicit target and does not accept
+`--all`. Update uses the existing target-selector syntax. Interactive and
+non-interactive paths must call the same planners, executors, and Disabled
+Storage module.
 
 ## 13. Cross-platform requirements
 
@@ -408,7 +481,11 @@ The exact target-selector syntax will be finalized with the core inventory model
 
 Lampwright has no telemetry. Inventory, paths, skill metadata, and search queries remain local.
 
-Network access is not required for scanning, search, planning, quarantine, restoration, or local adapters. An explicitly approved ephemeral package runner may access the network as described in its plan.
+A scan, search, plan, dry-run, quarantine, restore, or local Adapter operation
+uses no network access. An explicitly approved ephemeral package runner may
+access the network as described in its plan. A reviewed Managed Update may also
+let the Owner process access the network. Lampwright discloses that access
+before execution and does not perform a hidden remote Update check.
 
 ## 15. MVP acceptance criteria
 
@@ -438,6 +515,9 @@ The v1 MVP is complete when:
     sets may be suspended without changing Manager records, while System,
     Plugin-owned, incomplete, ambiguous-name, and Git-protected cases remain
     untouched.
+
+The post-MVP Update acceptance criteria are defined in
+[Owner-managed Update](./update.md#acceptance-criteria).
 
 ## 16. Delivery sequence
 
