@@ -9,6 +9,7 @@ import type {
   AvailabilityIntent,
 } from "../availability/types.js";
 import type { DisabledEntry } from "../disabled-storage/types.js";
+import type { UpdateTarget } from "../update/types.js";
 
 import { PlanningError } from "./types.js";
 
@@ -99,6 +100,62 @@ export function resolveTargetSelectors(
     }
   }
   return targets;
+}
+
+/** Resolves the single stable selector accepted by targeted Update. */
+export function resolveUpdateSelector(
+  inventory: Inventory,
+  selector: string,
+): UpdateTarget {
+  const separator = selector.indexOf(":");
+  const kind = selector.slice(0, separator);
+  const id = selector.slice(separator + 1);
+  if (separator < 1 || id.length === 0)
+    throw new PlanningError("invalid-intent", `invalid selector: ${selector}`);
+  if (kind === "installation") {
+    const installation = inventory.installations.find(
+      (candidate) => candidate.id === id,
+    );
+    if (installation === undefined)
+      throw new PlanningError(
+        "target-not-found",
+        `installation selector did not match Inventory: ${id}`,
+      );
+    return { kind, installationId: installation.id };
+  }
+  if (kind === "logical-skill") {
+    const logical = inventory.logicalSkills.find(
+      (candidate) => candidate.id === id,
+    );
+    if (logical === undefined)
+      throw new PlanningError(
+        "target-not-found",
+        `logical-skill selector did not match Inventory: ${id}`,
+      );
+    return { kind, logicalSkillId: logical.id };
+  }
+  if (kind === "group") {
+    const group = inventory.groups.find((candidate) => candidate.id === id);
+    if (group === undefined)
+      throw new PlanningError(
+        "target-not-found",
+        `group selector did not match a Group: ${id}`,
+      );
+    return { kind: "source-group", groupId: group.id };
+  }
+  if (kind === "plugin") {
+    const plugin = inventory.plugins.find((candidate) => candidate.id === id);
+    if (plugin === undefined)
+      throw new PlanningError(
+        "target-not-found",
+        `plugin selector did not match Inventory: ${id}`,
+      );
+    return { kind, pluginBoundaryId: plugin.id };
+  }
+  throw new PlanningError(
+    "invalid-intent",
+    `unknown Update selector kind: ${kind}`,
+  );
 }
 
 /** Resolves only stable Availability identifiers; names are never selectors. */

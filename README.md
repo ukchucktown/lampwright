@@ -51,6 +51,7 @@ or search queries.
 ```console
 lampwright                  # interactive fuzzy-search UI
 lampwright scan             # print the live Inventory
+lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # natively disable or safely suspend targets
 lampwright enable <target>  # enable native or Disabled Storage targets
 lampwright remove <target>  # review and remove selected target(s)
@@ -60,6 +61,8 @@ lampwright purge <entry>    # permanently delete Quarantine entries
 
 See [Reversible Skill availability](./docs/availability.md) for Native versus
 Suspended state, safe recovery, reports, and platform behavior.
+See [Targeted Owner Update](./docs/update.md) for Update authority,
+verification, and the no-rollback model.
 
 Use `lampwright --help` for selectors, approvals, JSON output, dry-run, and
 stable exit statuses. See the [terminal UI](./docs/tui.md) and
@@ -72,6 +75,7 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Module design](./docs/module-design.md)
 - [Core model](./docs/model.md)
 - [Reversible Skill availability](./docs/availability.md)
+- [Targeted Owner Update](./docs/update.md)
 - [Inventory scanning](./docs/inventory.md)
 - [Adapter runtime](./docs/adapters.md)
 - [Removal planning](./docs/planning.md)
