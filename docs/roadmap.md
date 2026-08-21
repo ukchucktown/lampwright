@@ -44,3 +44,15 @@ Issue #15 prepares a release but explicitly does not publish to npm or make the 
   4. [#76 Harden reversible Skill availability across platforms](https://github.com/ukchucktown/lampwright/issues/76) closes the feature.
   5. [#77 Suspend complete Manager-owned Skill artifact sets](https://github.com/ukchucktown/lampwright/issues/77) extends Suspended Disable after the original interfaces and hardening are complete.
   6. [#91 Add native disable and enable for complete Plugin boundaries](https://github.com/ukchucktown/lampwright/issues/91) extends the same Availability interfaces without allowing individual Plugin-owned Skill control or Disabled Storage fallback.
+
+## Targeted owner-managed Update
+
+- [#100 Epic: targeted Owner-managed Update lifecycle](https://github.com/ukchucktown/lampwright/issues/100)
+  1. [#101 Owner-managed Update specification and delivery plan](https://github.com/ukchucktown/lampwright/issues/101) defines the accepted behavior and safety rules.
+  2. [#102 Adapter v2 lifecycle-operation schema](https://github.com/ukchucktown/lampwright/issues/102) depends on #101.
+  3. [#103 Planner-ready Update evidence in Inventory](https://github.com/ukchucktown/lampwright/issues/103) depends on #102.
+  4. [#104 Targeted Update Planning and Execution interfaces](https://github.com/ukchucktown/lampwright/issues/104) depends on #103.
+  5. [#105 Vercel Manager-owned Skill Update](https://github.com/ukchucktown/lampwright/issues/105) depends on #104 and proves the first vertical slice.
+  6. [#106 Stable targeted Update command and JSON output](https://github.com/ukchucktown/lampwright/issues/106) and [#107 Targeted Update review in the terminal UI](https://github.com/ukchucktown/lampwright/issues/107) depend on #105 and can proceed in parallel.
+  7. [#108 Cross-platform hardening for targeted Update](https://github.com/ukchucktown/lampwright/issues/108) depends on #106 and #107.
+  8. [#109 Claude Code Plugin Managed Update](https://github.com/ukchucktown/lampwright/issues/109) and [#110 Gemini extension Managed Update](https://github.com/ukchucktown/lampwright/issues/110) depend on #108 and can proceed in parallel.

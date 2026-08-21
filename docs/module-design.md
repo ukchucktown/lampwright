@@ -33,6 +33,9 @@ The module owns:
 - Materialization of per-harness Skill and complete-Plugin availability status,
   safe native enablement controls, exact configuration evidence, and
   availability verification
+- Materialization of planner-ready Managed Update operations, current revision
+  evidence, source policy, declared mutation roots, network disclosure, local
+  change evidence, and concrete Update verification
 - Semantic Inventory fingerprinting over normalized evidence, excluding scan
   time
 
@@ -54,6 +57,7 @@ planAvailability(
   disabledEntries: readonly DisabledEntry[],
   intent: AvailabilityIntent,
 ): AvailabilityPlan
+planUpdate(inventory: Inventory, intent: UpdateIntent): UpdatePlan
 ```
 
 This is an in-process module with no side effects. It owns:
@@ -68,6 +72,8 @@ This is an in-process module with no side effects. It owns:
 - Normalized intent materialization for fresh-scan/replan validation
 - Harness Exposure expansion, Native Disable selection, Suspended Disable
   eligibility, name-control ambiguity, and enablement ordering
+- Update Target expansion, complete-member authority, Owner operation
+  selection, local-change blocks, and Update verification expectations
 
 Planning consumes only materialized Inventory evidence. It does not load or
 interpret Adapter catalogs and does not probe the live machine. This preserves
@@ -91,6 +97,10 @@ execution.executeAvailability(
   plan: AvailabilityPlan,
   approvals: Approvals,
 ): Promise<AvailabilityReport>
+execution.executeUpdate(
+  plan: UpdatePlan,
+  approvals: Approvals,
+): Promise<UpdateReport>
 ```
 
 The module owns:
@@ -105,6 +115,7 @@ The module owns:
 - Audit reporting
 - Exact native availability configuration mutation and verification
 - Suspended Disable and Enable through the Disabled Storage module
+- Managed Update invocation and lifecycle-identity verification
 
 `ExecutionModuleOptions` injects a fresh Inventory scan closure, pure replanner,
 Quarantine module, structured process runner, live Git inspector, package-trust
@@ -138,6 +149,13 @@ Availability execution uses the same freshness, protection, exact-preimage,
 dependency, audit, rescan, and typed-report rules as removal. It does not turn a
 name match into identity authority, construct a harness command in the
 presentation layer, or move a fallback artifact outside Disabled Storage.
+
+Update execution also uses the shared freshness, process, trust, dependency,
+audit, and rescan implementation. It accepts only a self-contained Update Plan.
+It does not contact a remote source before Execution, construct an Owner command
+from presentation state, create a filesystem fallback, or write an Update
+preimage to Quarantine or Disabled Storage. The final Inventory must preserve
+the strong identity, source, ref, Scope, and Owner of each successful target.
 
 ## Disabled Storage module
 
@@ -217,17 +235,23 @@ Interface:
 loadAdapters(request: AdapterLoadRequest): Promise<AdapterCatalog>
 ```
 
-The module owns JSONC parsing, schema validation, operating-system variants, trust checks, structured command templates, and compilation into internal discovery/removal rules. Application callers do not interpret adapter files.
+The module owns JSONC parsing, schema validation, operating-system variants,
+trust checks, structured command templates, and compilation into internal
+discovery and lifecycle rules. Adapter schema version 1 remains removal-only.
+Adapter schema version 2 adds an explicit Managed Update operation. Application
+callers do not interpret adapter files.
 
 Built-in ecosystem support should use the same compiled adapter representation as local adapters where possible. Ecosystem-specific code is justified only when the declarative schema cannot express a required read-only parser or platform behavior; it remains behind the Inventory or Execution interfaces rather than becoming a new external seam.
 
 ## Presentation modules
 
-The terminal UI and CLI format Inventory, RemovalPlan, and ExecutionReport values and gather user intent or approvals. They must not:
+The terminal UI and CLI format Inventory, plan, and report values and gather
+user intent or approvals. They must not:
 
 - Traverse skill directories directly
 - Infer ownership or identity
 - Invoke managers
+- Invoke Owner Update operations
 - Delete, quarantine, or restore files
 - Edit harness availability settings or manipulate Disabled Storage directly
 - Reimplement dependency or protection rules
@@ -244,4 +268,5 @@ After the core types and fixture harness are merged, future sessions can work in
 - Quarantine implementation
 - Cross-platform fixture coverage
 
-Each adapter issue should add fixtures and assert observable Inventory, RemovalPlan, and ExecutionReport behavior through the deep module interfaces.
+Each adapter issue should add fixtures and assert observable Inventory, plan,
+and report behavior through the deep module interfaces.

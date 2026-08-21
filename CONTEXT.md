@@ -66,6 +66,16 @@ A selected Logical Skill, individual Installation, declared Installation Group, 
 **Availability Plan**:
 The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to disable or enable one or more Availability Targets.
 
+**Update Target**:
+A selected Logical Skill, individual Installation, declared Installation Group, or complete Plugin boundary that the user intends the current Owner to update.
+
+**Update Plan**:
+The ordered, reviewable set of Owner actions, warnings, blocked operations, and verification checks required to update one or more Update Targets.
+
+**Managed Update**:
+An Owner-controlled refresh of an existing Installation or complete Plugin boundary under its recorded source, ref, and Scope.
+_Avoid_: Reinstall, sync, upgrade
+
 **Native Disable**:
 A reversible change through a harness-supported control that keeps the Installation or complete Plugin at its original location.
 _Avoid_: Remove, uninstall
