@@ -19,7 +19,9 @@ import {
   VERCEL_SKILLS_EXECUTABLE,
   VERCEL_SKILLS_PACKAGE_NAME,
   VERCEL_SKILLS_PACKAGE_VERSION,
+  VERCEL_SKILLS_UPDATE_AUTHORITY_HASH,
   vercelSkillsRemovalArguments,
+  vercelSkillsUpdateArguments,
 } from "../adapter/built-ins.js";
 import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
 import { resolvedArgumentSafetyIssue } from "../model/command-safety.js";
@@ -30,11 +32,15 @@ import type {
   InstallationId,
   JsonObject,
   ManagedRemovalEvidence,
+  ManagedUpdateEffect,
+  ManagedUpdateEvidence,
   ProtectionStatus,
   Scope,
   Sha256Digest,
   StrongIdentityEvidence,
   SupplementalRemovalArtifact,
+  UpdateEvidence,
+  UpdateLocalChangeEvidence,
   WeakIdentityEvidence,
 } from "../model/types.js";
 import { hashSkillDirectory } from "./content-hash.js";
@@ -50,6 +56,7 @@ import { readSkillMetadata } from "./metadata.js";
 import {
   vercelAgentPaths,
   vercelCanonicalPath,
+  vercelUpdateCandidatePaths,
 } from "./vercel-skills-paths.js";
 import type {
   InventoryCommandRunner,
@@ -173,15 +180,11 @@ async function materializeLockEntry(input: {
   const topologyIssue = await unexpectedArtifactTopology(
     artifacts,
     canonicalPath,
-    input.lock.format === "project"
-      ? stringField(input.entry.computedHash)
-      : null,
   );
-  const artifactUnsafeReason = input.collision
+  const identityUnsafeReason = input.collision
     ? "sanitized Vercel skill keys collide on one artifact path"
     : topologyIssue;
   const selectorIssue = nativeSelectorIssue(input.lockKey);
-  const managedUnsafeReason = artifactUnsafeReason ?? selectorIssue;
   const canonicalArtifact = artifacts.find(
     (artifact) => pathKey(artifact.location.path) === pathKey(canonicalPath),
   );
@@ -208,7 +211,7 @@ async function materializeLockEntry(input: {
   const fallbackSkillName =
     input.lockKey.trim().length > 0 ? input.lockKey : sanitizedName;
   const metadata =
-    artifactUnsafeReason === null
+    identityUnsafeReason === null
       ? await skillMetadata(primaryLocation, fallbackSkillName)
       : null;
   const sourceType = stringField(input.entry.sourceType);
@@ -222,7 +225,7 @@ async function materializeLockEntry(input: {
   const skillPath = stringField(input.entry.skillPath);
   const pluginName = stringField(input.entry.pluginName);
   const status =
-    artifactUnsafeReason !== null || metadata?.status === "unresolved"
+    identityUnsafeReason !== null || metadata?.status === "unresolved"
       ? "unresolved"
       : primary === undefined || isBroken(primary.location)
         ? "broken"
@@ -253,7 +256,7 @@ async function materializeLockEntry(input: {
     },
   ];
   const contentHash =
-    artifactUnsafeReason !== null ||
+    identityUnsafeReason !== null ||
     primary === undefined ||
     isBroken(primary.location)
       ? null
@@ -267,6 +270,9 @@ async function materializeLockEntry(input: {
     });
   }
   const recordPointer = `/skills/${escapePointer(input.lockKey)}`;
+  const ownerRecordDigest = digest(
+    Buffer.from(stringifyModel(input.entry, 0), "utf8"),
+  );
   const recordCleanup = {
     id: stableId(
       "vercel-skills-lock-record",
@@ -278,22 +284,44 @@ async function materializeLockEntry(input: {
     format: "json" as const,
     recordPointer,
     expectedFileHash: input.expectedFileHash,
-    expectedRecordHash: digest(
-      Buffer.from(stringifyModel(input.entry, 0), "utf8"),
-    ),
+    expectedRecordHash: ownerRecordDigest,
     protection: input.lockProtection,
   };
   const allArtifactPaths = [
     primaryLocation.path,
     ...supplementalArtifacts.map((artifact) => artifact.location.path),
   ];
+  const updateArtifactEffects = await materializeUpdateArtifactEffects({
+    scope: input.lock.format,
+    environment: input.environment,
+    sanitizedName,
+    entry: input.entry,
+    artifacts,
+    commandRunner: input.commandRunner,
+  });
+  const localChanges: UpdateLocalChangeEvidence =
+    identityUnsafeReason !== null || status !== "active"
+      ? {
+          kind: "unavailable",
+          reason:
+            "unsafe or inactive artifacts are not read for Update evidence",
+        }
+      : await vercelLocalChanges(input.lock.format, input.entry, artifacts);
+  const localChangeReason =
+    localChanges.kind === "changed"
+      ? `Vercel project copy hash changed: ${localChanges.path}`
+      : null;
+  const removalUnsafeReason =
+    identityUnsafeReason ??
+    invalidProjectDigestReason(input.lock.format, input.entry) ??
+    localChangeReason;
   const managed = managedRemoval({
     environment: input.environment,
     scope: input.lock.format,
     lockVersion: numberField(input.lock.value.version)!,
     lockManagerVisible: input.lock.managerVisible,
     managerAvailable: input.managerAvailable,
-    unsafeReason: managedUnsafeReason,
+    unsafeReason: removalUnsafeReason ?? selectorIssue,
     externalId: input.lockKey,
     invocationExternalId:
       selectorIssue === null ? input.lockKey : sanitizedName,
@@ -308,6 +336,30 @@ async function materializeLockEntry(input: {
     lockPath: input.lock.path,
     lockProtection: input.lockProtection,
     recordPointer,
+  });
+  const update = managedUpdate({
+    environment: input.environment,
+    scope: input.lock.format,
+    lockVersion: numberField(input.lock.value.version)!,
+    lockManagerVisible: input.lock.managerVisible,
+    managerAvailable: input.managerAvailable,
+    status,
+    unsafeReason: identityUnsafeReason ?? selectorIssue,
+    externalId: input.lockKey,
+    source: sourceId === null ? null : { id: sourceId, url: sourceUrl },
+    sourceType,
+    sourceBaseUrl: urlField(input.entry.sourceBaseUrl),
+    skillPath,
+    ref: stringField(input.entry.ref),
+    revision: updateRecordRevision(input.lock, input.lockKey, input.entry),
+    contentHash,
+    artifactPaths: allArtifactPaths,
+    artifactEffects: updateArtifactEffects,
+    lockPath: input.lock.path,
+    lockProtection: input.lockProtection,
+    recordPointer,
+    ownerRecordDigest,
+    localChanges,
   });
   const agents = [
     ...new Set([
@@ -337,7 +389,7 @@ async function materializeLockEntry(input: {
     exposedTo: agents,
     harnessExposures: [],
     suspension:
-      artifactUnsafeReason === null && status === "active"
+      removalUnsafeReason === null && status === "active"
         ? {
             kind: "available",
             artifacts: [
@@ -357,7 +409,7 @@ async function materializeLockEntry(input: {
         : {
             kind: "unavailable",
             reason:
-              artifactUnsafeReason ??
+              removalUnsafeReason ??
               "only a complete active Vercel Installation can be suspended",
           },
     scope: input.lock.scope,
@@ -370,22 +422,19 @@ async function materializeLockEntry(input: {
       confidence: "declared",
     },
     protection: primaryProtection,
-    update: {
-      kind: "unsupported",
-      reason: "Vercel Update support is not materialized",
-    },
+    update,
     removal: {
       managed,
       fallback:
-        artifactUnsafeReason !== null
+        removalUnsafeReason !== null
           ? {
               kind: "unavailable",
-              reason: artifactUnsafeReason,
+              reason: removalUnsafeReason,
             }
           : { kind: "available", requiresSeparateConfirmation: true },
       primaryArtifactPresent: primary !== undefined,
       supplementalArtifacts,
-      recordCleanups: artifactUnsafeReason === null ? [recordCleanup] : [],
+      recordCleanups: removalUnsafeReason === null ? [recordCleanup] : [],
     },
     tags: [sourceType, pluginName].filter(
       (value): value is string => value !== null,
@@ -405,6 +454,391 @@ async function materializeLockEntry(input: {
       topologyIssue,
     }),
   };
+}
+
+interface UpdateRecordRevision {
+  readonly recordPointer: string;
+  readonly value: string;
+}
+
+function updateRecordRevision(
+  lock: LockDocument,
+  lockKey: string,
+  entry: Record<string, unknown>,
+): UpdateRecordRevision | null {
+  if (lock.format === "project") {
+    const computedHash = stringField(entry.computedHash);
+    return computedHash === null
+      ? null
+      : {
+          recordPointer: `/skills/${escapePointer(lockKey)}/computedHash`,
+          value: computedHash,
+        };
+  }
+  const sourceType = stringField(entry.sourceType);
+  const field =
+    sourceType === "well-known" ? "wellKnownDigest" : "skillFolderHash";
+  const value = stringField(entry[field]);
+  return value === null
+    ? null
+    : {
+        recordPointer: `/skills/${escapePointer(lockKey)}/${field}`,
+        value,
+      };
+}
+
+async function vercelLocalChanges(
+  scope: "global" | "project",
+  entry: Record<string, unknown>,
+  artifacts: readonly LocatedArtifact[],
+): Promise<UpdateLocalChangeEvidence> {
+  if (scope === "global")
+    return {
+      kind: "unavailable",
+      reason:
+        "the global lock revision is a source digest, not a local content digest",
+    };
+  const expected = stringField(entry.computedHash);
+  if (expected === null || !isSha256(expected))
+    return {
+      kind: "unavailable",
+      reason: "the project lock has no valid computedHash",
+    };
+  const readable = artifacts.filter((artifact) => !isBroken(artifact.location));
+  if (readable.length === 0)
+    return {
+      kind: "unavailable",
+      reason: "no installed project artifact is available for comparison",
+    };
+  const expectedDigest = sha256(expected);
+  let unchanged: UpdateLocalChangeEvidence | null = null;
+  for (const artifact of readable) {
+    const actualDigest = sha256(
+      await hashVercelSkillCopy(artifact.location.path),
+    );
+    const evidence = {
+      kind:
+        actualDigest.digest === expectedDigest.digest
+          ? ("unchanged" as const)
+          : ("changed" as const),
+      path: artifact.location.path,
+      expectedDigest,
+      actualDigest,
+    };
+    if (evidence.kind === "changed") return evidence;
+    unchanged ??= evidence;
+  }
+  return unchanged!;
+}
+
+async function materializeUpdateArtifactEffects(input: {
+  readonly scope: "global" | "project";
+  readonly environment: InventoryScanEnvironment;
+  readonly sanitizedName: string;
+  readonly entry: Record<string, unknown>;
+  readonly artifacts: readonly LocatedArtifact[];
+  readonly commandRunner: InventoryCommandRunner;
+}): Promise<readonly ManagedUpdateEffect[]> {
+  const paths = new Map<string, string>();
+  const add = (path: string): void => {
+    paths.set(pathKey(path), path);
+  };
+  input.artifacts.forEach((artifact) => add(artifact.location.path));
+  add(vercelCanonicalPath(input.scope, input.environment, input.sanitizedName));
+  for (const candidate of await vercelUpdateCandidatePaths(
+    input.scope,
+    input.environment,
+    input.sanitizedName,
+  ))
+    add(candidate.path);
+  if (input.scope === "project")
+    for (const subagent of declaredEveSubagents(input.entry)) {
+      if (isEveRootSubagent(subagent)) continue;
+      add(
+        join(
+          input.environment.workspaceDirectory,
+          "agent",
+          "subagents",
+          sanitizeInstallName(subagent),
+          "skills",
+          input.sanitizedName,
+        ),
+      );
+    }
+
+  const existing = new Map(
+    input.artifacts.map((artifact) => [
+      pathKey(artifact.location.path),
+      artifact,
+    ]),
+  );
+  return Promise.all(
+    [...paths.values()]
+      .sort((left, right) => compareText(pathKey(left), pathKey(right)))
+      .map(async (path) => {
+        const artifact = existing.get(pathKey(path));
+        if (artifact !== undefined)
+          return {
+            kind: "mutation-root" as const,
+            path,
+            exists: true,
+            protection: artifact.protection,
+          };
+        const location = {
+          path,
+          canonicalPath: null,
+          artifactType: { kind: "directory" as const },
+        };
+        return {
+          kind: "mutation-root" as const,
+          path,
+          exists: false,
+          protection: await protectionFor(location, input.commandRunner, true),
+        };
+      }),
+  );
+}
+
+function managedUpdate(input: {
+  readonly environment: InventoryScanEnvironment;
+  readonly scope: "global" | "project";
+  readonly lockVersion: number;
+  readonly lockManagerVisible: boolean;
+  readonly managerAvailable: boolean;
+  readonly status: Installation["status"];
+  readonly unsafeReason: string | null;
+  readonly externalId: string;
+  readonly source: Installation["source"];
+  readonly sourceType: string | null;
+  readonly sourceBaseUrl: string | null;
+  readonly skillPath: string | null;
+  readonly ref: string | null;
+  readonly revision: UpdateRecordRevision | null;
+  readonly contentHash: string | null;
+  readonly artifactPaths: readonly string[];
+  readonly artifactEffects: readonly ManagedUpdateEffect[];
+  readonly lockPath: string;
+  readonly lockProtection: ProtectionStatus;
+  readonly recordPointer: string;
+  readonly ownerRecordDigest: Sha256Digest;
+  readonly localChanges: UpdateLocalChangeEvidence;
+}): UpdateEvidence {
+  const unresolvedReason =
+    input.unsafeReason !== null
+      ? input.unsafeReason
+      : input.status !== "active"
+        ? "the Vercel lock record has no complete active artifact set"
+        : input.source === null || input.skillPath === null
+          ? "Vercel Update requires recorded source and skillPath fields"
+          : input.revision === null
+            ? `the ${input.scope} lock has no supported revision field`
+            : input.scope === "project" && !isSha256(input.revision.value)
+              ? "the project lock computedHash is invalid"
+              : updateSourceIssue(input);
+  if (unresolvedReason !== null)
+    return { kind: "unresolved", reason: unresolvedReason };
+
+  const unavailableReason = !managerSupportsLockVersion(
+    input.scope,
+    input.lockVersion,
+  )
+    ? `${input.scope} lock version ${String(input.lockVersion)} is not supported by skills@${VERCEL_SKILLS_PACKAGE_VERSION}`
+    : !input.lockManagerVisible
+      ? `the ${input.scope} lock is not the location skills@${VERCEL_SKILLS_PACKAGE_VERSION} resolves in this environment`
+      : input.scope === "project" && !input.managerAvailable
+        ? "project Update requires an installed skills manager"
+        : input.scope === "global" &&
+            !input.managerAvailable &&
+            !supportsPinnedPackage(input.environment.nodeVersion)
+          ? `skills@${VERCEL_SKILLS_PACKAGE_VERSION} requires Node.js 22.20 or newer`
+          : null;
+  const invocation: ManagedUpdateEvidence["invocation"] = input.managerAvailable
+    ? {
+        kind: "direct",
+        command: {
+          executable: VERCEL_SKILLS_EXECUTABLE,
+          arguments: vercelSkillsUpdateArguments(input.scope, input.externalId),
+        },
+        workingDirectory:
+          input.scope === "project"
+            ? {
+                kind: "exact",
+                path: input.environment.workspaceDirectory,
+              }
+            : { kind: "isolated-temporary" },
+      }
+    : input.scope === "project"
+      ? {
+          kind: "direct",
+          command: {
+            executable: VERCEL_SKILLS_EXECUTABLE,
+            arguments: vercelSkillsUpdateArguments(
+              input.scope,
+              input.externalId,
+            ),
+          },
+          workingDirectory: {
+            kind: "exact",
+            path: input.environment.workspaceDirectory,
+          },
+        }
+      : {
+          kind: "ephemeral-package",
+          packageExecution: {
+            runner: "npx",
+            packageName: VERCEL_SKILLS_PACKAGE_NAME,
+            packageVersion: VERCEL_SKILLS_PACKAGE_VERSION,
+            adapterHash: VERCEL_SKILLS_UPDATE_AUTHORITY_HASH,
+            mayDownload: true,
+          },
+          packageArguments: vercelSkillsUpdateArguments(
+            input.scope,
+            input.externalId,
+          ),
+          workingDirectory: { kind: "isolated-temporary" },
+        };
+  const revisions: ManagedUpdateEvidence["currentRevision"] = [
+    {
+      kind: "owner-value",
+      path: input.lockPath,
+      format: "json",
+      recordPointer: input.revision!.recordPointer,
+      value: input.revision!.value,
+    },
+    {
+      kind: "content-hash",
+      path: input.artifactPaths[0]!,
+      digest: sha256(input.contentHash!),
+    },
+  ];
+  return {
+    kind: "managed",
+    operation: {
+      adapterId: VERCEL_SKILLS_ADAPTER_ID,
+      operationId: `update-${input.scope}-skill`,
+      availability:
+        unavailableReason === null
+          ? { kind: "available" }
+          : { kind: "unavailable", reason: unavailableReason },
+      trust: { kind: "trusted" },
+      owner: {
+        kind: "manager",
+        managerId,
+        confidence: "declared",
+      },
+      externalId: input.externalId,
+      invocation,
+      source: input.source!,
+      ref: input.ref,
+      scope:
+        input.scope === "project"
+          ? {
+              kind: "workspace",
+              workspacePath: input.environment.workspaceDirectory,
+            }
+          : { kind: "user" },
+      currentRevision: revisions,
+      ownerRecordDigest: input.ownerRecordDigest,
+      effects: [
+        ...input.artifactEffects,
+        {
+          kind: "configuration-path",
+          path: input.lockPath,
+          exists: true,
+          protection: input.lockProtection,
+        },
+      ],
+      network: {
+        kind: "required",
+        reason: "the Vercel Manager checks and retrieves the recorded source",
+      },
+      packageDownload:
+        invocation.kind === "ephemeral-package"
+          ? {
+              kind: "possible",
+              packageName: VERCEL_SKILLS_PACKAGE_NAME,
+              packageVersion: VERCEL_SKILLS_PACKAGE_VERSION,
+            }
+          : { kind: "none" },
+      localChanges: input.localChanges,
+      verifications: [
+        ...input.artifactPaths.map((path) => ({
+          kind: "path-present" as const,
+          path,
+        })),
+        {
+          kind: "record-present",
+          path: input.lockPath,
+          format: "json",
+          recordPointer: input.recordPointer,
+        },
+        {
+          kind: "revision-manifest-value",
+          path: input.lockPath,
+          format: "json",
+          recordPointer: input.revision!.recordPointer,
+          value: input.revision!.value,
+        },
+        {
+          kind: "revision-content-hash",
+          path: input.artifactPaths[0]!,
+        },
+      ],
+    },
+  };
+}
+
+function updateSourceIssue(input: {
+  readonly scope: "global" | "project";
+  readonly sourceType: string | null;
+  readonly source: Installation["source"];
+  readonly sourceBaseUrl: string | null;
+}): string | null {
+  if (input.sourceType === "local")
+    return "Vercel local sources do not have a supported in-place Update";
+  if (input.sourceType === "node_modules")
+    return "Vercel node_modules sources do not have a supported in-place Update";
+  if (input.sourceType === "well-known") {
+    const hasBase =
+      input.scope === "global"
+        ? input.sourceBaseUrl !== null
+        : input.source?.url !== null;
+    if (!hasBase)
+      return `the ${input.scope} well-known source is missing its update URL`;
+  }
+  if (
+    (input.sourceType === "git" || input.sourceType === "gitlab") &&
+    input.source?.url === null &&
+    input.source !== null &&
+    isBareSource(input.source.id)
+  )
+    return `the ${input.scope} Git source is ambiguous without sourceUrl`;
+  return null;
+}
+
+function invalidProjectDigestReason(
+  scope: "global" | "project",
+  entry: Record<string, unknown>,
+): string | null {
+  if (scope !== "project") return null;
+  const value = stringField(entry.computedHash);
+  return value !== null && !isSha256(value)
+    ? "invalid Vercel project copy hash"
+    : null;
+}
+
+function isBareSource(value: string): boolean {
+  return (
+    !value.includes(":") && !value.startsWith(".") && !value.startsWith("/")
+  );
+}
+
+function isSha256(value: string): boolean {
+  return /^[a-f\d]{64}$/i.test(value);
+}
+
+function sha256(value: string): Sha256Digest {
+  return { algorithm: "sha256", digest: value.toLowerCase() };
 }
 
 function managedRemoval(input: {
@@ -946,7 +1380,6 @@ function installationMode(
 async function unexpectedArtifactTopology(
   artifacts: readonly LocatedArtifact[],
   canonicalPath: string,
-  expectedCopyHash: string | null,
 ): Promise<string | null> {
   const resolvedCanonicalPath = await realpath(canonicalPath).catch(() => null);
   for (const artifact of artifacts) {
@@ -967,18 +1400,6 @@ async function unexpectedArtifactTopology(
         !targetsCanonicalPath
       ) {
         return `unexpected Vercel-managed link target: ${artifact.location.path}`;
-      }
-    } else if (
-      type.kind === "directory" &&
-      pathKey(artifact.location.path) !== pathKey(canonicalPath) &&
-      expectedCopyHash !== null
-    ) {
-      if (!/^[a-f\d]{64}$/i.test(expectedCopyHash)) {
-        return "invalid Vercel project copy hash";
-      }
-      const actualHash = await hashVercelSkillCopy(artifact.location.path);
-      if (actualHash !== expectedCopyHash.toLowerCase()) {
-        return `Vercel project copy hash changed: ${artifact.location.path}`;
       }
     }
   }
@@ -1033,12 +1454,22 @@ function numberField(value: unknown): number | null {
 }
 
 function declaredEveAgents(entry: Record<string, unknown>): readonly string[] {
-  if (!Array.isArray(entry.subagents)) return [];
-  return entry.subagents.flatMap((value) =>
-    typeof value !== "string"
-      ? []
-      : [value.length === 0 ? "eve" : `eve:${value}`],
+  return declaredEveSubagents(entry).map((value) =>
+    isEveRootSubagent(value) ? "eve" : `eve:${value}`,
   );
+}
+
+function declaredEveSubagents(
+  entry: Record<string, unknown>,
+): readonly string[] {
+  if (!Array.isArray(entry.subagents)) return [];
+  return entry.subagents.filter(
+    (value): value is string => typeof value === "string",
+  );
+}
+
+function isEveRootSubagent(value: string): boolean {
+  return value === "" || value === "root" || value === ".";
 }
 
 function normalizedSourceId(

@@ -178,6 +178,33 @@ export async function vercelAgentPaths(
   );
 }
 
+/** Every bounded agent path the pinned nested `add` operation may select. */
+export async function vercelUpdateCandidatePaths(
+  scope: "global" | "project",
+  environment: InventoryScanEnvironment,
+  sanitizedName: string,
+): Promise<readonly VercelAgentPath[]> {
+  const resolved = await vercelAgentPaths(scope, environment, sanitizedName);
+  if (scope === "project") return resolved;
+  return [
+    ...resolved,
+    ...definitions.flatMap((definition) =>
+      definition.global === undefined
+        ? [
+            {
+              agentId: definition.agentId,
+              path: join(
+                environment.homeDirectory,
+                ...definition.project,
+                sanitizedName,
+              ),
+            },
+          ]
+        : [],
+    ),
+  ];
+}
+
 export function vercelCanonicalPath(
   scope: "global" | "project",
   environment: InventoryScanEnvironment,

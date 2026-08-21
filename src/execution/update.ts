@@ -469,6 +469,11 @@ async function verifyCheck(
       "final Update evidence is not managed and readable",
     );
   const finalOperation = record.update.operation;
+  if (finalOperation.localChanges.kind === "changed")
+    return failedCheck(
+      check.id,
+      "final content does not match the Owner's recorded revision",
+    );
   if (
     finalOperation.adapterId !== action.operation.adapterId ||
     finalOperation.operationId !== action.operation.operationId ||

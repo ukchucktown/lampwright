@@ -18,6 +18,7 @@ import {
   createQuarantineModule,
   nodeQuarantineFileSystem,
   plan,
+  planUpdate,
   type ExecutionProcessRequest,
   type Installation,
   type InventoryCommandRunner,
@@ -153,6 +154,7 @@ describe("Vercel skills adapter", () => {
           skillPath: "skills/review-tools",
           pluginName: "quality-suite",
           ref: "main",
+          skillFolderHash: "source-tree-v1",
           futureField: { preserved: true },
         },
       },
@@ -247,6 +249,27 @@ describe("Vercel skills adapter", () => {
           path: globalLockPath(environment),
         }),
       ]),
+    });
+    expect(installation.update).toMatchObject({
+      kind: "managed",
+      operation: {
+        effects: expect.arrayContaining([
+          expect.objectContaining({ kind: "mutation-root", path: canonical }),
+          expect.objectContaining({ kind: "mutation-root", path: claudeLink }),
+          expect.objectContaining({
+            kind: "configuration-path",
+            path: globalLockPath(environment),
+          }),
+        ]),
+        verifications: expect.arrayContaining([
+          { kind: "path-present", path: canonical },
+          { kind: "path-present", path: claudeLink },
+          expect.objectContaining({
+            kind: "record-present",
+            recordPointer: "/skills/review-tools",
+          }),
+        ]),
+      },
     });
     const globalArguments =
       installation.removal.managed?.invocation.kind === "direct"
@@ -629,6 +652,7 @@ describe("Vercel skills adapter", () => {
         status: "unresolved",
         skill: { name: "expected-skill", description: null },
         contentHash: null,
+        update: expect.objectContaining({ kind: "unresolved" }),
         suspension: expect.objectContaining({
           kind: "unavailable",
           reason: expect.any(String),
@@ -667,18 +691,27 @@ describe("Vercel skills adapter", () => {
     });
 
     const inventory = await scanner(environment, true).scan({});
-    expect(inventory.installations).toEqual([
-      expect.objectContaining({
-        status: "unresolved",
-        contentHash: null,
-        removal: expect.objectContaining({
-          managed: expect.objectContaining({
-            availability: expect.objectContaining({ kind: "unavailable" }),
-          }),
-          fallback: expect.objectContaining({ kind: "unavailable" }),
-        }),
-      }),
-    ]);
+    const installation = inventory.installations[0]!;
+    expect(installation).toMatchObject({
+      status: "active",
+      contentHash: expect.any(String),
+      update: {
+        kind: "managed",
+        operation: { localChanges: { kind: "changed", path: copied } },
+      },
+      removal: {
+        managed: { availability: { kind: "unavailable" } },
+        fallback: { kind: "unavailable" },
+      },
+    });
+    const updatePlan = planUpdate(inventory, {
+      target: { kind: "installation", installationId: installation.id },
+      force: true,
+    });
+    expect(updatePlan.actions).toEqual([]);
+    expect(updatePlan.blocks).toContainEqual(
+      expect.objectContaining({ kind: "local-changes", path: copied }),
+    );
   });
 
   it("exposes safe source and plugin batch groups without merging Skill identities", async () => {
