@@ -517,22 +517,21 @@ async function geminiExposure(
     environment.agentHomeDirectories?.[geminiHarness] ??
     join(environment.homeDirectory, ".gemini");
   const workspace = environment.workspaceDirectory;
-  const documents = await Promise.all([
-    readDocument(
-      join(home, "settings.json"),
-      "jsonc",
-      { kind: "user" },
-      "user",
-      true,
-    ),
-    readDocument(
-      join(workspace, ".gemini", "settings.json"),
-      "jsonc",
-      { kind: "workspace", workspacePath: workspace },
-      "workspace",
-      environment.geminiWorkspaceTrusted ?? "unresolved",
-    ),
-  ]);
+  const userPath = join(home, "settings.json");
+  const workspacePath = join(workspace, ".gemini", "settings.json");
+  const documents =
+    pathKey(userPath) === pathKey(workspacePath)
+      ? [await readDocument(userPath, "jsonc", { kind: "user" }, "user", true)]
+      : await Promise.all([
+          readDocument(userPath, "jsonc", { kind: "user" }, "user", true),
+          readDocument(
+            workspacePath,
+            "jsonc",
+            { kind: "workspace", workspacePath: workspace },
+            "workspace",
+            environment.geminiWorkspaceTrusted ?? "unresolved",
+          ),
+        ]);
   const selector = { kind: "name" as const, value: installation.skill.name };
   const values = documents.map((document) =>
     document.unsafe
@@ -553,7 +552,7 @@ async function geminiExposure(
       documents.map((document) => document.evidence.path),
       "a Gemini CLI configuration layer is malformed, linked, hard-linked, unreadable, or changed while scanning",
     );
-  const workspaceDisabled = values[1]!.value.disabled;
+  const workspaceDisabled = values[1]?.value.disabled ?? false;
   if (workspaceDisabled && layers[1]!.applies === "unresolved")
     return unresolvedNative(
       geminiHarness,

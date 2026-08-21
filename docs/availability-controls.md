@@ -124,6 +124,13 @@ state. If workspace applicability depends on an IDE signal, environment or
 session flag, is malformed, or otherwise cannot be proven from the scan,
 workspace-derived availability is `unresolved` rather than guessed.
 
+When the workspace is the user's home directory, the user and workspace
+`settings.json` paths coincide. Inventory represents that physical file once
+as the user configuration layer, retaining user-layer applicability even when
+workspace trust is unresolved. Coincident Gemini user and workspace skill
+roots likewise produce one Installation using the higher-precedence workspace
+scope; distinct roots retain their normal precedence and union behavior.
+
 System defaults, system overrides, remote administration, and session-only
 overrides are not writable native controls. Observed higher-precedence evidence
 must make the control unavailable; absence of such evidence is not authority to

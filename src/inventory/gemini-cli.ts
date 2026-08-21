@@ -37,7 +37,7 @@ import type {
   WeakIdentityEvidence,
 } from "../model/types.js";
 import { hashSkillDirectory } from "./content-hash.js";
-import { readStableRegularFile } from "./evidence.js";
+import { pathKey, readStableRegularFile } from "./evidence.js";
 import { inspectGitProtection } from "./git-protection.js";
 import { stableId } from "./identity.js";
 import { readSkillMetadata } from "./metadata.js";
@@ -93,7 +93,7 @@ export async function scanGeminiCli(
     ".gemini",
     "skills",
   );
-  const skillRoots: readonly {
+  const discoveredSkillRoots: readonly {
     path: string;
     source: "gemini" | "agents";
     scope: Scope;
@@ -130,6 +130,11 @@ export async function scanGeminiCli(
       rank: 4,
     },
   ];
+  const skillRoots = [
+    ...new Map(
+      discoveredSkillRoots.map((root) => [pathKey(root.path), root]),
+    ).values(),
+  ].sort((left, right) => left.rank - right.rank);
   const entries: {
     path: string;
     source: "gemini" | "agents" | "extension";
