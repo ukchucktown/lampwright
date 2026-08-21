@@ -6,15 +6,16 @@ complete Plugins whether they were installed as standalone files, by a
 Manager, or through a Plugin system.
 
 The primary interface is an interactive terminal Inventory. The supported,
-version-pinned invocation for the first npm release is:
+version-pinned invocation for the current release is:
 
 ```console
-npx lampwright@0.1.0
+npx lampwright@0.1.1
 ```
 
-Use that command after the registry shows `lampwright@0.1.0` and the published
-artifact has been verified. It downloads the package to npm's cache; Lampwright
-does not install itself globally or add a dependency to the current project.
+Use that command after the GitHub `v0.1.1` release has been verified and
+`lampwright@0.1.1` is visible on npm. It downloads the package to npm's cache;
+Lampwright does not install itself globally or add a dependency to the current
+project.
 
 Before registry publication is verified, build and run from a trusted checkout:
 
@@ -77,7 +78,7 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Execution and fallback](./docs/execution.md)
 - [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
-- [0.1.0 release notes](./docs/releases/0.1.0.md)
+- [0.1.1 release notes](./docs/releases/0.1.1.md)
 - [Release readiness](./docs/release.md)
 - [Product ideas](./docs/ideas.md) — unapproved directions under consideration
 - [Architectural decisions](./docs/adr/)
