@@ -246,6 +246,91 @@ export type AdapterRemovalActionDefinition =
       readonly arguments: readonly AdapterCommandArgument[];
     });
 
+export type AdapterRuntimePathDefinition =
+  | {
+      readonly kind: "static";
+      readonly path: PlatformVariant<AdapterPathTemplate>;
+    }
+  | {
+      readonly kind: "value";
+      readonly from: "installationPath" | "manifestPath" | "scopePath";
+    };
+
+export type AdapterWorkingDirectoryDefinition =
+  | { readonly kind: "isolated-temporary" }
+  | {
+      readonly kind: "exact";
+      readonly path: AdapterRuntimePathDefinition;
+    };
+
+export type AdapterNetworkDisclosure =
+  | { readonly kind: "none" }
+  | { readonly kind: "required"; readonly reason: string };
+
+export type AdapterLifecycleInvocationDefinition =
+  | {
+      readonly kind: "direct";
+      readonly command: PlatformVariant<AdapterCommandTemplate>;
+    }
+  | {
+      readonly kind: "ephemeral-package";
+      readonly runner: PackageRunner;
+      readonly packageName: string;
+      readonly packageVersion: string;
+      readonly mayDownload: true;
+      readonly arguments: readonly AdapterCommandArgument[];
+    };
+
+export interface AdapterRemovalEffectDefinition {
+  readonly kind: "remove-path" | "modify-path";
+  readonly path: AdapterManagedEffectPath;
+}
+
+export interface AdapterUpdateEffectDefinition {
+  readonly kind: "mutation-root" | "configuration-path";
+  readonly path: AdapterRuntimePathDefinition;
+}
+
+export type AdapterLocalChangeEvidenceDefinition =
+  | {
+      readonly kind: "content-hash-match";
+      readonly algorithm: "sha256";
+      readonly path: AdapterRuntimePathDefinition;
+      readonly manifestId: string;
+      readonly expectedDigest: AdapterValueSelector;
+    }
+  | {
+      readonly kind: "unavailable";
+      readonly reason: string;
+    };
+
+interface AdapterLifecycleOperationBase extends AdapterDeclarationBase {
+  /** The root or manifest record which supplies this operation's values. */
+  readonly source: AdapterRuleSource;
+  readonly ownerKind: "manager" | "plugin";
+  readonly operationId: string;
+  readonly requiresProbes?: readonly string[];
+  readonly workingDirectory: AdapterWorkingDirectoryDefinition;
+  readonly invocation: AdapterLifecycleInvocationDefinition;
+  readonly network: AdapterNetworkDisclosure;
+  readonly verificationRules: readonly string[];
+}
+
+export interface AdapterManagedRemovalOperationDefinition extends AdapterLifecycleOperationBase {
+  readonly lifecycle: "remove";
+  readonly effects: readonly AdapterRemovalEffectDefinition[];
+}
+
+export interface AdapterManagedUpdateOperationDefinition extends AdapterLifecycleOperationBase {
+  readonly lifecycle: "update";
+  readonly effects: readonly AdapterUpdateEffectDefinition[];
+  readonly localChangeEvidence: AdapterLocalChangeEvidenceDefinition;
+}
+
+export type AdapterLifecycleOperationDefinition =
+  | AdapterManagedRemovalOperationDefinition
+  | AdapterManagedUpdateOperationDefinition;
+
 export type AdapterVerificationDefinition =
   | (AdapterDeclarationBase & {
       readonly kind: "path-absent";
@@ -267,9 +352,40 @@ export type AdapterVerificationDefinition =
       readonly successExitCodes: readonly number[];
     });
 
-export interface AdapterDefinitionV1 {
+export type AdapterUpdateVerificationDefinition =
+  | (AdapterDeclarationBase & {
+      readonly kind: "path-present";
+      readonly path: PlatformVariant<AdapterPathTemplate>;
+    })
+  | (AdapterDeclarationBase & {
+      readonly kind: "manifest-record-present";
+      readonly manifestId: string;
+      readonly selector: AdapterValueSelector;
+    })
+  | (AdapterDeclarationBase & {
+      readonly kind: "owner-state-present";
+      readonly ownerKind: "manager" | "plugin";
+      readonly externalId: AdapterValueSelector;
+    })
+  | (AdapterDeclarationBase & {
+      readonly kind: "revision-evidence";
+      readonly evidence:
+        | {
+            readonly kind: "content-hash";
+            readonly path: AdapterRuntimePathDefinition;
+          }
+        | {
+            readonly kind: "manifest-value";
+            readonly manifestId: string;
+            readonly selector: AdapterValueSelector;
+          };
+    });
+
+export type AdapterVerificationDefinitionV2 =
+  AdapterVerificationDefinition | AdapterUpdateVerificationDefinition;
+
+interface AdapterDefinitionBase {
   readonly $schema?: string;
-  readonly schemaVersion: 1;
   readonly id: string;
   readonly name: string;
   readonly platforms: readonly AdapterPlatform[];
@@ -279,9 +395,21 @@ export interface AdapterDefinitionV1 {
   readonly ownershipRules?: readonly AdapterOwnershipRule[];
   readonly groupingRules?: readonly AdapterGroupingRule[];
   readonly hardDependencies?: readonly AdapterHardDependencyDefinition[];
+}
+
+export interface AdapterDefinitionV1 extends AdapterDefinitionBase {
+  readonly schemaVersion: 1;
   readonly actions?: readonly AdapterRemovalActionDefinition[];
   readonly verificationRules?: readonly AdapterVerificationDefinition[];
 }
+
+export interface AdapterDefinitionV2 extends AdapterDefinitionBase {
+  readonly schemaVersion: 2;
+  readonly lifecycleOperations?: readonly AdapterLifecycleOperationDefinition[];
+  readonly verificationRules?: readonly AdapterVerificationDefinitionV2[];
+}
+
+export type AdapterDefinition = AdapterDefinitionV1 | AdapterDefinitionV2;
 
 export interface AdapterTrustApproval {
   readonly adapterId: string;
@@ -357,6 +485,49 @@ export type CompiledAdapterManagedEffect =
       readonly value: "installationPath" | "manifestPath";
     };
 
+export type CompiledAdapterRuntimePath =
+  | {
+      readonly path: string;
+      /** Lexically selected template base; retained for runtime canonical checks. */
+      readonly pathBase: string;
+    }
+  | {
+      readonly value: "installationPath" | "manifestPath" | "scopePath";
+    };
+
+export type CompiledAdapterWorkingDirectory =
+  | { readonly kind: "isolated-temporary" }
+  | ({ readonly kind: "exact" } & CompiledAdapterRuntimePath);
+
+export type CompiledAdapterLifecycleInvocation =
+  | {
+      readonly kind: "direct";
+      readonly command: AdapterCommandTemplate;
+    }
+  | Extract<
+      AdapterLifecycleInvocationDefinition,
+      { kind: "ephemeral-package" }
+    >;
+
+export type CompiledAdapterRemovalEffect = {
+  readonly kind: "remove-path" | "modify-path";
+} & CompiledAdapterRuntimePath;
+
+export type CompiledAdapterUpdateEffect = {
+  readonly kind: "mutation-root" | "configuration-path";
+} & CompiledAdapterRuntimePath;
+
+export type CompiledAdapterLocalChangeEvidence =
+  | Extract<AdapterLocalChangeEvidenceDefinition, { kind: "unavailable" }>
+  | (Omit<
+      Extract<
+        AdapterLocalChangeEvidenceDefinition,
+        { kind: "content-hash-match" }
+      >,
+      "path"
+    > &
+      CompiledAdapterRuntimePath);
+
 export type CompiledAdapterRemovalAction =
   | (Omit<
       Extract<AdapterRemovalActionDefinition, { kind: "managed" }>,
@@ -369,6 +540,35 @@ export type CompiledAdapterRemovalAction =
       Extract<AdapterRemovalActionDefinition, { kind: "ephemeral-package" }>,
       "effects"
     > & { readonly effects: readonly CompiledAdapterManagedEffect[] });
+
+export type CompiledAdapterLegacyRemovalOperation =
+  CompiledAdapterRemovalAction & {
+    readonly lifecycle: "remove";
+    readonly adapterSchemaVersion: 1;
+  };
+
+interface CompiledAdapterLifecycleOperationBase extends Omit<
+  AdapterLifecycleOperationBase,
+  "workingDirectory" | "invocation"
+> {
+  readonly adapterSchemaVersion: 2;
+  readonly workingDirectory: CompiledAdapterWorkingDirectory;
+  readonly invocation: CompiledAdapterLifecycleInvocation;
+}
+
+export type CompiledAdapterLifecycleOperationV2 =
+  | (CompiledAdapterLifecycleOperationBase & {
+      readonly lifecycle: "remove";
+      readonly effects: readonly CompiledAdapterRemovalEffect[];
+    })
+  | (CompiledAdapterLifecycleOperationBase & {
+      readonly lifecycle: "update";
+      readonly effects: readonly CompiledAdapterUpdateEffect[];
+      readonly localChangeEvidence: CompiledAdapterLocalChangeEvidence;
+    });
+
+export type CompiledAdapterLifecycleOperation =
+  CompiledAdapterLegacyRemovalOperation | CompiledAdapterLifecycleOperationV2;
 
 export type CompiledAdapterVerification =
   | (Omit<
@@ -384,8 +584,38 @@ export type CompiledAdapterVerification =
       "command"
     > & { readonly command: AdapterCommandTemplate });
 
+export type CompiledAdapterUpdateVerification =
+  | (Omit<
+      Extract<AdapterUpdateVerificationDefinition, { kind: "path-present" }>,
+      "path"
+    > & { readonly path: string })
+  | Extract<
+      AdapterUpdateVerificationDefinition,
+      { kind: "manifest-record-present" | "owner-state-present" }
+    >
+  | (Omit<
+      Extract<
+        AdapterUpdateVerificationDefinition,
+        { kind: "revision-evidence" }
+      >,
+      "evidence"
+    > & {
+      readonly evidence:
+        | ({ readonly kind: "content-hash" } & CompiledAdapterRuntimePath)
+        | Extract<
+            Extract<
+              AdapterUpdateVerificationDefinition,
+              { kind: "revision-evidence" }
+            >["evidence"],
+            { kind: "manifest-value" }
+          >;
+    });
+
+export type CompiledAdapterVerificationV2 =
+  CompiledAdapterVerification | CompiledAdapterUpdateVerification;
+
 export interface CompiledAdapter {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 1 | 2;
   readonly id: string;
   readonly name: string;
   readonly platforms: readonly AdapterPlatform[];
@@ -398,8 +628,10 @@ export interface CompiledAdapter {
   readonly ownershipRules: readonly AdapterOwnershipRule[];
   readonly groupingRules: readonly AdapterGroupingRule[];
   readonly hardDependencies: readonly AdapterHardDependencyDefinition[];
+  /** Version 1-only Removal compatibility view for existing Inventory consumers. */
   readonly actions: readonly CompiledAdapterRemovalAction[];
-  readonly verificationRules: readonly CompiledAdapterVerification[];
+  readonly lifecycleOperations: readonly CompiledAdapterLifecycleOperation[];
+  readonly verificationRules: readonly CompiledAdapterVerificationV2[];
 }
 
 export interface AdapterCatalog {

@@ -670,7 +670,7 @@ function resolveVerifications(
       );
       if (externalId === null) return null;
       result.push({ kind: "owner-state-absent", externalId });
-    } else {
+    } else if (rule.kind === "command") {
       const arguments_ = resolveArguments(rule.command.arguments, values);
       if (arguments_ === null) return null;
       result.push({
@@ -678,7 +678,7 @@ function resolveVerifications(
         command: { executable: rule.command.executable, arguments: arguments_ },
         successExitCodes: rule.successExitCodes,
       });
-    }
+    } else return null;
   }
   return result;
 }

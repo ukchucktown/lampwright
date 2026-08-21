@@ -73,6 +73,7 @@ for (const required of [
   "docs/cli.md",
   "docs/tui.md",
   "schemas/adapter-v1.schema.json",
+  "schemas/adapter-v2.schema.json",
   "schemas/cli-v1.schema.json",
 ]) {
   if (!files.has(required))

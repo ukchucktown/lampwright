@@ -9,6 +9,7 @@ import {
   AdapterTrustRequiredError,
   loadAdapters,
   type AdapterDefinitionV1,
+  type AdapterDefinitionV2,
   type AdapterPathBases,
   type AdapterPlatform,
 } from "../src/index.js";
@@ -162,6 +163,122 @@ function readOnlyDefinition(): AdapterDefinitionV1 {
   };
 }
 
+function lifecycleDefinition(): AdapterDefinitionV2 {
+  const legacy = readOnlyDefinition();
+  const {
+    schemaVersion: _schemaVersion,
+    actions: _actions,
+    ...common
+  } = legacy;
+  void _schemaVersion;
+  void _actions;
+  return {
+    ...common,
+    schemaVersion: 2,
+    id: "fixture.lifecycle",
+    verificationRules: [
+      ...(legacy.verificationRules ?? []),
+      {
+        id: "path-remains",
+        kind: "path-present",
+        path: {
+          default: {
+            base: "home",
+            segments: [".fixture-agent", "skills", "selected"],
+          },
+        },
+      },
+      {
+        id: "revision-readable",
+        kind: "revision-evidence",
+        evidence: {
+          kind: "content-hash",
+          path: { kind: "value", from: "installationPath" },
+        },
+      },
+    ],
+    lifecycleOperations: [
+      {
+        id: "update-skill",
+        lifecycle: "update",
+        ownerKind: "manager",
+        operationId: "update-skill",
+        source: { kind: "manifest", manifestId: "registry" },
+        requiresProbes: ["manager-present"],
+        workingDirectory: {
+          kind: "exact",
+          path: { kind: "value", from: "scopePath" },
+        },
+        invocation: {
+          kind: "direct",
+          command: {
+            default: {
+              executable: "fixture-manager",
+              arguments: [
+                { kind: "literal", value: "update" },
+                { kind: "value", from: "externalId" },
+              ],
+            },
+          },
+        },
+        effects: [
+          {
+            kind: "mutation-root",
+            path: { kind: "value", from: "installationPath" },
+          },
+          {
+            kind: "configuration-path",
+            path: { kind: "value", from: "manifestPath" },
+          },
+        ],
+        network: {
+          kind: "required",
+          reason: "The Owner retrieves the recorded source revision.",
+        },
+        localChangeEvidence: {
+          kind: "content-hash-match",
+          algorithm: "sha256",
+          path: { kind: "value", from: "installationPath" },
+          manifestId: "registry",
+          expectedDigest: { kind: "pointer", pointer: "/computedHash" },
+        },
+        verificationRules: ["revision-readable", "path-remains"],
+      },
+      {
+        id: "remove-skill",
+        lifecycle: "remove",
+        ownerKind: "manager",
+        operationId: "remove-skill",
+        source: { kind: "manifest", manifestId: "registry" },
+        requiresProbes: ["manager-present"],
+        workingDirectory: { kind: "isolated-temporary" },
+        invocation: {
+          kind: "ephemeral-package",
+          runner: "npx",
+          packageName: "fixture-manager",
+          packageVersion: "1.2.3",
+          mayDownload: true,
+          arguments: [
+            { kind: "literal", value: "remove" },
+            { kind: "value", from: "externalId" },
+          ],
+        },
+        effects: [
+          {
+            kind: "remove-path",
+            path: { kind: "value", from: "installationPath" },
+          },
+        ],
+        network: {
+          kind: "required",
+          reason: "The exact package may be downloaded before removal.",
+        },
+        verificationRules: ["path-gone"],
+      },
+    ],
+  };
+}
+
 function asJsonc(definition: unknown): string {
   const json = JSON.stringify(definition, null, 2);
   return json
@@ -212,11 +329,13 @@ describe("Adapter loading", () => {
       (adapter) => adapter.id === "codex.plugins",
     );
     expect(fixtureAdapter).toMatchObject({
+      schemaVersion: 1,
       id: "fixture.read-only",
       trust: { kind: "read-only" },
       commandCapable: false,
     });
     expect(fixtureAdapter?.platforms).toEqual(["darwin", "linux", "win32"]);
+    expect(fixtureAdapter?.lifecycleOperations).toEqual([]);
     expect(fixtureAdapter?.roots[0]?.path).toBe(
       join(environment.home, ".fixture-agent", "skills"),
     );
@@ -387,6 +506,332 @@ describe("Adapter loading", () => {
     });
   });
 
+  it("publishes v2 and compiles explicit Update and Removal lifecycle operations", async () => {
+    const environment = await createTestEnvironment();
+    const adapterPath = join(environment.temporary, "lifecycle.jsonc");
+    const content = await writeAdapter(adapterPath, lifecycleDefinition());
+    const contentHash = createHash("sha256").update(content).digest("hex");
+    const request = {
+      localAdapterPaths: [adapterPath],
+      platform: supportedPlatform(),
+      pathBases: fixturePathBases(environment),
+      approvals: [{ adapterId: "fixture.lifecycle", contentHash }],
+    } as const;
+
+    await expect(
+      loadAdapters({ ...request, approvals: [] }),
+    ).rejects.toMatchObject({
+      code: "trust-required",
+      requirements: [{ adapterId: "fixture.lifecycle", contentHash }],
+    });
+    const first = await loadAdapters(request);
+    const second = await loadAdapters(request);
+    const adapter = first.adapters.find(
+      (candidate) => candidate.id === "fixture.lifecycle",
+    );
+
+    expect(first).toEqual(second);
+    expect(adapter).toMatchObject({
+      schemaVersion: 2,
+      commandCapable: true,
+      trust: { kind: "approved", contentHash },
+    });
+    expect(
+      adapter?.lifecycleOperations.map((operation) => operation.id),
+    ).toEqual(["remove-skill", "update-skill"]);
+    expect(
+      adapter?.lifecycleOperations.find(
+        (operation) => operation.lifecycle === "update",
+      ),
+    ).toMatchObject({
+      adapterSchemaVersion: 2,
+      lifecycle: "update",
+      workingDirectory: { kind: "exact", value: "scopePath" },
+      invocation: {
+        kind: "direct",
+        command: {
+          executable: "fixture-manager",
+          arguments: [
+            { kind: "literal", value: "update" },
+            { kind: "value", from: "externalId" },
+          ],
+        },
+      },
+      effects: [
+        { kind: "mutation-root", value: "installationPath" },
+        { kind: "configuration-path", value: "manifestPath" },
+      ],
+      network: { kind: "required" },
+      localChangeEvidence: {
+        kind: "content-hash-match",
+        algorithm: "sha256",
+        value: "installationPath",
+        manifestId: "registry",
+        expectedDigest: { kind: "pointer", pointer: "/computedHash" },
+      },
+      verificationRules: ["path-remains", "revision-readable"],
+    });
+    expect(adapter?.actions).toEqual([]);
+    expect(Object.isFrozen(adapter?.lifecycleOperations)).toBe(true);
+
+    const schema = JSON.parse(
+      await readFile(
+        join(process.cwd(), "schemas", "adapter-v2.schema.json"),
+        "utf8",
+      ),
+    ) as { readonly $schema?: string; readonly properties?: object };
+    expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(schema.properties).toHaveProperty("lifecycleOperations");
+  });
+
+  it("compiles an exact-version ephemeral Update invocation", async () => {
+    const environment = await createTestEnvironment();
+    const adapterPath = join(environment.temporary, "ephemeral-update.jsonc");
+    const definition = lifecycleDefinition();
+    const ephemeralUpdate = {
+      ...definition,
+      id: "fixture.ephemeral-update",
+      lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+        operation.lifecycle === "update"
+          ? {
+              ...operation,
+              workingDirectory: { kind: "isolated-temporary" },
+              invocation: {
+                kind: "ephemeral-package",
+                runner: "npx",
+                packageName: "fixture-manager",
+                packageVersion: "2.3.4-beta.1",
+                mayDownload: true,
+                arguments: [
+                  { kind: "literal", value: "update" },
+                  { kind: "value", from: "externalId" },
+                ],
+              },
+            }
+          : operation,
+      ),
+    };
+    const content = await writeAdapter(adapterPath, ephemeralUpdate);
+    const contentHash = createHash("sha256").update(content).digest("hex");
+
+    const catalog = await loadAdapters({
+      localAdapterPaths: [adapterPath],
+      platform: supportedPlatform(),
+      pathBases: fixturePathBases(environment),
+      approvals: [{ adapterId: ephemeralUpdate.id, contentHash }],
+    });
+    const update = catalog.adapters
+      .find((adapter) => adapter.id === ephemeralUpdate.id)
+      ?.lifecycleOperations.find(
+        (operation) => operation.lifecycle === "update",
+      );
+
+    expect(update).toMatchObject({
+      lifecycle: "update",
+      workingDirectory: { kind: "isolated-temporary" },
+      invocation: {
+        kind: "ephemeral-package",
+        runner: "npx",
+        packageName: "fixture-manager",
+        packageVersion: "2.3.4-beta.1",
+        mayDownload: true,
+      },
+    });
+  });
+
+  it.each([
+    [
+      "missing explicit lifecycle",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map(
+          ({ lifecycle: _lifecycle, ...operation }) => {
+            void _lifecycle;
+            return operation;
+          },
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "Removal effect on Update",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+          operation.lifecycle === "update"
+            ? {
+                ...operation,
+                effects: [
+                  {
+                    kind: "remove-path",
+                    path: { kind: "value", from: "installationPath" },
+                  },
+                ],
+              }
+            : operation,
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "empty effects",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map(
+          (operation) => ({
+            ...operation,
+            effects: [],
+          }),
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "missing network disclosure",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map(
+          ({ network: _network, ...operation }) => {
+            void _network;
+            return operation;
+          },
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "no-network ephemeral package",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+          operation.invocation.kind === "ephemeral-package"
+            ? { ...operation, network: { kind: "none" } }
+            : operation,
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "mutable Update package version",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+          operation.lifecycle === "update"
+            ? {
+                ...operation,
+                invocation: {
+                  kind: "ephemeral-package",
+                  runner: "npx",
+                  packageName: "fixture-manager",
+                  packageVersion: "latest",
+                  mayDownload: true,
+                  arguments: [],
+                },
+              }
+            : operation,
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "missing local-change evidence",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map(
+          (operation) => {
+            if (operation.lifecycle !== "update") return operation;
+            const { localChangeEvidence: _evidence, ...incomplete } = operation;
+            void _evidence;
+            return incomplete;
+          },
+        ),
+      }),
+      "schema-invalid",
+    ],
+    [
+      "Removal verification on Update",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+          operation.lifecycle === "update"
+            ? { ...operation, verificationRules: ["path-gone"] }
+            : operation,
+        ),
+      }),
+      "invalid-reference",
+    ],
+    [
+      "no revision verification",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+          operation.lifecycle === "update"
+            ? { ...operation, verificationRules: ["path-remains"] }
+            : operation,
+        ),
+      }),
+      "invalid-reference",
+    ],
+    [
+      "duplicate operation ID",
+      (definition: AdapterDefinitionV2) => ({
+        ...definition,
+        lifecycleOperations: definition.lifecycleOperations?.map(
+          (operation) => ({
+            ...operation,
+            operationId: "same-operation",
+          }),
+        ),
+      }),
+      "duplicate-id",
+    ],
+  ])("rejects invalid v2 %s before trust", async (_name, mutate, code) => {
+    const environment = await createTestEnvironment();
+    const adapterPath = join(environment.temporary, "invalid-v2.jsonc");
+    await writeAdapter(adapterPath, mutate(lifecycleDefinition()));
+
+    await expect(
+      loadAdapters({
+        localAdapterPaths: [adapterPath],
+        platform: supportedPlatform(),
+        pathBases: fixturePathBases(environment),
+      }),
+    ).rejects.toMatchObject({ code });
+  });
+
+  it("rejects unsafe v2 Update commands before exact-hash trust", async () => {
+    const environment = await createTestEnvironment();
+    const adapterPath = join(environment.temporary, "unsafe-v2.jsonc");
+    const definition = lifecycleDefinition();
+    await writeAdapter(adapterPath, {
+      ...definition,
+      lifecycleOperations: definition.lifecycleOperations?.map((operation) =>
+        operation.lifecycle === "update"
+          ? {
+              ...operation,
+              invocation: {
+                kind: "direct",
+                command: {
+                  default: {
+                    executable: "fixture-manager",
+                    arguments: [{ kind: "literal", value: "|" }],
+                  },
+                },
+              },
+            }
+          : operation,
+      ),
+    });
+
+    await expect(
+      loadAdapters({
+        localAdapterPaths: [adapterPath],
+        platform: supportedPlatform(),
+        pathBases: fixturePathBases(environment),
+      }),
+    ).rejects.toMatchObject({ code: "unsafe-command" });
+  });
+
   it("selects operating-system variants using platform path semantics", async () => {
     const environment = await createTestEnvironment();
     const adapterPath = join(environment.temporary, "platforms.jsonc");
@@ -528,7 +973,7 @@ describe("Adapter loading", () => {
     const unsupportedPath = join(environment.temporary, "unsupported.jsonc");
     await writeAdapter(unsupportedPath, {
       ...readOnlyDefinition(),
-      schemaVersion: 2,
+      schemaVersion: 3,
     });
     await expect(
       loadAdapters({ localAdapterPaths: [unsupportedPath] }),

@@ -5,13 +5,13 @@ import {
 import type {
   AdapterCommandArgument,
   AdapterCommandTemplate,
-  AdapterDefinitionV1,
+  AdapterDefinition,
   PlatformVariant,
 } from "./types.js";
 import { AdapterLoadError } from "./types.js";
 
 export function validateCommandSafety(
-  definition: AdapterDefinitionV1,
+  definition: AdapterDefinition,
   sourcePath: string | null,
 ): void {
   for (const probe of definition.probes ?? []) {
@@ -19,7 +19,9 @@ export function validateCommandSafety(
       validateCommandVariant(probe.command, sourcePath, `probe ${probe.id}`);
     }
   }
-  for (const action of definition.actions ?? []) {
+  for (const action of definition.schemaVersion === 1
+    ? (definition.actions ?? [])
+    : []) {
     if (action.kind === "managed") {
       validateCommandVariant(action.command, sourcePath, `action ${action.id}`);
     } else {
@@ -30,6 +32,29 @@ export function validateCommandSafety(
         true,
       );
       validateArguments(action.arguments, sourcePath, `action ${action.id}`);
+    }
+  }
+  for (const operation of definition.schemaVersion === 2
+    ? (definition.lifecycleOperations ?? [])
+    : []) {
+    if (operation.invocation.kind === "direct") {
+      validateCommandVariant(
+        operation.invocation.command,
+        sourcePath,
+        `lifecycle operation ${operation.id}`,
+      );
+    } else {
+      validateExecutable(
+        operation.invocation.runner,
+        sourcePath,
+        `lifecycle operation ${operation.id}`,
+        true,
+      );
+      validateArguments(
+        operation.invocation.arguments,
+        sourcePath,
+        `lifecycle operation ${operation.id}`,
+      );
     }
   }
   for (const verification of definition.verificationRules ?? []) {
@@ -43,9 +68,11 @@ export function validateCommandSafety(
   }
 }
 
-export function isCommandCapable(definition: AdapterDefinitionV1): boolean {
+export function isCommandCapable(definition: AdapterDefinition): boolean {
   return (
-    (definition.actions?.length ?? 0) > 0 ||
+    (definition.schemaVersion === 1
+      ? (definition.actions?.length ?? 0) > 0
+      : (definition.lifecycleOperations?.length ?? 0) > 0) ||
     definition.probes?.some((probe) => probe.kind === "command") === true ||
     definition.verificationRules?.some(
       (verification) => verification.kind === "command",
