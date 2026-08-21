@@ -10,7 +10,7 @@ import { parseJsoncAdapter } from "./jsonc.js";
 import { validateAdapterDefinition } from "./schema.js";
 import type {
   AdapterCatalog,
-  AdapterDefinitionV1,
+  AdapterDefinition,
   AdapterLoadRequest,
   AdapterPathBase,
   AdapterPathBases,
@@ -23,7 +23,7 @@ import type {
 import { AdapterLoadError, AdapterTrustRequiredError } from "./types.js";
 
 interface LoadedDefinition {
-  readonly definition: AdapterDefinitionV1;
+  readonly definition: AdapterDefinition;
   readonly source: CompiledAdapterSource;
 }
 
@@ -264,7 +264,7 @@ function rejectRemoteOrExecutableSource(candidate: string): void {
 async function parseAndValidate(
   content: string,
   path: string | null,
-): Promise<AdapterDefinitionV1> {
+): Promise<AdapterDefinition> {
   return validateAdapterDefinition(parseJsoncAdapter(content, path), path);
 }
 

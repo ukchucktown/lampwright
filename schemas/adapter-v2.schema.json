@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ukchucktown/lampwright/raw/main/schemas/adapter-v2.schema.json",
+  "title": "Lampwright adapter v2",
+  "description": "Declarative local adapter definition with explicit lifecycle operations for Lampwright.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "platforms"],
+  "properties": {
+    "$schema": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "const": 2 },
+    "id": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+    "name": { "$ref": "adapter-v1.schema.json#/$defs/nonBlankString" },
+    "platforms": { "$ref": "adapter-v1.schema.json#/$defs/platforms" },
+    "probes": {
+      "type": "array",
+      "items": { "$ref": "adapter-v1.schema.json#/$defs/probe" }
+    },
+    "roots": {
+      "type": "array",
+      "items": { "$ref": "adapter-v1.schema.json#/$defs/root" }
+    },
+    "manifests": {
+      "type": "array",
+      "items": { "$ref": "adapter-v1.schema.json#/$defs/manifest" }
+    },
+    "ownershipRules": {
+      "type": "array",
+      "items": { "$ref": "adapter-v1.schema.json#/$defs/ownershipRule" }
+    },
+    "groupingRules": {
+      "type": "array",
+      "items": { "$ref": "adapter-v1.schema.json#/$defs/groupingRule" }
+    },
+    "hardDependencies": {
+      "type": "array",
+      "items": { "$ref": "adapter-v1.schema.json#/$defs/hardDependency" }
+    },
+    "lifecycleOperations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lifecycleOperation" }
+    },
+    "verificationRules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/verification" }
+    }
+  },
+  "$defs": {
+    "runtimePath": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "static" },
+            "path": {
+              "$ref": "adapter-v1.schema.json#/$defs/pathVariant"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "from"],
+          "properties": {
+            "kind": { "const": "value" },
+            "from": {
+              "enum": ["installationPath", "manifestPath", "scopePath"]
+            }
+          }
+        }
+      ]
+    },
+    "workingDirectory": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "isolated-temporary" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "exact" },
+            "path": { "$ref": "#/$defs/runtimePath" }
+          }
+        }
+      ]
+    },
+    "network": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason"],
+          "properties": {
+            "kind": { "const": "required" },
+            "reason": {
+              "$ref": "adapter-v1.schema.json#/$defs/nonBlankString"
+            }
+          }
+        }
+      ]
+    },
+    "invocation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "command"],
+          "properties": {
+            "kind": { "const": "direct" },
+            "command": {
+              "$ref": "adapter-v1.schema.json#/$defs/commandVariant"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "runner",
+            "packageName",
+            "packageVersion",
+            "mayDownload",
+            "arguments"
+          ],
+          "properties": {
+            "kind": { "const": "ephemeral-package" },
+            "runner": { "const": "npx" },
+            "packageName": {
+              "type": "string",
+              "maxLength": 214,
+              "pattern": "^(?:@[a-z0-9](?:[a-z0-9._~-]*[a-z0-9])?\\/)?[a-z0-9](?:[a-z0-9._~-]*[a-z0-9])?$"
+            },
+            "packageVersion": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|(?:[0-9]*[A-Za-z-][0-9A-Za-z-]*))(?:\\.(?:(?:0|[1-9][0-9]*)|(?:[0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+            },
+            "mayDownload": { "const": true },
+            "arguments": {
+              "type": "array",
+              "items": {
+                "$ref": "adapter-v1.schema.json#/$defs/commandArgument"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "operationBase": {
+      "type": "object",
+      "required": [
+        "id",
+        "ownerKind",
+        "operationId",
+        "source",
+        "workingDirectory",
+        "invocation",
+        "network",
+        "verificationRules"
+      ],
+      "properties": {
+        "id": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+        "platforms": {
+          "$ref": "adapter-v1.schema.json#/$defs/declarationPlatforms"
+        },
+        "ownerKind": { "enum": ["manager", "plugin"] },
+        "operationId": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+        "source": { "$ref": "adapter-v1.schema.json#/$defs/ruleSource" },
+        "requiresProbes": { "$ref": "adapter-v1.schema.json#/$defs/idList" },
+        "workingDirectory": { "$ref": "#/$defs/workingDirectory" },
+        "invocation": { "$ref": "#/$defs/invocation" },
+        "network": { "$ref": "#/$defs/network" },
+        "verificationRules": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "adapter-v1.schema.json#/$defs/id" }
+        }
+      }
+    },
+    "removalEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "enum": ["remove-path", "modify-path"] },
+        "path": { "$ref": "#/$defs/removalPath" }
+      }
+    },
+    "removalPath": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "static" },
+            "path": {
+              "$ref": "adapter-v1.schema.json#/$defs/pathVariant"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "from"],
+          "properties": {
+            "kind": { "const": "value" },
+            "from": { "enum": ["installationPath", "manifestPath"] }
+          }
+        }
+      ]
+    },
+    "updateEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "enum": ["mutation-root", "configuration-path"] },
+        "path": { "$ref": "#/$defs/runtimePath" }
+      }
+    },
+    "localChangeEvidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "algorithm",
+            "path",
+            "manifestId",
+            "expectedDigest"
+          ],
+          "properties": {
+            "kind": { "const": "content-hash-match" },
+            "algorithm": { "const": "sha256" },
+            "path": { "$ref": "#/$defs/runtimePath" },
+            "manifestId": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+            "expectedDigest": {
+              "$ref": "adapter-v1.schema.json#/$defs/selector"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason"],
+          "properties": {
+            "kind": { "const": "unavailable" },
+            "reason": {
+              "$ref": "adapter-v1.schema.json#/$defs/nonBlankString"
+            }
+          }
+        }
+      ]
+    },
+    "managedRemovalOperation": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/operationBase" },
+        {
+          "type": "object",
+          "required": ["lifecycle", "effects"],
+          "properties": {
+            "lifecycle": { "const": "remove" },
+            "effects": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/removalEffect" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "managedUpdateOperation": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/operationBase" },
+        {
+          "type": "object",
+          "required": ["lifecycle", "effects", "localChangeEvidence"],
+          "properties": {
+            "lifecycle": { "const": "update" },
+            "effects": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/updateEffect" }
+            },
+            "localChangeEvidence": {
+              "$ref": "#/$defs/localChangeEvidence"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "lifecycleOperation": {
+      "oneOf": [
+        { "$ref": "#/$defs/managedRemovalOperation" },
+        { "$ref": "#/$defs/managedUpdateOperation" }
+      ]
+    },
+    "updateVerification": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "path"],
+          "properties": {
+            "id": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+            "platforms": {
+              "$ref": "adapter-v1.schema.json#/$defs/declarationPlatforms"
+            },
+            "kind": { "const": "path-present" },
+            "path": {
+              "$ref": "adapter-v1.schema.json#/$defs/pathVariant"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "manifestId", "selector"],
+          "properties": {
+            "id": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+            "platforms": {
+              "$ref": "adapter-v1.schema.json#/$defs/declarationPlatforms"
+            },
+            "kind": { "const": "manifest-record-present" },
+            "manifestId": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+            "selector": { "$ref": "adapter-v1.schema.json#/$defs/selector" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "ownerKind", "externalId"],
+          "properties": {
+            "id": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+            "platforms": {
+              "$ref": "adapter-v1.schema.json#/$defs/declarationPlatforms"
+            },
+            "kind": { "const": "owner-state-present" },
+            "ownerKind": { "enum": ["manager", "plugin"] },
+            "externalId": {
+              "$ref": "adapter-v1.schema.json#/$defs/selector"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "evidence"],
+          "properties": {
+            "id": { "$ref": "adapter-v1.schema.json#/$defs/id" },
+            "platforms": {
+              "$ref": "adapter-v1.schema.json#/$defs/declarationPlatforms"
+            },
+            "kind": { "const": "revision-evidence" },
+            "evidence": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "path"],
+                  "properties": {
+                    "kind": { "const": "content-hash" },
+                    "path": { "$ref": "#/$defs/runtimePath" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "manifestId", "selector"],
+                  "properties": {
+                    "kind": { "const": "manifest-value" },
+                    "manifestId": {
+                      "$ref": "adapter-v1.schema.json#/$defs/id"
+                    },
+                    "selector": {
+                      "$ref": "adapter-v1.schema.json#/$defs/selector"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "verification": {
+      "oneOf": [
+        { "$ref": "adapter-v1.schema.json#/$defs/verification" },
+        { "$ref": "#/$defs/updateVerification" }
+      ]
+    }
+  }
+}

@@ -7,15 +7,16 @@ loadAdapters(request: AdapterLoadRequest): Promise<AdapterCatalog>
 ```
 
 It loads package-owned definitions and explicitly supplied local `.jsonc`
-files, validates them against the version 1 schema, selects operating-system
+files, validates them against their versioned schema, selects operating-system
 variants, compiles structured paths and commands, verifies references, applies
 content-hash trust, and returns one recursively frozen `AdapterCatalog`.
 Callers do not parse or interpret adapter documents.
 
-The editor-completable schema is published with the package as
-`lampwright/adapter-v1.schema.json` and lives in the repository at
-[`schemas/adapter-v1.schema.json`](../schemas/adapter-v1.schema.json). A local
-adapter can point an editor at the installed copy:
+The editor-completable schemas are published with the package as
+`lampwright/adapter-v1.schema.json` and `lampwright/adapter-v2.schema.json`.
+They live at [`schemas/adapter-v1.schema.json`](../schemas/adapter-v1.schema.json)
+and [`schemas/adapter-v2.schema.json`](../schemas/adapter-v2.schema.json). A
+local Adapter can point an editor at the applicable installed copy:
 
 ```jsonc
 {
@@ -47,7 +48,7 @@ accepted; URLs and executable adapter files are not adapter sources.
 
 ## Declarative model
 
-Version 1 supports these ID-addressable declarations:
+Both versions support these ID-addressable declarations:
 
 - `probes`: path, executable-presence, or structured command checks.
 - `roots`: the same user, agent, workspace, plugin, source, cache/vendor,
@@ -60,10 +61,120 @@ Version 1 supports these ID-addressable declarations:
   package evidence accepted by the core identity model.
 - `hardDependencies`: declarative dependency targets and reasons extracted
   from manifests.
-- `actions`: Owner Managed Removal or an exact-version ephemeral package
-  operation.
 - `verificationRules`: path, manifest record, Owner state, or structured
   command checks.
+
+Version 1 also supports `actions`. Every version 1 action is a Managed Removal
+operation. Version 1 grants no Update authority.
+
+Version 2 replaces `actions` with `lifecycleOperations`. Each operation has an
+explicit `remove` or `update` lifecycle. Lampwright does not infer the lifecycle
+from an operation ID or command. Each operation declares:
+
+- An Owner and an unambiguous operation ID.
+- A direct structured command or exact-version `npx` package invocation.
+- An exact structured working directory or a new isolated temporary directory.
+- A nonempty lifecycle-specific effect set.
+- Required or absent network access. Package download remains a separate
+  disclosure.
+- A nonempty set of lifecycle-appropriate verification rules.
+
+An Update effect is a `mutation-root` or `configuration-path`. It cannot be a
+Removal effect. Update also declares local-change evidence. A content-hash
+rule compares an installed boundary with an Owner-recorded SHA-256 digest. An
+`unavailable` rule gives the reason that the Owner record cannot prove local
+changes. Every Update requires both a boundary-presence check and revision
+evidence. These declarations prepare Inventory materialization. The Adapter
+loader does not inspect installed content or contact a remote source.
+
+The compiled catalog exposes all operations through `lifecycleOperations`.
+Version 1 actions appear there explicitly as Removal operations. The compiled
+`actions` property remains a version 1-only Removal compatibility view for
+current Inventory consumers. A version 2 Adapter has no legacy `actions` view.
+Callers must consume its complete lifecycle operation, including working
+directory and network policy, from `lifecycleOperations`.
+
+A minimal version 2 Update declaration has this shape:
+
+```jsonc
+{
+  "$schema": "./node_modules/lampwright/schemas/adapter-v2.schema.json",
+  "schemaVersion": 2,
+  "id": "example.manager-v2",
+  "name": "Example manager v2",
+  "platforms": ["darwin", "linux", "win32"],
+  "roots": [
+    {
+      "id": "user-skills",
+      "kind": "user",
+      "agentId": "example-agent",
+      "path": {
+        "default": {
+          "base": "home",
+          "segments": [".example-agent", "skills"],
+        },
+      },
+    },
+  ],
+  "lifecycleOperations": [
+    {
+      "id": "update-user-skill",
+      "lifecycle": "update",
+      "ownerKind": "manager",
+      "operationId": "update-user-skill",
+      "source": { "kind": "root", "rootId": "user-skills" },
+      "workingDirectory": { "kind": "isolated-temporary" },
+      "invocation": {
+        "kind": "direct",
+        "command": {
+          "default": {
+            "executable": "example-manager",
+            "arguments": [
+              { "kind": "literal", "value": "update" },
+              { "kind": "value", "from": "externalId" },
+            ],
+          },
+        },
+      },
+      "effects": [
+        {
+          "kind": "mutation-root",
+          "path": { "kind": "value", "from": "installationPath" },
+        },
+      ],
+      "network": {
+        "kind": "required",
+        "reason": "The Owner retrieves the recorded source revision.",
+      },
+      "localChangeEvidence": {
+        "kind": "unavailable",
+        "reason": "The Owner record has no content digest.",
+      },
+      "verificationRules": ["path-remains", "revision-readable"],
+    },
+  ],
+  "verificationRules": [
+    {
+      "id": "path-remains",
+      "kind": "path-present",
+      "path": {
+        "default": {
+          "base": "home",
+          "segments": [".example-agent", "skills", "selected"],
+        },
+      },
+    },
+    {
+      "id": "revision-readable",
+      "kind": "revision-evidence",
+      "evidence": {
+        "kind": "content-hash",
+        "path": { "kind": "value", "from": "installationPath" },
+      },
+    },
+  ],
+}
+```
 
 Declarations may have a `platforms` filter. Paths and external commands use a
 `{ default?, darwin?, linux?, win32? }` variant object; a platform-specific
@@ -125,12 +236,17 @@ NUL bytes, and pipe, redirection, chaining, or statement tokens. Later
 execution must still pass the compiled executable and arguments directly to a
 process runner with shell handling disabled.
 
-Ephemeral actions use the closed v1 `npx` runner strategy and separately
-declare a valid npm package identifier, exact Semantic Version, possible
-download behavior, and package arguments. The runner is not an operating-system
-variant and cannot inject flags; direct commands remain a separate action kind.
-Alternate runners, embedded package versions, tags, and version ranges do not
-compile.
+Ephemeral actions and lifecycle operations use the closed `npx` runner strategy
+and separately declare a valid npm package identifier, exact Semantic Version,
+possible download behavior, and package arguments. The runner is not an
+operating-system variant and cannot inject flags. Direct commands remain a
+separate action kind. Alternate runners, embedded package versions, tags, and
+version ranges do not compile.
+
+Every version 2 operation declares network behavior. An ephemeral-package
+operation cannot claim `network: { kind: "none" }` because its approved package
+may need to be downloaded. Scan, Adapter loading, Planning, and dry-run remain
+offline. The declaration is disclosure for later Execution.
 
 ## Local adapter trust
 

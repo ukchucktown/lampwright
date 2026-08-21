@@ -3,9 +3,12 @@ import { posix, win32 } from "node:path";
 import { isCommandCapable } from "./commands.js";
 import type {
   AdapterCatalog,
+  AdapterDefinition,
   AdapterDefinitionV1,
   AdapterHardDependencyDefinition,
+  AdapterLifecycleOperationDefinition,
   AdapterManifestDefinition,
+  AdapterRuntimePathDefinition,
   AdapterRemovalActionDefinition,
   AdapterOwnershipRule,
   AdapterPathBases,
@@ -16,14 +19,18 @@ import type {
   AdapterRuleSource,
   AdapterTrustApproval,
   CompiledAdapter,
+  CompiledAdapterLifecycleOperation,
+  CompiledAdapterLifecycleOperationV2,
+  CompiledAdapterLocalChangeEvidence,
   CompiledAdapterManifest,
   CompiledAdapterProbe,
   CompiledAdapterRemovalAction,
+  CompiledAdapterRuntimePath,
   CompiledAdapterRoot,
   CompiledAdapterScope,
   CompiledAdapterSource,
   CompiledAdapterTrust,
-  CompiledAdapterVerification,
+  CompiledAdapterVerificationV2,
   PlatformVariant,
 } from "./types.js";
 import { AdapterLoadError } from "./types.js";
@@ -35,7 +42,7 @@ const platformOrder: Readonly<Record<AdapterPlatform, number>> = {
 };
 
 export interface AdapterCompilationInput {
-  readonly definition: AdapterDefinitionV1;
+  readonly definition: AdapterDefinition;
   readonly source: CompiledAdapterSource;
   readonly platform: AdapterPlatform;
   readonly pathBases: AdapterPathBases;
@@ -69,12 +76,27 @@ export function compileAdapter(
   const hardDependencies = active(definition.hardDependencies, platform).map(
     normalizeDeclaration,
   );
-  const actions: CompiledAdapterRemovalAction[] = active(
-    definition.actions,
-    platform,
-  ).map((action) =>
-    compileAction(action, platform, pathBases, sourcePath(source)),
-  );
+  const actions: CompiledAdapterRemovalAction[] =
+    definition.schemaVersion === 1
+      ? active(definition.actions, platform).map((action) =>
+          compileAction(action, platform, pathBases, sourcePath(source)),
+        )
+      : [];
+  const lifecycleOperations: CompiledAdapterLifecycleOperation[] =
+    definition.schemaVersion === 1
+      ? actions.map((action) => ({
+          ...action,
+          lifecycle: "remove" as const,
+          adapterSchemaVersion: 1 as const,
+        }))
+      : active(definition.lifecycleOperations, platform).map((operation) =>
+          compileLifecycleOperation(
+            operation,
+            platform,
+            pathBases,
+            sourcePath(source),
+          ),
+        );
   const verificationRules = active(definition.verificationRules, platform).map(
     (verification) =>
       compileVerification(
@@ -94,6 +116,7 @@ export function compileAdapter(
       groupingRules,
       hardDependencies,
       actions,
+      lifecycleOperations,
       verificationRules,
     },
     sourcePath(source),
@@ -102,7 +125,7 @@ export function compileAdapter(
   const commandCapable = isCommandCapable(definition);
   const trust = trustFor(input, commandCapable);
   return deepFreeze({
-    schemaVersion: 1,
+    schemaVersion: definition.schemaVersion,
     id: definition.id,
     name: definition.name,
     platforms: [...definition.platforms].sort(comparePlatform),
@@ -116,6 +139,7 @@ export function compileAdapter(
     groupingRules,
     hardDependencies,
     actions,
+    lifecycleOperations,
     verificationRules,
   });
 }
@@ -206,6 +230,135 @@ function compileAction(
     ...normalizeDeclaration(base),
     effects: compileEffects(effects, action.id, platform, bases, sourcePath_),
   };
+}
+
+function compileLifecycleOperation(
+  operation: AdapterLifecycleOperationDefinition,
+  platform: AdapterPlatform,
+  bases: AdapterPathBases,
+  sourcePath_: string | null,
+): CompiledAdapterLifecycleOperationV2 {
+  const invocation =
+    operation.invocation.kind === "direct"
+      ? {
+          kind: "direct" as const,
+          command: selectVariant(
+            operation.invocation.command,
+            platform,
+            sourcePath_,
+            `lifecycle operation ${operation.id}`,
+          ),
+        }
+      : operation.invocation;
+  const workingDirectory =
+    operation.workingDirectory.kind === "isolated-temporary"
+      ? operation.workingDirectory
+      : {
+          kind: "exact" as const,
+          ...compileRuntimePath(
+            operation.workingDirectory.path,
+            operation.id,
+            "working directory",
+            platform,
+            bases,
+            sourcePath_,
+          ),
+        };
+  const common = {
+    ...normalizeDeclaration(operation),
+    adapterSchemaVersion: 2 as const,
+    invocation,
+    workingDirectory,
+  };
+  if (operation.lifecycle === "remove") {
+    return {
+      ...common,
+      lifecycle: "remove",
+      effects: operation.effects.map((effect) => ({
+        kind: effect.kind,
+        ...compileRuntimePath(
+          effect.path,
+          operation.id,
+          "effect",
+          platform,
+          bases,
+          sourcePath_,
+        ),
+      })),
+    };
+  }
+  return {
+    ...common,
+    lifecycle: "update",
+    effects: operation.effects.map((effect) => ({
+      kind: effect.kind,
+      ...compileRuntimePath(
+        effect.path,
+        operation.id,
+        "effect",
+        platform,
+        bases,
+        sourcePath_,
+      ),
+    })),
+    localChangeEvidence: compileLocalChangeEvidence(
+      operation.localChangeEvidence,
+      operation.id,
+      platform,
+      bases,
+      sourcePath_,
+    ),
+  };
+}
+
+function compileLocalChangeEvidence(
+  evidence: Extract<
+    AdapterLifecycleOperationDefinition,
+    { lifecycle: "update" }
+  >["localChangeEvidence"],
+  operationId: string,
+  platform: AdapterPlatform,
+  bases: AdapterPathBases,
+  sourcePath_: string | null,
+): CompiledAdapterLocalChangeEvidence {
+  if (evidence.kind === "unavailable") {
+    return evidence;
+  }
+  const { path, ...base } = evidence;
+  return {
+    ...base,
+    ...compileRuntimePath(
+      path,
+      operationId,
+      "local-change evidence",
+      platform,
+      bases,
+      sourcePath_,
+    ),
+  };
+}
+
+function compileRuntimePath(
+  path: AdapterRuntimePathDefinition,
+  operationId: string,
+  context: string,
+  platform: AdapterPlatform,
+  bases: AdapterPathBases,
+  sourcePath_: string | null,
+): CompiledAdapterRuntimePath {
+  return path.kind === "static"
+    ? compileCompiledPath(
+        selectVariant(
+          path.path,
+          platform,
+          sourcePath_,
+          `lifecycle operation ${operationId} ${context}`,
+        ),
+        platform,
+        bases,
+        sourcePath_,
+      )
+    : { value: path.from };
 }
 
 function compileEffects(
@@ -318,13 +471,14 @@ function compileManifest(
 }
 
 function compileVerification(
-  verification: NonNullable<AdapterDefinitionV1["verificationRules"]>[number],
+  verification: NonNullable<AdapterDefinition["verificationRules"]>[number],
   platform: AdapterPlatform,
   bases: AdapterPathBases,
   sourcePath_: string | null,
-): CompiledAdapterVerification {
+): CompiledAdapterVerificationV2 {
   switch (verification.kind) {
-    case "path-absent": {
+    case "path-absent":
+    case "path-present": {
       const { path, ...base } = verification;
       return {
         ...normalizeDeclaration(base),
@@ -357,8 +511,34 @@ function compileVerification(
       };
     }
     case "manifest-record-absent":
+    case "manifest-record-present":
     case "owner-state-absent":
+    case "owner-state-present":
       return normalizeDeclaration(verification);
+    case "revision-evidence": {
+      if (verification.evidence.kind === "manifest-value") {
+        const { evidence, ...base } = verification;
+        return {
+          ...normalizeDeclaration(base),
+          evidence,
+        };
+      }
+      const { evidence, ...base } = verification;
+      return {
+        ...normalizeDeclaration(base),
+        evidence: {
+          kind: "content-hash",
+          ...compileRuntimePath(
+            evidence.path,
+            verification.id,
+            "revision evidence",
+            platform,
+            bases,
+            sourcePath_,
+          ),
+        },
+      };
+    }
   }
 }
 
@@ -415,7 +595,7 @@ function absoluteBase(
 }
 
 function validateDefinitionSemantics(
-  definition: AdapterDefinitionV1,
+  definition: AdapterDefinition,
   sourcePath_: string | null,
 ): void {
   const allIds = new Set<string>();
@@ -467,18 +647,85 @@ function validateDefinitionSemantics(
       metadataKeys.add(key);
     }
   }
-  for (const action of definition.actions ?? []) {
-    if (action.kind === "managed") {
-      validateVariants(action.command, action, definition, sourcePath_);
+  if (definition.schemaVersion === 1) {
+    for (const action of definition.actions ?? []) {
+      if (action.kind === "managed") {
+        validateVariants(action.command, action, definition, sourcePath_);
+      }
+      for (const effect of action.effects ?? []) {
+        if (effect.path.kind === "static") {
+          validatePathVariants(
+            effect.path.path,
+            action,
+            definition,
+            sourcePath_,
+          );
+        }
+      }
     }
-    for (const effect of action.effects ?? []) {
-      if (effect.path.kind === "static") {
-        validatePathVariants(effect.path.path, action, definition, sourcePath_);
+  } else {
+    const operationIds = new Set<string>();
+    for (const operation of definition.lifecycleOperations ?? []) {
+      if (operationIds.has(operation.operationId)) {
+        throw new AdapterLoadError(
+          "duplicate-id",
+          `duplicate lifecycle operation id: ${operation.operationId}`,
+          sourcePath_,
+        );
+      }
+      operationIds.add(operation.operationId);
+      if (
+        operation.invocation.kind === "ephemeral-package" &&
+        operation.network.kind === "none"
+      ) {
+        throw new AdapterLoadError(
+          "schema-invalid",
+          `ephemeral lifecycle operation ${operation.id} must disclose required network access`,
+          sourcePath_,
+        );
+      }
+      if (operation.invocation.kind === "direct") {
+        validateVariants(
+          operation.invocation.command,
+          operation,
+          definition,
+          sourcePath_,
+        );
+      }
+      validateRuntimePathVariants(
+        operation.workingDirectory.kind === "exact"
+          ? operation.workingDirectory.path
+          : null,
+        operation,
+        definition,
+        sourcePath_,
+      );
+      for (const effect of operation.effects) {
+        validateRuntimePathVariants(
+          effect.path,
+          operation,
+          definition,
+          sourcePath_,
+        );
+      }
+      if (
+        operation.lifecycle === "update" &&
+        operation.localChangeEvidence.kind === "content-hash-match"
+      ) {
+        validateRuntimePathVariants(
+          operation.localChangeEvidence.path,
+          operation,
+          definition,
+          sourcePath_,
+        );
       }
     }
   }
   for (const verification of definition.verificationRules ?? []) {
-    if (verification.kind === "path-absent") {
+    if (
+      verification.kind === "path-absent" ||
+      verification.kind === "path-present"
+    ) {
       validatePathVariants(
         verification.path,
         verification,
@@ -492,10 +739,34 @@ function validateDefinitionSemantics(
         definition,
         sourcePath_,
       );
+    } else if (
+      verification.kind === "revision-evidence" &&
+      verification.evidence.kind === "content-hash"
+    ) {
+      validateRuntimePathVariants(
+        verification.evidence.path,
+        verification,
+        definition,
+        sourcePath_,
+      );
     }
   }
 
   validateAllReferences(definition, sourcePath_);
+}
+
+function validateRuntimePathVariants(
+  path: AdapterRuntimePathDefinition | null,
+  declaration: {
+    readonly id: string;
+    readonly platforms?: readonly AdapterPlatform[];
+  },
+  definition: AdapterDefinition,
+  sourcePath_: string | null,
+): void {
+  if (path?.kind === "static") {
+    validatePathVariants(path.path, declaration, definition, sourcePath_);
+  }
 }
 
 function validateRoot(
@@ -587,7 +858,7 @@ function forbidRoot(
 }
 
 function validateAllReferences(
-  definition: AdapterDefinitionV1,
+  definition: AdapterDefinition,
   sourcePath_: string | null,
 ): void {
   const probes = new Set((definition.probes ?? []).map(({ id }) => id));
@@ -600,7 +871,9 @@ function validateAllReferences(
   for (const declaration of [
     ...(definition.roots ?? []),
     ...(definition.manifests ?? []),
-    ...(definition.actions ?? []),
+    ...(definition.schemaVersion === 1
+      ? (definition.actions ?? [])
+      : (definition.lifecycleOperations ?? [])),
   ]) {
     for (const probeId of declaration.requiresProbes ?? []) {
       requireReference(probes, probeId, "probe", declaration.id, sourcePath_);
@@ -619,7 +892,11 @@ function validateAllReferences(
   for (const rule of definition.ownershipRules ?? []) {
     validateRuleSource(rule.source, roots, manifests, rule.id, sourcePath_);
   }
-  for (const action of definition.actions ?? []) {
+  const operations =
+    definition.schemaVersion === 1
+      ? (definition.actions ?? [])
+      : (definition.lifecycleOperations ?? []);
+  for (const action of operations) {
     if (action.source !== undefined) {
       validateRuleSource(
         action.source,
@@ -635,6 +912,30 @@ function validateAllReferences(
         verificationId,
         "verification rule",
         action.id,
+        sourcePath_,
+      );
+    }
+  }
+  if (definition.schemaVersion === 2) {
+    const verificationById = new Map(
+      (definition.verificationRules ?? []).map((rule) => [rule.id, rule]),
+    );
+    for (const operation of definition.lifecycleOperations ?? []) {
+      if (
+        operation.lifecycle === "update" &&
+        operation.localChangeEvidence.kind === "content-hash-match"
+      ) {
+        requireReference(
+          manifests,
+          operation.localChangeEvidence.manifestId,
+          "manifest",
+          operation.id,
+          sourcePath_,
+        );
+      }
+      validateLifecycleVerificationReferences(
+        operation,
+        verificationById,
         sourcePath_,
       );
     }
@@ -658,7 +959,10 @@ function validateAllReferences(
     );
   }
   for (const verification of definition.verificationRules ?? []) {
-    if (verification.kind === "manifest-record-absent") {
+    if (
+      verification.kind === "manifest-record-absent" ||
+      verification.kind === "manifest-record-present"
+    ) {
       requireReference(
         manifests,
         verification.manifestId,
@@ -666,7 +970,85 @@ function validateAllReferences(
         verification.id,
         sourcePath_,
       );
+    } else if (
+      verification.kind === "revision-evidence" &&
+      verification.evidence.kind === "manifest-value"
+    ) {
+      requireReference(
+        manifests,
+        verification.evidence.manifestId,
+        "manifest",
+        verification.id,
+        sourcePath_,
+      );
     }
+  }
+}
+
+function validateLifecycleVerificationReferences(
+  operation: AdapterLifecycleOperationDefinition,
+  verificationById: ReadonlyMap<
+    string,
+    NonNullable<AdapterDefinition["verificationRules"]>[number]
+  >,
+  sourcePath_: string | null,
+): void {
+  const rules = operation.verificationRules.map((id) =>
+    verificationById.get(id),
+  );
+  if (rules.some((rule) => rule === undefined)) {
+    return;
+  }
+  if (operation.lifecycle === "remove") {
+    const incompatible = rules.find(
+      (rule) =>
+        rule?.kind === "path-present" ||
+        rule?.kind === "manifest-record-present" ||
+        rule?.kind === "owner-state-present" ||
+        rule?.kind === "revision-evidence",
+    );
+    if (incompatible !== undefined) {
+      throw new AdapterLoadError(
+        "invalid-reference",
+        `remove operation ${operation.id} references Update verification ${incompatible.id}`,
+        sourcePath_,
+      );
+    }
+    return;
+  }
+  const incompatible = rules.find(
+    (rule) =>
+      rule?.kind === "path-absent" ||
+      rule?.kind === "manifest-record-absent" ||
+      rule?.kind === "owner-state-absent",
+  );
+  if (incompatible !== undefined) {
+    throw new AdapterLoadError(
+      "invalid-reference",
+      `Update operation ${operation.id} references Removal verification ${incompatible.id}`,
+      sourcePath_,
+    );
+  }
+  if (!rules.some((rule) => rule?.kind === "revision-evidence")) {
+    throw new AdapterLoadError(
+      "invalid-reference",
+      `Update operation ${operation.id} requires revision-evidence verification`,
+      sourcePath_,
+    );
+  }
+  if (
+    !rules.some(
+      (rule) =>
+        rule?.kind === "path-present" ||
+        rule?.kind === "manifest-record-present" ||
+        rule?.kind === "owner-state-present",
+    )
+  ) {
+    throw new AdapterLoadError(
+      "invalid-reference",
+      `Update operation ${operation.id} requires boundary-presence verification`,
+      sourcePath_,
+    );
   }
 }
 
@@ -682,7 +1064,8 @@ function validateActiveReferences(
     }[];
     readonly hardDependencies: readonly AdapterHardDependencyDefinition[];
     readonly actions: readonly CompiledAdapterRemovalAction[];
-    readonly verificationRules: readonly CompiledAdapterVerification[];
+    readonly lifecycleOperations: readonly CompiledAdapterLifecycleOperation[];
+    readonly verificationRules: readonly CompiledAdapterVerificationV2[];
   },
   sourcePath_: string | null,
 ): void {
@@ -694,6 +1077,7 @@ function validateActiveReferences(
     ...values.roots,
     ...values.manifests,
     ...values.actions,
+    ...values.lifecycleOperations,
   ]) {
     for (const probeId of declaration.requiresProbes ?? []) {
       requireReference(
@@ -744,6 +1128,39 @@ function validateActiveReferences(
       );
     }
   }
+  for (const operation of values.lifecycleOperations) {
+    if (operation.source !== undefined) {
+      validateRuleSource(
+        operation.source,
+        roots,
+        manifests,
+        operation.id,
+        sourcePath_,
+      );
+    }
+    for (const verificationId of operation.verificationRules ?? []) {
+      requireReference(
+        verifications,
+        verificationId,
+        "active verification rule",
+        operation.id,
+        sourcePath_,
+      );
+    }
+    if (
+      operation.adapterSchemaVersion === 2 &&
+      operation.lifecycle === "update" &&
+      operation.localChangeEvidence.kind === "content-hash-match"
+    ) {
+      requireReference(
+        manifests,
+        operation.localChangeEvidence.manifestId,
+        "active manifest",
+        operation.id,
+        sourcePath_,
+      );
+    }
+  }
   for (const rule of values.groupingRules) {
     requireReference(
       manifests,
@@ -763,10 +1180,24 @@ function validateActiveReferences(
     );
   }
   for (const verification of values.verificationRules) {
-    if (verification.kind === "manifest-record-absent") {
+    if (
+      verification.kind === "manifest-record-absent" ||
+      verification.kind === "manifest-record-present"
+    ) {
       requireReference(
         manifests,
         verification.manifestId,
+        "active manifest",
+        verification.id,
+        sourcePath_,
+      );
+    } else if (
+      verification.kind === "revision-evidence" &&
+      verification.evidence.kind === "manifest-value"
+    ) {
+      requireReference(
+        manifests,
+        verification.evidence.manifestId,
         "active manifest",
         verification.id,
         sourcePath_,
@@ -817,7 +1248,7 @@ function validatePathVariants(
     readonly id: string;
     readonly platforms?: readonly AdapterPlatform[];
   },
-  definition: AdapterDefinitionV1,
+  definition: AdapterDefinition,
   sourcePath_: string | null,
 ): void {
   for (const template of variantValues(variant)) {
@@ -855,7 +1286,7 @@ function validateVariants<Value>(
     readonly id: string;
     readonly platforms?: readonly AdapterPlatform[];
   },
-  definition: AdapterDefinitionV1,
+  definition: AdapterDefinition,
   sourcePath_: string | null,
 ): void {
   for (const platform of declaration.platforms ?? definition.platforms) {
@@ -950,7 +1381,7 @@ function normalizeDeclaration<
   return result;
 }
 
-function allDeclarations(definition: AdapterDefinitionV1): readonly {
+function allDeclarations(definition: AdapterDefinition): readonly {
   readonly id: string;
   readonly platforms?: readonly AdapterPlatform[];
 }[] {
@@ -961,7 +1392,9 @@ function allDeclarations(definition: AdapterDefinitionV1): readonly {
     ...(definition.ownershipRules ?? []),
     ...(definition.groupingRules ?? []),
     ...(definition.hardDependencies ?? []),
-    ...(definition.actions ?? []),
+    ...(definition.schemaVersion === 1
+      ? (definition.actions ?? [])
+      : (definition.lifecycleOperations ?? [])),
     ...(definition.verificationRules ?? []),
   ];
 }
