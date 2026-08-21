@@ -219,12 +219,45 @@ describe("release readiness", () => {
     expect(workflow).not.toMatch(/\brun:\s+(?:bash|sh|pwsh|cmd)\b/u);
   });
 
-  it("describes reversible availability in package metadata", async () => {
+  it("describes Update and reversible availability in package metadata", async () => {
     const metadata = JSON.parse(
       await readFile(join(repositoryRoot, "package.json"), "utf8"),
     ) as { readonly description: string };
+    expect(metadata.description).toContain("update");
     expect(metadata.description).toContain("reversibly disable");
     expect(metadata.description).toContain("enable");
+  });
+
+  it("keeps Update types, documents, and schemas in the public package", async () => {
+    const [metadataText, sourceIndex, verifier, cliSchemaText] =
+      await Promise.all([
+        readFile(join(repositoryRoot, "package.json"), "utf8"),
+        readFile(join(repositoryRoot, "src/index.ts"), "utf8"),
+        readFile(join(repositoryRoot, "scripts/verify-package.mjs"), "utf8"),
+        readFile(join(repositoryRoot, "schemas/cli-v1.schema.json"), "utf8"),
+      ] as const);
+    const metadata = JSON.parse(metadataText) as {
+      readonly exports: Readonly<Record<string, unknown>>;
+    };
+    const schema = JSON.parse(cliSchemaText) as {
+      readonly $defs: Readonly<Record<string, unknown>>;
+    };
+
+    expect(sourceIndex).toContain('export * from "./update/index.js"');
+    expect(metadata.exports).toHaveProperty("./adapter-v2.schema.json");
+    expect(metadata.exports).toHaveProperty("./cli-v1.schema.json");
+    expect(verifier).toContain('"dist/update/index.d.ts"');
+    expect(verifier).toContain('"docs/update.md"');
+    for (const definition of [
+      "updatePlan",
+      "updateReport",
+      "updatePlanEnvelope",
+      "updateReportEnvelope",
+      "updateConfirmationEnvelope",
+    ]) {
+      expect(schema.$defs).toHaveProperty(definition);
+      expect(verifier).toContain(`"${definition}"`);
+    }
   });
 
   it("keeps the packed first-release documentation complete", async () => {

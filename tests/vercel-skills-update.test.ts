@@ -4,6 +4,8 @@ import {
   lstat,
   mkdir,
   readFile,
+  readdir,
+  readlink,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -11,6 +13,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { runCli } from "../src/cli.js";
 import {
   createExecutionModule,
   createInventoryScanner,
@@ -120,6 +123,35 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function snapshotTree(
+  root: string,
+  segments: readonly string[] = [],
+): Promise<readonly string[]> {
+  const directory = join(root, ...segments);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const snapshot: string[] = [];
+  for (const entry of entries.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    const childSegments = [...segments, entry.name];
+    const relativePath = childSegments.join("/");
+    const path = join(root, ...childSegments);
+    if (entry.isSymbolicLink()) {
+      snapshot.push(`link:${relativePath}:${await readlink(path)}`);
+    } else if (entry.isDirectory()) {
+      snapshot.push(`directory:${relativePath}`);
+      snapshot.push(...(await snapshotTree(root, childSegments)));
+    } else {
+      snapshot.push(
+        `file:${relativePath}:${createHash("sha256")
+          .update(await readFile(path))
+          .digest("hex")}`,
+      );
+    }
+  }
+  return snapshot;
+}
+
 function globalLockPath(environment: FixtureEnvironment): string {
   return join(environment.stateDirectory, "skills", ".skill-lock.json");
 }
@@ -213,6 +245,57 @@ async function globalFixture(managerAvailable: boolean, name = "review-tools") {
 }
 
 describe("Vercel Managed Update evidence", () => {
+  it("keeps scan, Planning, and CLI dry-run at zero footprint without an Owner request", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const name = "dry-run-skill";
+    await writeSkill(globalSkillPath(environment, name), name);
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        [name]: {
+          source: "acme/dry-run-skill",
+          sourceType: "github",
+          sourceUrl: "https://github.com/acme/dry-run-skill.git",
+          skillPath: `skills/${name}/SKILL.md`,
+          skillFolderHash: "source-tree-v1",
+        },
+      },
+    });
+    const localCommands = commandRunner(true);
+    const run = vi.fn((command) => localCommands.run(command));
+    const inventoryScanner = createInventoryScanner({
+      now: () => fixedTime,
+      environment,
+      commandRunner: { run },
+    });
+    const beforeScan = await snapshotTree(fixture.root);
+    const initial = await inventoryScanner.scan({});
+    expect(await snapshotTree(fixture.root)).toEqual(beforeScan);
+    const before = await snapshotTree(fixture.root);
+
+    const output = await runCli(
+      [
+        "update",
+        `installation:${initial.installations[0]!.id}`,
+        "--dry-run",
+        "--json",
+      ],
+      { scan: () => inventoryScanner.scan({}) },
+    );
+
+    expect(output).toMatchObject({
+      exitCode: 0,
+      output: { kind: "update-plan", plan: { actions: [{}] } },
+    });
+    expect(await snapshotTree(fixture.root)).toEqual(before);
+    expect(run).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        arguments: expect.arrayContaining(["update"]),
+      }),
+    );
+  });
+
   it("plans one global direct Update with exact argv and complete local evidence", async () => {
     const value = await globalFixture(true);
     const operation =
@@ -378,12 +461,16 @@ describe("Vercel Managed Update evidence", () => {
     const planned = planUpdate(inventory, updateIntent(installation));
     expect(planned.blocks).toEqual([]);
     const run = vi.fn(async (request: ExecutionProcessRequest) => {
-      expect(request).toMatchObject({
+      expect(request).toEqual({
         command: {
           executable: "skills",
           arguments: ["update", name, "--project", "--yes"],
         },
         cwd: environment.workspaceDirectory,
+        environment: {
+          DISABLE_TELEMETRY: "1",
+          DO_NOT_TRACK: "1",
+        },
       });
       await writeSkill(skillPath, name, "v2");
       const lock = JSON.parse(await readFile(lockPath, "utf8")) as {
@@ -531,19 +618,37 @@ describe("Vercel Managed Update evidence", () => {
       updateIntent(value.installation),
     );
     const run = vi.fn(async (request: ExecutionProcessRequest) => {
-      expect(request.command).toEqual({
-        executable: "npx",
-        arguments: [
-          "--yes",
-          "skills@1.5.22",
-          "update",
-          "review-tools",
-          "--global",
-          "--yes",
-        ],
+      expect(request).toEqual({
+        command: {
+          executable: "npx",
+          arguments: [
+            "--yes",
+            "skills@1.5.22",
+            "update",
+            "review-tools",
+            "--global",
+            "--yes",
+          ],
+        },
+        cwd: expect.stringContaining("lampwright-execution-"),
+        environment: {
+          DISABLE_TELEMETRY: "1",
+          DO_NOT_TRACK: "1",
+          npm_config_cache: join(
+            value.environment.stateDirectory,
+            "lampwright",
+            "execution",
+            "v1",
+            "npm-cache",
+          ),
+          npm_config_update_notifier: "false",
+          npm_config_fund: "false",
+          npm_config_audit: "false",
+          npm_config_global: "false",
+          npm_config_save: "false",
+          npm_config_package_lock: "false",
+        },
       });
-      expect(request.cwd).toBeTypeOf("string");
-      expect(request.environment?.npm_config_cache).toBeTypeOf("string");
       return { exitCode: 0, stdout: "unchanged", stderr: "" };
     });
     const report = await execution(value.inventoryScanner, value.environment, {
@@ -609,9 +714,16 @@ describe("Vercel Managed Update execution", () => {
     );
     let isolatedDirectory: string | undefined;
     const run = vi.fn(async (request: ExecutionProcessRequest) => {
-      expect(request.command).toEqual({
-        executable: "skills",
-        arguments: ["update", "review-tools", "--global", "--yes"],
+      expect(request).toEqual({
+        command: {
+          executable: "skills",
+          arguments: ["update", "review-tools", "--global", "--yes"],
+        },
+        cwd: expect.stringContaining("lampwright-owner-"),
+        environment: {
+          DISABLE_TELEMETRY: "1",
+          DO_NOT_TRACK: "1",
+        },
       });
       expect(request.cwd).not.toBe(value.environment.workspaceDirectory);
       isolatedDirectory = request.cwd;
@@ -713,6 +825,48 @@ describe("Vercel Managed Update execution", () => {
 });
 
 describe("Vercel Update safety blocks", () => {
+  it("withholds Update authority from an unexpected external link or junction", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const name = "external-topology";
+    const external = join(fixture.temporary, "external-topology-target");
+    const linked = projectSkillPath(environment, name);
+    await writeSkill(external, name);
+    await mkdir(dirname(linked), { recursive: true });
+    await symlink(
+      external,
+      linked,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await writeJson(projectLockPath(environment), {
+      version: 1,
+      skills: {
+        [name]: {
+          source: "acme/external-topology",
+          sourceType: "github",
+          sourceUrl: "https://github.com/acme/external-topology.git",
+          skillPath: name,
+          computedHash: projectCopyHash(name),
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+    expect(inventory.installations[0]).toMatchObject({
+      status: "unresolved",
+      location: {
+        path: linked,
+        artifactType: {
+          kind: process.platform === "win32" ? "junction" : "symbolic-link",
+        },
+      },
+      update: {
+        kind: "unresolved",
+        reason: expect.stringContaining("unexpected Vercel-managed link"),
+      },
+    });
+  });
+
   it.skipIf(process.platform === "win32")(
     "does not traverse an unexpected external project link for Update evidence",
     async () => {

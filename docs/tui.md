@@ -308,7 +308,8 @@ invocation, effects, network use, and ephemeral package trust. It also shows
 every block, warning, and verification check. The review states that Update has
 no automatic rollback and creates no Trash or Disabled Storage copy. The body
 supports the same details, paging, wheel scrolling, and resize clamping as the
-other plan screens. A blocked plan cannot be confirmed.
+other plan screens. Update Execution offers no Removal or brute-force fallback.
+A blocked plan cannot be confirmed.
 
 Pressing `y` grants the approval requirements shown for Update actions, except
 Adapter trust. Adapter trust must already exist before execution. Pressing `y`

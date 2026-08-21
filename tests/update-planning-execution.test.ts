@@ -300,6 +300,24 @@ describe("targeted Update planning", () => {
     );
   });
 
+  it("blocks read-only selected content even when effects claim writable paths", () => {
+    const item = installation("read-only-target", 1, {
+      protection: {
+        git: { kind: "outside-worktree" },
+        system: { kind: "none" },
+        filesystem: { kind: "read-only", reason: "fixture permission" },
+      },
+    });
+    const planned = planUpdate(inventory(item), intent(item));
+    expect(planned.actions).toEqual([]);
+    expect(planned.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "filesystem-permission",
+        path: item.location.path,
+      }),
+    );
+  });
+
   it("blocks incomplete roots and roots that contain an unselected boundary", () => {
     const selected = installation("selected");
     const nested = installation("nested", 1, {
@@ -421,6 +439,149 @@ describe("managed Update execution", () => {
     expect(report.status).toBe("blocked");
     expect(config.processRunner.run).not.toHaveBeenCalled();
     expect(config.updateAuditWriter?.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects forged effects through fresh replan without mutation or audit", async () => {
+    const item = installation();
+    const before = inventory(item);
+    const planned = planUpdate(before, intent(item));
+    const forged = structuredClone(planned) as UpdatePlan;
+    (
+      forged.actions[0]!.operation.effects as unknown as {
+        path: string;
+      }[]
+    )[0]!.path = "/fixtures/unreviewed-effect";
+    const supplied = parseUpdatePlan(forged);
+    const config = options(before, before, planned);
+    const report = await createExecutionModule(config).executeUpdate(supplied, {
+      grants: [{ kind: "confirmation" }],
+    });
+
+    expect(report.status).toBe("blocked");
+    expect(config.processRunner.run).not.toHaveBeenCalled();
+    expect(config.updateAuditWriter?.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects an Adapter trust change during the fresh replan", async () => {
+    const reviewedItem = installation();
+    const reviewed = inventory(reviewedItem);
+    const planned = planUpdate(reviewed, intent(reviewedItem));
+    const freshOperation = operation(1, "installation-1");
+    const freshItem = installation("installation-1", 1, {
+      update: {
+        kind: "managed",
+        operation: {
+          ...freshOperation,
+          trust: {
+            kind: "blocked",
+            adapterId: freshOperation.adapterId,
+            contentHash: "d".repeat(64),
+          },
+        },
+      },
+    });
+    const fresh = inventory(freshItem, "inventory-fresh");
+    const config = options(fresh, fresh, planned);
+    const report = await createExecutionModule(config).executeUpdate(planned, {
+      grants: [{ kind: "confirmation" }],
+    });
+
+    expect(report.status).toBe("blocked");
+    expect(config.processRunner.run).not.toHaveBeenCalled();
+    expect(config.updateAuditWriter?.write).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when exact package trust cannot be persisted", async () => {
+    const update = operation(1, "installation-1");
+    const packageTrust = {
+      runner: "npx" as const,
+      packageName: "fixture-manager",
+      packageVersion: "1.2.3",
+      adapterHash: "e".repeat(64),
+    };
+    const item = installation("installation-1", 1, {
+      update: {
+        kind: "managed",
+        operation: {
+          ...update,
+          invocation: {
+            kind: "ephemeral-package",
+            packageExecution: { ...packageTrust, mayDownload: true },
+            packageArguments: ["update", "fixture-lock-key"],
+            workingDirectory: { kind: "isolated-temporary" },
+          },
+          packageDownload: {
+            kind: "possible",
+            packageName: packageTrust.packageName,
+            packageVersion: packageTrust.packageVersion,
+          },
+        },
+      },
+    });
+    const before = inventory(item);
+    const planned = planUpdate(before, intent(item));
+    const trust = vi.fn(async () => {
+      throw new Error("trust record changed during approval");
+    });
+    const config: ExecutionModuleOptions = {
+      ...options(before, before, planned),
+      packageTrustStore: {
+        isTrusted: vi.fn(async () => false),
+        trust,
+      },
+    };
+    const report = await createExecutionModule(config).executeUpdate(planned, {
+      grants: planned.actions[0]!.approvals,
+    });
+
+    expect(report.targetResults[0].status).toBe("failed");
+    expect(trust).toHaveBeenCalledWith(packageTrust);
+    expect(config.processRunner.run).not.toHaveBeenCalled();
+    expect(config.updateAuditWriter?.write).not.toHaveBeenCalled();
+  });
+
+  it("blocks an effect that becomes Git-protected before Owner invocation", async () => {
+    const item = installation();
+    const before = inventory(item);
+    const planned = planUpdate(before, intent(item));
+    const config: ExecutionModuleOptions = {
+      ...options(before, before, planned),
+      inspectGitProtection: vi.fn(async () => ({
+        kind: "protected" as const,
+        worktreeRoot: "/fixtures",
+      })),
+    };
+    const report = await createExecutionModule(config).executeUpdate(planned, {
+      grants: [{ kind: "confirmation" }],
+    });
+
+    expect(report.targetResults[0].status).toBe("blocked");
+    expect(report.actionResults[0]).toMatchObject({
+      status: "skipped",
+      reason: expect.stringContaining("became Git-protected"),
+    });
+    expect(config.processRunner.run).not.toHaveBeenCalled();
+    expect(config.updateAuditWriter?.write).not.toHaveBeenCalled();
+  });
+
+  it("reports an interrupted Owner process as failed and never updated", async () => {
+    const item = installation();
+    const before = inventory(item);
+    const planned = planUpdate(before, intent(item));
+    const runner = {
+      run: vi.fn(async () => {
+        throw new Error("Owner process interrupted");
+      }),
+    };
+    const config = options(before, before, planned, runner);
+    const report = await createExecutionModule(config).executeUpdate(planned, {
+      grants: [{ kind: "confirmation" }],
+    });
+
+    expect(report.status).toBe("failed");
+    expect(report.targetResults[0].status).toBe("failed");
+    expect(report.targetResults[0].status).not.toBe("updated");
+    expect(config.updateAuditWriter?.write).toHaveBeenCalledOnce();
   });
 
   it("returns a blocked report when fresh replanning cannot resolve the target", async () => {
@@ -663,8 +824,8 @@ describe("managed Update execution", () => {
 
   it("continues an independent action and blocks a failed dependency branch", async () => {
     const sharedIdentity = installation("shared").identity;
-    const withSelector = (id: string): ManagedUpdateEvidence => {
-      const value = operation(1, id);
+    const withSelector = (id: string, version = 1): ManagedUpdateEvidence => {
+      const value = operation(version, id);
       return {
         ...value,
         externalId: id,
@@ -722,7 +883,35 @@ describe("managed Update execution", () => {
         }),
       ),
     };
-    const config = options(before, before, planned, runner);
+    const finalInstallations = [
+      installation("first", 1, {
+        identity: sharedIdentity,
+        update: { kind: "managed", operation: withSelector("first") },
+      }),
+      installation("second", 1, {
+        identity: sharedIdentity,
+        update: { kind: "managed", operation: withSelector("second") },
+      }),
+      installation("independent", 2, {
+        identity: sharedIdentity,
+        update: {
+          kind: "managed",
+          operation: withSelector("independent", 2),
+        },
+      }),
+    ];
+    const final = buildInventory({
+      id: "inventory-final",
+      installations: finalInstallations,
+      logicalSkills: [
+        buildLogicalSkill({
+          id: logical.id,
+          identity: sharedIdentity,
+          installationIds: finalInstallations.map((item) => item.id),
+        }),
+      ],
+    });
+    const config = options(before, final, planned, runner);
     const report = await createExecutionModule(config).executeUpdate(planned, {
       grants: [{ kind: "confirmation" }],
     });
@@ -741,5 +930,10 @@ describe("managed Update execution", () => {
         return action?.operation.externalId === "first";
       })?.status,
     ).toBe("blocked");
+    expect(report.status).toBe("partial");
+    expect(report.targetResults[0]).toMatchObject({
+      status: "partially-updated",
+      reason: "only some Update actions were verified",
+    });
   });
 });

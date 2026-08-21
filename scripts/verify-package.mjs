@@ -19,6 +19,8 @@ if (pack.name !== packageJson.name || pack.version !== packageJson.version)
   throw new Error("packed name/version does not match package.json");
 if (!/\bdisable\b/u.test(packageJson.description))
   throw new Error("packed description omits reversible disable behavior");
+if (!/\bupdate\b/u.test(packageJson.description))
+  throw new Error("packed description omits targeted Update behavior");
 if (!Array.isArray(pack.files) || pack.files.length === 0)
   throw new Error("npm pack returned no files");
 
@@ -60,6 +62,7 @@ for (const required of [
   "dist/index.js",
   "dist/availability/types.d.ts",
   "dist/disabled-storage/types.d.ts",
+  "dist/update/index.d.ts",
   "dist/tui/types.d.ts",
   "dist/testing/index.d.ts",
   "dist/testing/index.js",
@@ -68,6 +71,7 @@ for (const required of [
   "docs/availability.md",
   "docs/availability-controls.md",
   "docs/disabled-storage.md",
+  "docs/update.md",
   "docs/execution.md",
   "docs/planning.md",
   "docs/cli.md",
@@ -88,15 +92,18 @@ for (const definition of [
   "availabilityReport",
   "availabilityPlanEnvelope",
   "availabilityReportEnvelope",
+  "updatePlan",
+  "updateReport",
+  "updatePlanEnvelope",
+  "updateReportEnvelope",
+  "updateConfirmationEnvelope",
 ]) {
   if (
     cliSchema.$defs === null ||
     typeof cliSchema.$defs !== "object" ||
     !(definition in cliSchema.$defs)
   )
-    throw new Error(
-      `Availability CLI schema definition missing: ${definition}`,
-    );
+    throw new Error(`Lifecycle CLI schema definition missing: ${definition}`);
 }
 
 for (const target of exportedTargets(packageJson.exports)) {
