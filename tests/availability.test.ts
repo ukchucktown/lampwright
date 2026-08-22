@@ -293,7 +293,7 @@ describe("native availability evidence", () => {
     const root = join(environment.temporary, "shared-codex-skills");
     await skill(join(root, "one"), "one");
     await skill(join(root, "two"), "two");
-    await mkdir(codexHome, { recursive: true });
+    await mkdir(join(codexHome, ".git"), { recursive: true });
     await writeFile(
       join(codexHome, "config.toml"),
       "[skills]\nbundled = { enabled = true }\n",
@@ -371,6 +371,7 @@ describe("native availability evidence", () => {
   it("keeps Claude local overrides safe and requires every applied Gemini membership for enable", async () => {
     const environment = await fixture();
     const workspace = environment.workspace;
+    await mkdir(join(workspace, ".git"));
     const runner: InventoryCommandRunner = {
       async run(command: InventoryCommand) {
         if (command.executable !== "git") return { exitCode: 1, stdout: "" };
