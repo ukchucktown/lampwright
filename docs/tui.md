@@ -125,6 +125,8 @@ Inventory and Disabled always retain the complete `u update` key/action pair
 at supported terminal widths. When the action row must shrink, it removes or
 shortens secondary navigation hints before it shortens a lifecycle command.
 A 60-column render includes `u update` without an ellipsis.
+The browse grid supports a minimum of nine terminal columns. The margin guard
+leaves eight columns for `u update`.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
