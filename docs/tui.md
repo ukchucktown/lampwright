@@ -310,13 +310,22 @@ actions, verification checks, identifiers, and approval boundary.
 
 ### Update review and report
 
-Update review shows the exact Owner, current revision, source, ref, Scope,
-invocation, effects, network use, and ephemeral package trust. It also shows
-every block, warning, and verification check. The review states that Update has
-no automatic rollback and creates no Trash or Disabled Storage copy. The body
-supports the same details, paging, wheel scrolling, and resize clamping as the
-other plan screens. Update Execution offers no Removal or brute-force fallback.
-A blocked plan cannot be confirmed.
+Update review leads with the selected target, readiness, action count,
+Installation count, material risks, recoverability, and verification outcomes.
+Lampwright groups Owner actions only when their Owner, source, ref, Scope,
+invocation pattern, trust, network use, and risks match. A Plugin boundary has
+its own summary. Each repeated warning appears once with the affected count and
+the consequence. Each distinct block remains prominent.
+
+The default review groups checks that promise the same outcome. Package consent
+shows each exact runner, pinned version, and Adapter identity one time for each
+trust tuple. The review states that Update has no automatic rollback and creates
+no Trash or Disabled Storage copy. Press `d` to see exact targets, selectors,
+revisions, hashes, effects, paths, approvals, commands, action IDs, and check
+IDs. The body supports paging, wheel scrolling, and resize clamping.
+
+Update Execution offers no Removal or brute-force fallback. You cannot confirm
+a blocked plan.
 
 Pressing `y` grants the approval requirements shown for Update actions, except
 Adapter trust. Adapter trust must already exist before execution. Pressing `y`

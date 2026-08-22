@@ -798,48 +798,69 @@ function updatePlanBodyLines(
         ? style.success("READY TO UPDATE")
         : style.warning("REVIEW BEFORE UPDATE")
       : style.error("CANNOT UPDATE"),
+    style.muted(
+      `${countLabel(plan.actions.length, "Owner action")} · ${countLabel(affectedUpdateInstallationCount(state), "affected Installation")}`,
+    ),
     "",
   ];
-  if (plan.blocks.length > 0)
+  if (plan.blocks.length > 0) {
+    const groups = groupUpdateBlocks(plan.blocks);
     lines.push(
       style.error("Why Update cannot run"),
-      ...plan.blocks.flatMap((block) =>
-        wrapPlanLine(`! ${describeUpdateBlock(block)}`, width).map(style.error),
+      ...groups.flatMap((group) =>
+        wrapPlanLine(`! ${describeUpdateBlockGroup(group)}`, width).map(
+          style.error,
+        ),
       ),
       "",
     );
-  if (plan.warnings.length > 0)
+  }
+  if (plan.warnings.length > 0) {
+    const groups = groupUpdateWarnings(plan.warnings);
     lines.push(
       style.warning("Review these warnings"),
-      ...plan.warnings.flatMap((warning) =>
-        wrapPlanLine(`! ${describeUpdateWarning(warning)}`, width).map(
+      ...groups.flatMap((group) =>
+        wrapPlanLine(`! ${describeUpdateWarningGroup(group)}`, width).map(
           style.warning,
         ),
       ),
       "",
     );
-  for (const action of plan.actions)
+  }
+  if (plan.actions.length > 0) {
     lines.push(
-      style.title("Reviewed Owner action"),
-      ...updateActionLines(action).flatMap((line) =>
-        wrapPlanLine(line, width).map(style.muted),
+      style.title("Planned Owner actions"),
+      ...groupUpdateActions(plan.actions, plan.warnings).flatMap((group) =>
+        updateActionGroupLines(group).flatMap((line) =>
+          wrapPlanLine(line, width).map(style.muted),
+        ),
       ),
       "",
     );
-  if (plan.verificationChecks.length > 0)
+    const approvals = uniqueUpdateApprovals(plan.actions);
+    if (approvals.length > 0)
+      lines.push(
+        style.title("Required consent"),
+        ...approvals.flatMap((approval) =>
+          wrapPlanLine(`• ${describeApproval(approval)}`, width).map(
+            style.muted,
+          ),
+        ),
+        "",
+      );
+  }
+  if (plan.verificationChecks.length > 0) {
     lines.push(
       style.title("After Update, Lampwright will verify"),
-      ...plan.verificationChecks.flatMap((check) =>
-        [
-          `• ${describeUpdateTarget(check.target)} keeps its strong identity, Owner, source, ref, Scope, boundary, and availability.`,
-          `  Current revision: ${check.currentRevision.map(describeUpdateRevision).join(" · ")}`,
-          ...describeUpdateAvailabilityExpectation(
-            check.availabilityExpectation,
+      ...groupUpdateVerificationChecks(plan.verificationChecks).flatMap(
+        (group) =>
+          updateVerificationGroupLines(group).flatMap((line) =>
+            wrapPlanLine(line, width).map(style.muted),
           ),
-        ].flatMap((line) => wrapPlanLine(line, width).map(style.muted)),
       ),
       "",
     );
+  }
   lines.push(
     style.warning("Automatic rollback is unavailable."),
     ...wrapPlanLine(
@@ -847,10 +868,10 @@ function updatePlanBodyLines(
       width,
     ).map(style.warning),
   );
-  if (state.technicalDetails)
+  if (state.technicalDetails) {
     lines.push(
       "",
-      style.info("Technical details"),
+      style.info("Exact Update evidence"),
       ...wrapPlanLine(`Plan ID: ${plan.id}`, width).map(style.muted),
       ...wrapPlanLine(`Inventory ID: ${plan.inventoryId}`, width).map(
         style.muted,
@@ -859,14 +880,400 @@ function updatePlanBodyLines(
         `Target: ${describeUpdateTarget(plan.intent.target)}`,
         width,
       ).map(style.muted),
-      ...plan.actions.flatMap((action) =>
-        wrapPlanLine(`Action ID: ${action.id}`, width).map(style.muted),
-      ),
-      ...plan.verificationChecks.flatMap((check) =>
-        wrapPlanLine(`Check ID: ${check.id}`, width).map(style.muted),
-      ),
     );
+    if (plan.blocks.length > 0)
+      lines.push(
+        style.title("Exact blocks"),
+        ...plan.blocks.flatMap((block) =>
+          wrapPlanLine(`• ${JSON.stringify(block)}`, width).map(style.muted),
+        ),
+        "",
+      );
+    if (plan.warnings.length > 0)
+      lines.push(
+        style.title("Exact warnings"),
+        ...plan.warnings.flatMap((warning) =>
+          wrapPlanLine(`• ${JSON.stringify(warning)}`, width).map(style.muted),
+        ),
+        "",
+      );
+    for (const action of plan.actions)
+      lines.push(
+        style.title(`Action ID: ${action.id}`),
+        ...updateActionLines(action).flatMap((line) =>
+          wrapPlanLine(line, width).map(style.muted),
+        ),
+        ...action.selectedInstallations.flatMap((installation) =>
+          [
+            `• Selected Installation ID: ${installation.id}`,
+            `  Location: ${installation.location.path}`,
+            `  Canonical path: ${installation.location.canonicalPath}`,
+            `  Artifact type: ${JSON.stringify(installation.location.artifactType)}`,
+            `  Strong identity: ${JSON.stringify(installation.strongEvidence)}`,
+            `  Lifecycle facts: ${JSON.stringify(installation.lifecycle)}`,
+          ].flatMap((line) => wrapPlanLine(line, width).map(style.muted)),
+        ),
+        ...(action.selectedPlugin === null
+          ? []
+          : [
+              `• Selected Plugin boundary: ${JSON.stringify(action.selectedPlugin)}`,
+            ].flatMap((line) => wrapPlanLine(line, width).map(style.muted))),
+        "",
+      );
+    for (const check of plan.verificationChecks)
+      lines.push(
+        style.title(`Check ID: ${check.id}`),
+        ...[
+          `• Action ID: ${check.actionId}`,
+          `• Target: ${describeUpdateTarget(check.target)}`,
+          `• Installation ID: ${check.installationId ?? "none"}`,
+          `• Plugin boundary ID: ${check.pluginBoundaryId ?? "none"}`,
+          `• Strong identity: ${JSON.stringify(check.identity)}`,
+          `• Source: ${JSON.stringify(check.source)}`,
+          `• Ref: ${check.ref ?? "none"}`,
+          `• Scope: ${JSON.stringify(check.scope)}`,
+          `• Owner: ${JSON.stringify(check.owner)}`,
+          `• Current revision: ${check.currentRevision.map(describeUpdateRevision).join(" · ")}`,
+          ...describeUpdateAvailabilityExpectation(
+            check.availabilityExpectation,
+          ),
+        ].flatMap((line) => wrapPlanLine(line, width).map(style.muted)),
+        "",
+      );
+  }
   return lines;
+}
+
+interface UpdateActionGroup {
+  readonly actions: readonly [UpdateAction, ...UpdateAction[]];
+}
+
+interface UpdateWarningGroup {
+  readonly warnings: readonly [UpdateWarning, ...UpdateWarning[]];
+}
+
+interface UpdateBlockGroup {
+  readonly blocks: readonly [UpdateBlock, ...UpdateBlock[]];
+}
+
+type UpdateVerificationCheck =
+  TuiUpdatePlanState["plan"]["verificationChecks"][number];
+
+interface UpdateVerificationGroup {
+  readonly checks: readonly [
+    UpdateVerificationCheck,
+    ...UpdateVerificationCheck[],
+  ];
+}
+
+function affectedUpdateInstallationIds(
+  actions: readonly UpdateAction[],
+): readonly string[] {
+  return [
+    ...new Set(actions.flatMap((action) => action.affectedInstallationIds)),
+  ];
+}
+
+function affectedUpdateInstallationCount(state: TuiUpdatePlanState): number {
+  const fromActions = affectedUpdateInstallationIds(state.plan.actions);
+  if (fromActions.length > 0) return fromActions.length;
+  const target = state.plan.intent.target;
+  if (target.kind === "installation") return 1;
+  if (target.kind === "logical-skill")
+    return (
+      state.browse.inventory.logicalSkills.find(
+        (skill) => skill.id === target.logicalSkillId,
+      )?.installationIds.length ?? 0
+    );
+  if (target.kind === "source-group")
+    return (
+      state.browse.inventory.groups.find((group) => group.id === target.groupId)
+        ?.installationIds.length ?? 0
+    );
+  return (
+    state.browse.inventory.plugins.find(
+      (plugin) => plugin.id === target.pluginBoundaryId,
+    )?.installationIds.length ?? 0
+  );
+}
+
+function groupValues<Value>(
+  values: readonly Value[],
+  keyFor: (value: Value) => string,
+): readonly (readonly [Value, ...Value[]])[] {
+  const groups = new Map<string, Value[]>();
+  for (const value of values) {
+    const key = keyFor(value);
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [value]);
+    else group.push(value);
+  }
+  return [...groups.values()].map((group) => [group[0]!, ...group.slice(1)]);
+}
+
+function updateRiskKey(
+  action: UpdateAction,
+  warnings: readonly UpdateWarning[],
+): string {
+  const actionWarnings = warnings
+    .filter((warning) => updateWarningAppliesToAction(warning, action))
+    .map((warning) => describeUpdateWarning(warning))
+    .sort();
+  return JSON.stringify({
+    localChanges: action.operation.localChanges,
+    packageDownload: action.operation.packageDownload,
+    availability: updateAvailabilityKey(action.availabilityExpectation),
+    warnings: actionWarnings,
+  });
+}
+
+function updateWarningAppliesToAction(
+  warning: UpdateWarning,
+  action: UpdateAction,
+): boolean {
+  if ("actionId" in warning) return warning.actionId === action.id;
+  if (warning.kind === "local-change-unavailable")
+    return (
+      warning.installationId === null ||
+      action.affectedInstallationIds.includes(warning.installationId)
+    );
+  if (warning.kind === "hard-dependency")
+    return action.affectedInstallationIds.includes(
+      warning.dependency.dependentInstallationId,
+    );
+  if (warning.kind === "soft-reference")
+    return (
+      warning.reference.referringRecord.kind === "finding" ||
+      action.affectedInstallationIds.includes(
+        warning.reference.referringRecord.installationId,
+      )
+    );
+  return warning.installationIds.some((id) =>
+    action.affectedInstallationIds.includes(id),
+  );
+}
+
+function updateAvailabilityKey(
+  expectation: UpdateAction["availabilityExpectation"],
+): Readonly<Record<string, unknown>> {
+  return {
+    harnessStatuses: expectation.harnessStatuses
+      .map(({ harnessId, status }) => ({ harnessId, status }))
+      .sort((left, right) =>
+        `${left.harnessId}\u0000${left.status}`.localeCompare(
+          `${right.harnessId}\u0000${right.status}`,
+        ),
+      ),
+    pluginStatus: expectation.pluginStatus,
+  };
+}
+
+function updateActionGroupKey(
+  action: UpdateAction,
+  warnings: readonly UpdateWarning[],
+): string {
+  const operation = action.operation;
+  return JSON.stringify({
+    targetKind: action.target.kind,
+    pluginBoundary: action.selectedPlugin?.id ?? null,
+    owner: operation.owner,
+    source: operation.source,
+    ref: operation.ref,
+    scope: operation.scope,
+    invocation: updateInvocationPattern(operation),
+    trust: operation.trust,
+    approvals: action.approvals.filter(
+      (approval) => approval.kind !== "confirmation",
+    ),
+    network: operation.network,
+    risk: updateRiskKey(action, warnings),
+  });
+}
+
+function groupUpdateActions(
+  actions: readonly UpdateAction[],
+  warnings: readonly UpdateWarning[],
+): readonly UpdateActionGroup[] {
+  return groupValues(actions, (action) =>
+    updateActionGroupKey(action, warnings),
+  ).map((group) => ({ actions: group }));
+}
+
+function updateActionGroupLines(group: UpdateActionGroup): readonly string[] {
+  const action = group.actions[0];
+  const operation = action.operation;
+  const owner =
+    operation.owner.kind === "manager"
+      ? `Manager ${operation.owner.managerId}`
+      : `Plugin ${operation.owner.pluginId}`;
+  const affected = affectedUpdateInstallationIds(group.actions);
+  const packageConsent = group.actions.some((item) =>
+    item.approvals.some((approval) => approval.kind === "package-trust"),
+  );
+  return [
+    `• ${countLabel(group.actions.length, "Owner action")} · ${countLabel(affected.length, "affected Installation")}`,
+    ...(action.target.kind === "plugin"
+      ? [`  Boundary: Plugin ${action.target.pluginBoundaryId}`]
+      : []),
+    `  Owner: ${owner}`,
+    `  Source: ${operation.source.id}${operation.source.url === null ? "" : ` (${operation.source.url})`} · ref ${operation.ref ?? "not pinned"}`,
+    `  Scope: ${describeUpdateScope(operation.scope)}`,
+    `  Invocation: ${describeUpdateInvocationPattern(operation)}`,
+    `  Network: ${operation.network.kind === "required" ? `required — ${operation.network.reason}` : "not required by the reviewed operation"}`,
+    `  Trust: Adapter ${operation.adapterId} ${operation.trust.kind === "trusted" ? "trusted" : "not trusted"} · ${packageConsent ? "pinned package consent required" : "no package consent required"}`,
+  ];
+}
+
+function uniqueUpdateApprovals(
+  actions: readonly UpdateAction[],
+): readonly ApprovalRequirement[] {
+  const approvals = actions
+    .flatMap((action) => action.approvals)
+    .filter((approval) => approval.kind !== "confirmation");
+  return approvals.filter(
+    (approval, index) =>
+      approvals.findIndex(
+        (candidate) => JSON.stringify(candidate) === JSON.stringify(approval),
+      ) === index,
+  );
+}
+
+function updateInvocationPattern(
+  operation: UpdateAction["operation"],
+): UpdateAction["operation"]["invocation"] {
+  const replaceSelector = (argument: string): string =>
+    argument === operation.externalId ? "…" : argument;
+  const invocation = operation.invocation;
+  if (invocation.kind === "direct")
+    return {
+      ...invocation,
+      command: {
+        ...invocation.command,
+        arguments: invocation.command.arguments.map(replaceSelector),
+      },
+    };
+  return {
+    ...invocation,
+    packageArguments: invocation.packageArguments.map(replaceSelector),
+  };
+}
+
+function describeUpdateInvocationPattern(
+  operation: UpdateAction["operation"],
+): string {
+  return describeUpdateInvocation(updateInvocationPattern(operation));
+}
+
+function groupUpdateWarnings(
+  warnings: readonly UpdateWarning[],
+): readonly UpdateWarningGroup[] {
+  return groupValues(warnings, describeUpdateWarning).map((group) => ({
+    warnings: group,
+  }));
+}
+
+function describeUpdateWarningGroup(group: UpdateWarningGroup): string {
+  const description = describeUpdateWarning(group.warnings[0]);
+  if (group.warnings.length === 1) return description;
+  const warning = group.warnings[0];
+  const noun =
+    warning.kind === "network-access" || warning.kind === "package-download"
+      ? "affected action"
+      : warning.kind === "local-change-unavailable"
+        ? "affected Installation"
+        : "affected relationship";
+  return `${description} — ${countLabel(group.warnings.length, noun)}`;
+}
+
+function groupUpdateBlocks(
+  blocks: readonly UpdateBlock[],
+): readonly UpdateBlockGroup[] {
+  return groupValues(blocks, (block) =>
+    JSON.stringify({ kind: block.kind, reason: block.reason }),
+  ).map((group) => ({ blocks: group }));
+}
+
+function describeUpdateBlockGroup(group: UpdateBlockGroup): string {
+  if (group.blocks.length === 1) return describeUpdateBlock(group.blocks[0]);
+  const block = group.blocks[0];
+  return `${block.kind}: ${block.reason} — ${countLabel(group.blocks.length, "affected boundary")} (not overridable)`;
+}
+
+function groupUpdateVerificationChecks(
+  checks: readonly UpdateVerificationCheck[],
+): readonly UpdateVerificationGroup[] {
+  return groupValues(checks, (check) =>
+    JSON.stringify({
+      targetKind: check.target.kind,
+      pluginBoundaryId: check.pluginBoundaryId,
+      source: check.source,
+      ref: check.ref,
+      scope: check.scope,
+      owner: check.owner,
+      revisionShape: check.currentRevision.map(updateRevisionShape),
+      availability: updateAvailabilityKey(check.availabilityExpectation),
+    }),
+  ).map((group) => ({ checks: group }));
+}
+
+function updateRevisionShape(
+  revision: UpdateVerificationCheck["currentRevision"][number],
+): Readonly<Record<string, unknown>> {
+  if (revision.kind === "content-hash")
+    return { kind: revision.kind, algorithm: revision.digest.algorithm };
+  return { kind: revision.kind, format: revision.format };
+}
+
+function updateVerificationGroupLines(
+  group: UpdateVerificationGroup,
+): readonly string[] {
+  const check = group.checks[0];
+  if (group.checks.length === 1)
+    return [
+      `• ${describeUpdateTarget(check.target)} keeps its strong identity, Owner, source, ref, Scope, boundary, and availability.`,
+      ...describeUpdateAvailabilityExpectation(check.availabilityExpectation),
+    ];
+  const installationCount = new Set(
+    group.checks.flatMap((item) =>
+      item.installationId === null ? [] : [item.installationId],
+    ),
+  ).size;
+  return [
+    `• ${countLabel(installationCount, "Installation")} will be verified for strong identity, Owner, source, ref, Scope, boundary, and availability.`,
+    ...summarizeUpdateAvailability(group.checks),
+  ];
+}
+
+function summarizeUpdateAvailability(
+  checks: readonly UpdateVerificationCheck[],
+): readonly string[] {
+  const harnesses = checks.flatMap(
+    (check) => check.availabilityExpectation.harnessStatuses,
+  );
+  const statuses = new Map<string, number>();
+  for (const harness of harnesses) {
+    const key = `${harness.harnessId}\u0000${harness.status}`;
+    statuses.set(key, (statuses.get(key) ?? 0) + 1);
+  }
+  const lines = [...statuses].map(([key, count]) => {
+    const [harnessId, status] = key.split("\u0000");
+    return `  ${countLabel(count, `${status ?? "recorded"} ${harnessId ?? "Harness"} exposure`)} must remain unchanged.`;
+  });
+  const pluginStatuses = [
+    ...new Set(
+      checks.flatMap((check) =>
+        check.availabilityExpectation.pluginStatus === null
+          ? []
+          : [check.availabilityExpectation.pluginStatus],
+      ),
+    ),
+  ];
+  lines.push(
+    ...pluginStatuses.map((status) => `  Plugin must remain ${status}.`),
+  );
+  return lines.length === 0
+    ? ["  No Harness or Plugin availability state is recorded."]
+    : lines;
 }
 
 function updateActionLines(action: UpdateAction): readonly string[] {
@@ -1108,14 +1515,16 @@ function describeUpdateBlock(block: UpdateBlock): string {
 
 function describeUpdateWarning(warning: UpdateWarning): string {
   if (warning.kind === "package-download")
-    return `${warning.kind}: ${warning.packageName}@${warning.packageVersion} may download or use a cache`;
+    return `Package download: ${warning.packageName}@${warning.packageVersion} may download or use a cache`;
   if (warning.kind === "soft-reference")
-    return `${warning.kind}: ${warning.reference.evidence}`;
+    return `Soft reference: ${warning.reference.evidence} — Update does not change the reference, so it can become stale`;
   if (warning.kind === "hard-dependency")
-    return `${warning.kind}: ${warning.dependency.reason}`;
+    return `Hard dependency: ${warning.dependency.reason} — Lampwright preserves the required action order`;
   if (warning.kind === "plugin-impact")
-    return `${warning.kind}: Plugin ${warning.pluginId} and ${String(warning.installationIds.length)} owned Installation(s)`;
-  return `${warning.kind}: ${warning.reason}`;
+    return `Plugin impact: Plugin ${warning.pluginId} and ${String(warning.installationIds.length)} owned Installation(s) can change together`;
+  if (warning.kind === "local-change-unavailable")
+    return `Local edits: ${warning.reason} — Lampwright cannot detect local edits, so Update can overwrite them`;
+  return `Network access: ${warning.reason} — the Owner can contact a remote service`;
 }
 
 function describeUpdateInvocation(
