@@ -524,6 +524,7 @@ async function verifyCheck(
     });
     const installation =
       byOldId ?? (candidates.length === 1 ? candidates[0] : undefined);
+    if (check.pluginBoundaryId !== null && installation === undefined) continue;
     if (
       installation?.harnessExposures.find(
         (item) => item.harnessId === expectation.harnessId,
@@ -572,15 +573,81 @@ async function verifyCheck(
         "an approved Owner verification command failed",
       );
   }
-  const changed =
+  const revisionChanged =
     stringifyModel(check.currentRevision, 0) !==
     stringifyModel(finalOperation.currentRevision, 0);
+  const selectedPlugin = action.selectedPlugin;
+  if (
+    selectedPlugin !== null &&
+    "pluginId" in record &&
+    stringifyModel(selectedPlugin.settingsRecords, 0) !==
+      stringifyModel(record.settingsRecords ?? [], 0)
+  )
+    return failedCheck(
+      check.id,
+      "the selected Plugin settings records changed",
+    );
+  const finalPluginResources =
+    selectedPlugin !== null && "pluginId" in record
+      ? pluginResourceKeys(record, inventory)
+      : [];
+  const addedResources =
+    selectedPlugin === null
+      ? []
+      : finalPluginResources.filter(
+          (resource) => !selectedPlugin.resourceKeys.includes(resource),
+        );
+  const removedResources =
+    selectedPlugin === null
+      ? []
+      : selectedPlugin.resourceKeys.filter(
+          (resource) => !finalPluginResources.includes(resource),
+        );
+  const versionChanged =
+    selectedPlugin !== null &&
+    "pluginId" in record &&
+    selectedPlugin.version !== record.version;
+  const changed =
+    revisionChanged ||
+    versionChanged ||
+    addedResources.length > 0 ||
+    removedResources.length > 0;
   return {
     checkId: check.id,
     status: "passed",
     changed,
-    details: { revisionChanged: changed },
+    details: {
+      revisionChanged,
+      ...(selectedPlugin === null || !("pluginId" in record)
+        ? {}
+        : {
+            versionBefore: selectedPlugin.version,
+            versionAfter: record.version,
+            addedResources: addedResources.join(", "),
+            removedResources: removedResources.join(", "),
+          }),
+    },
   };
+}
+
+function pluginResourceKeys(
+  plugin: Inventory["plugins"][number],
+  inventory: Inventory,
+): readonly string[] {
+  return [
+    ...plugin.resources.map((resource) => `${resource.kind}:${resource.id}`),
+    ...inventory.installations
+      .filter((installation) => installation.pluginBoundaryId === plugin.id)
+      .flatMap((installation) =>
+        installation.identity.strongEvidence.flatMap((evidence) =>
+          evidence.kind === "plugin" && evidence.pluginId === plugin.pluginId
+            ? [`skill:${evidence.skillId}`]
+            : [],
+        ),
+      ),
+  ]
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
 function newBoundaryFailure(

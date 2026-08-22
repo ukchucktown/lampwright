@@ -295,10 +295,33 @@ materializes. The approval does not reuse the version 1 Removal Adapter hash.
 
 ### Claude Code Plugins
 
-A later slice supports one complete, non-default Plugin boundary with
-`claude plugin update`. The operation preserves the qualified Plugin identity
-and its installation Scope. Known marketplace commands and dependency
-installation must not create an unselected lifecycle boundary.
+Lampwright supports one complete, non-default Claude Code Plugin boundary with
+`claude plugin update`. The exact arguments are `plugin update <qualified-id>
+--scope <scope> --yes`. A user operation uses a new isolated directory. A
+project or local operation uses the exact recorded workspace.
+
+The Update operation preserves the qualified Plugin identity, Scope, settings,
+and Native Disable state. Inventory corroborates the registry record with the
+known-marketplace record and the bounded marketplace manifest. The plan names
+the stable Plugin cache parent and each configuration path that the Owner can
+change. A marketplace refresh is outside this action.
+
+The plan contains opaque hashes and presence bits for the selected Plugin's
+`enabledPlugins` and `pluginConfigs` records. It does not contain their values.
+An npm source requires a valid npm package identifier and an exact semantic
+version. Local specifiers, URLs, tags, and version ranges are blocked.
+
+A command source grants no Update authority because Claude Code runs the
+command through a platform shell. A declared Plugin dependency also blocks the
+operation because Claude Code can install an independent Plugin. The network
+warning states that Claude can fetch the Plugin source. The warning also states
+that Claude can install package dependencies inside the new cache entry.
+
+Final verification accepts a new version root inside the selected Plugin cache
+boundary. The Plugin ID, the Scope, the source policy, the settings, and the
+availability state must stay unchanged. The report names the prior and final
+versions. The report also lists added and removed owned resources. A removed
+owned Skill does not fail Plugin verification by itself.
 
 ### Gemini extensions
 

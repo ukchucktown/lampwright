@@ -323,7 +323,9 @@ workspace, and their scope settings are read from `.claude/settings.json` or
 
 Each applicable registry record becomes its own physical Plugin boundary,
 even when another scope contains the same qualified Plugin ID. The boundary ID
-includes the declared installed root, scope, and workspace evidence. Installed
+includes the qualified Plugin ID, the Scope, and the workspace evidence. The
+versioned installed root is not part of that identity. Thus, the boundary and
+its child IDs stay stable when Update selects a new version root. Installed
 roots must remain under the exact versioned cache location
 `plugins/cache/<marketplace>/<plugin>/...`; a mismatched or externally resolved
 root is visible only as blocked Plugin state and grants no fallback authority.
@@ -353,6 +355,37 @@ JSON files with unique keys and a single hard link. Declarative cleanup records
 carry exact file and record hashes. Shared cache paths, duplicate scope records,
 invalid manifests/settings, and administrator-managed records remain blocked
 instead of widening the removal boundary.
+
+Claude Plugin Update authority also depends on local marketplace evidence.
+Inventory reads `plugins/known_marketplaces.json` and accepts only the exact
+`installLocation` for the named marketplace. Inventory then reads the bounded
+marketplace manifest and selects one exact Plugin entry. The known marketplace
+source supports the documented `github`, `url`, `git`, `directory`, and `file`
+forms. The Plugin source supports a safe relative path, `github`, `url`,
+`git-subdir`, `npm`, or `archive`.
+
+An `npm` source must contain an npm package identifier. Its optional version
+must be one exact semantic version. Paths, URLs, `file:` values, ranges, and
+tags do not grant npm Update authority. The cached Plugin manifest name must
+match the Plugin name in the qualified registry key.
+
+The Update evidence names the qualified Plugin ID and the exact Scope. A user
+operation uses an isolated directory. A project or local operation uses the
+exact workspace. The declared effects contain the stable Plugin cache parent,
+and the installed-Plugin registry. Settings stay as availability-verification
+evidence, not mutation authority. Inventory records only hashes and presence
+bits for the selected `enabledPlugins` and `pluginConfigs` records. It does not
+put their values in Inventory or the Update plan. The marketplace checkout
+grants source evidence, but the Update action does not refresh or mutate that
+checkout.
+
+Inventory blocks unsafe Claude Update evidence. The blocked cases include a
+source command, a local Plugin source, an unsupported URL scheme, a Plugin
+dependency, and a shared cache boundary. A source-command reason contains the
+exact command. Inventory also blocks a difference between the registry version
+and the cached Plugin manifest version. The network disclosure covers the
+Plugin source request and a possible `npm ci` or `bun install` in the new cache
+entry. Inventory does not contact that source during a scan.
 
 ## Codex plugin reconciliation
 

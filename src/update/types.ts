@@ -10,6 +10,7 @@ import type {
   ManagedOwnership,
   ManagedUpdateEvidence,
   Ownership,
+  PluginSettingsRecordSnapshot,
   Scope,
   SkillIdentity,
   SoftReference,
@@ -70,6 +71,9 @@ export interface UpdateInstallationBoundaryFacts {
 export interface UpdatePluginBoundaryFacts {
   readonly id: string;
   readonly pluginId: string;
+  readonly version: string | null;
+  readonly resourceKeys: readonly string[];
+  readonly settingsRecords: readonly PluginSettingsRecordSnapshot[];
   readonly ownership: Extract<Ownership, { readonly kind: "plugin" }>;
   readonly lifecycle: UpdateLifecycleFacts;
 }

@@ -1046,6 +1046,26 @@ const pluginAvailabilitySchema = z.strictObject({
   ]),
 });
 
+export const pluginSettingsRecordSnapshotSchema = z.discriminatedUnion(
+  "present",
+  [
+    z.strictObject({
+      path: absoluteFilesystemPath,
+      format: declarativeDocumentFormatSchema,
+      recordPointer,
+      present: z.literal(true),
+      digest: sha256DigestSchema,
+    }),
+    z.strictObject({
+      path: absoluteFilesystemPath,
+      format: declarativeDocumentFormatSchema,
+      recordPointer,
+      present: z.literal(false),
+      digest: z.null(),
+    }),
+  ],
+);
+
 const pluginBoundarySchema = z.strictObject({
   id: nonEmptyString,
   pluginId: nonEmptyString,
@@ -1056,6 +1076,7 @@ const pluginBoundarySchema = z.strictObject({
   runtimeDefault: z.boolean(),
   installationIds: z.array(modelId),
   resources: z.array(pluginResourceSchema),
+  settingsRecords: z.array(pluginSettingsRecordSnapshotSchema).optional(),
   availability: pluginAvailabilitySchema,
   update: updateEvidenceSchema,
   removal: removalEvidenceSchema,

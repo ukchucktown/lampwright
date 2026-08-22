@@ -175,6 +175,13 @@ export function claudeCodePluginUninstallArguments(
   );
 }
 
+export function claudeCodePluginUpdateArguments(
+  scope: ClaudeCodePluginScope,
+  externalId: string,
+): readonly string[] {
+  return ["plugin", "update", externalId, "--scope", scope, "--yes"];
+}
+
 const claudeCodePlugins = {
   schemaVersion: 1,
   id: CLAUDE_CODE_PLUGIN_ADAPTER_ID,

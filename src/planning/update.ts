@@ -568,10 +568,34 @@ function actionForUnit(
         : {
             id: resolved.plugin.id,
             pluginId: resolved.plugin.pluginId,
+            version: resolved.plugin.version,
+            resourceKeys: pluginResourceKeys(
+              resolved.plugin,
+              resolved.installations,
+            ),
+            settingsRecords: resolved.plugin.settingsRecords ?? [],
             ownership: resolved.plugin.ownership,
             lifecycle: lifecycleFacts(operation),
           },
   };
+}
+
+function pluginResourceKeys(
+  plugin: PluginBoundary,
+  installations: readonly Installation[],
+): readonly string[] {
+  return [
+    ...plugin.resources.map((resource) => `${resource.kind}:${resource.id}`),
+    ...installations.flatMap((installation) =>
+      installation.identity.strongEvidence.flatMap((evidence) =>
+        evidence.kind === "plugin" && evidence.pluginId === plugin.pluginId
+          ? [`skill:${evidence.skillId}`]
+          : [],
+      ),
+    ),
+  ]
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .sort(compare);
 }
 
 function availabilityExpectation(
