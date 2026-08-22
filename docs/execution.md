@@ -193,12 +193,16 @@ boundary. Execution also compares the location, source, ref, Scope, Owner, and
 exact Owner selector. The selected complete Plugin boundary can contain changed
 children. For other targets, a new Harness Exposure fails verification.
 
-The report uses `updated` only when all represented local revisions changed.
-It uses `unchanged` when all Owner commands succeed and no represented revision
-changes. The value `unchanged` does not claim that a remote source is current.
-A mixed result uses `partially-updated`. Owner failures use `failed`, approval
-and plan blocks use `blocked`, and an unproved final state uses `unresolved`.
-A final scan failure cannot produce an `updated` result.
+The report uses `updated` when every Owner action succeeds, every final
+verification passes, and at least one represented local revision changes. It
+uses `unchanged` when those actions and checks succeed and no represented
+revision changes. A successful mix of changed and unchanged Installations is
+therefore `updated`. Its human summary gives both counts. The value `unchanged`
+does not claim that a remote source is current. The value
+`partially-updated` requires a failed, skipped, or blocked action, or a failed
+verification, after another Installation changes. Owner failures use `failed`,
+approval and plan blocks use `blocked`, and an unproved final state uses
+`unresolved`. A final scan failure cannot produce an `updated` result.
 
 For a complete Plugin, the verification result compares the version and the
 owned-resource keys. The result lists the prior version, the final version, and

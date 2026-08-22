@@ -182,9 +182,19 @@ source it only partly came from.
 ## Protection and identity
 
 Every discovered path, including a Skill directory that is itself a worktree
-root, is checked against Git. Ignored paths are marked `ignored`; tracked and
-unignored paths are marked `protected`. Git command errors are conservative: if
-a `.git` worktree marker is present, the artifact remains protected.
+root, is checked against Git. Git protection first inspects each path and its
+ancestors for a `.git` directory or file. When that bounded search proves that
+an Artifact is outside a worktree, scanning does not start `git rev-parse` for
+that Artifact. A scan with many Artifacts outside a worktree therefore does not
+start one Git process per Artifact.
+
+When local evidence identifies a possible worktree, Git classifies the path.
+Ignored paths are marked `ignored`. Tracked and unignored paths are marked
+`protected`. The check supports ordinary worktrees, linked worktrees, and
+`.git` files. Permission errors, unreadable markers, Git command errors, and
+absent effect paths fail closed whenever worktree membership cannot be ruled
+out. This optimization does not weaken protection or change the rule that only
+Git can classify a path inside a worktree as ignored.
 
 Canonical targets, declared source coordinates, and plugin coordinates are
 strong identity evidence and may form Logical Skills. Shared normalized names

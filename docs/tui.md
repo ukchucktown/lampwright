@@ -121,6 +121,11 @@ key/action pairs. Separators remain muted, so the header does not conflate
 navigation with selection. Segment styling is applied after clipping,
 preserving emphasis and reset boundaries on narrow terminals.
 
+Inventory and Disabled always retain the complete `u update` key/action pair
+at supported terminal widths. When the action row must shrink, it removes or
+shortens secondary navigation hints before it shortens a lifecycle command.
+A 60-column render includes `u update` without an ellipsis.
+
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
 when color is unavailable. Raw terminals select true color, 256-color ANSI, or
@@ -320,10 +325,12 @@ returns an `UpdateReport`.
 The report shows every target and its status: `updated`, `unchanged`,
 `partially-updated`, `blocked`, `failed`, or `unresolved`. An `unchanged` result
 means only that local verification found no proven change. It does not mean that
-the target is up-to-date with a remote source. Press Escape to run a fresh
-Inventory scan and read Disabled Storage. Lampwright then returns to Inventory
-and shows the saved target label with its result. The refresh preserves the
-other view snapshots.
+the target is up-to-date with a remote source. For a target with multiple
+Installations, an all-success report states how many updated and how many were
+unchanged. A mix of changed and unchanged Installations remains a successful
+`updated` result. Press Escape to run a fresh Inventory scan and read Disabled
+Storage. Lampwright then returns to Inventory and shows the saved target label
+with its result. The refresh preserves the other view snapshots.
 
 ## Limited terminals
 
