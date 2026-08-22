@@ -67,7 +67,7 @@ for (const required of [
   "dist/testing/index.d.ts",
   "dist/testing/index.js",
   "docs/release.md",
-  "docs/releases/0.1.1.md",
+  "docs/releases/0.2.0.md",
   "docs/availability.md",
   "docs/availability-controls.md",
   "docs/disabled-storage.md",

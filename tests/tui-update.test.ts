@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBrowseModel,
   createTuiSections,
+  createNightfallTheme,
   parseLineTuiAction,
   plan,
   plainTuiTheme,
   renderTui,
+  styleTui,
   TuiController,
   updatePlanScrollMetrics,
   updateReportScrollMetrics,
@@ -470,7 +472,46 @@ function suspendedEntry(installation = buildInstallation()): DisabledEntry {
 }
 
 describe("Update TUI", () => {
-  it("keeps an equivalent 25-Installation Update review decision-focused", () => {
+  it("counts one logical skill once when two installations change", () => {
+    const fixture = equivalentInstallationPlan(2);
+    const installationIds = fixture.inventory.installations.map(
+      (item) => item.id,
+    );
+    const logicalInstallationIds: [
+      (typeof installationIds)[number],
+      ...(typeof installationIds)[number][],
+    ] = [installationIds[0]!, ...installationIds.slice(1)];
+    const inventory = {
+      ...fixture.inventory,
+      logicalSkills: [
+        buildLogicalSkill({
+          id: "logical-skill-1",
+          installationIds: logicalInstallationIds,
+        }),
+      ],
+    };
+    const state = {
+      screen: "update-plan" as const,
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 1_000,
+          columns: 80,
+        }),
+        view: "inventory" as const,
+        disabledEntries: [],
+      },
+      plan: fixture.plan,
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    const rendered = renderTui(state, plainTuiTheme);
+    expect(rendered).toContain("1 skill");
+    expect(rendered).not.toContain("2 skills");
+  });
+
+  it("keeps an equivalent 25-skill Update review decision-focused", () => {
     const fixture = equivalentInstallationPlan(25);
     const state = {
       screen: "update-plan" as const,
@@ -491,18 +532,19 @@ describe("Update TUI", () => {
 
     const rendered = renderTui(state, plainTuiTheme);
     const renderedLines = rendered.trimEnd().split("\n");
-    const footerLineCount = 2;
+    const footerLineCount = 1;
     expect(renderedLines.length - footerLineCount).toBeLessThanOrEqual(60);
-    expect(rendered).toContain("25 Owner actions");
-    expect(rendered).toContain("25 affected Installations");
-    expect(rendered).toContain("Owner: Manager fixture-manager");
-    expect(rendered).toContain("Network: required");
-    expect(rendered).toContain("Automatic rollback is unavailable");
-    expect(rendered).toContain("25 Installations will be verified");
-    expect(rendered.match(/Network access/g)).toHaveLength(1);
-    expect(rendered).toContain("25 affected Installations");
+    expect(rendered).toContain("25 skills");
+    expect(rendered).toContain("This update needs internet access");
+    expect(rendered).toContain("The same 25 skills stay installed");
+    expect(rendered).toContain("Lampwright cannot undo this update for you");
+    expect(rendered).not.toContain("Owner action");
+    expect(rendered).not.toContain("affected Installation");
+    expect(rendered).not.toContain("Scope:");
+    expect(rendered).not.toContain("Invocation:");
+    expect(rendered).not.toContain("Trust:");
     expect(rendered.replaceAll(/\s+/g, " ")).toContain(
-      "Lampwright cannot detect local edits, so Update can overwrite them",
+      "Lampwright cannot check for edits, so this update may overwrite them.",
     );
     for (const machineLabel of [
       "network-access",
@@ -510,7 +552,7 @@ describe("Update TUI", () => {
       "local-change-unavailable",
     ])
       expect(rendered).not.toContain(machineLabel);
-    expect(rendered.match(/package trust:/g)).toHaveLength(1);
+    expect(rendered.match(/Allow npx to run/g)).toHaveLength(1);
     expect(rendered).not.toContain("update-action-25");
     expect(rendered).not.toContain("fixture-lock-key-25");
     expect(rendered).not.toContain("/fixtures/skills/example-skill-25");
@@ -574,9 +616,9 @@ describe("Update TUI", () => {
       scrollOffset: 0,
     };
     const unlike = renderTui(state, plainTuiTheme);
-    expect(unlike.match(/• 1 Owner action/g)).toHaveLength(2);
-    expect(unlike).toContain("Source: fixture-source");
-    expect(unlike).toContain("Source: other-source");
+    expect(unlike.match(/• 1 skill/g)).toHaveLength(2);
+    expect(unlike).toContain("1 skill from fixture-source");
+    expect(unlike).toContain("1 skill from other-source");
 
     const firstCheck = fixture.plan.verificationChecks[0]!;
     const secondCheck = fixture.plan.verificationChecks[1]!;
@@ -601,9 +643,7 @@ describe("Update TUI", () => {
       { ...state, plan: unlikeVerificationPlan },
       plainTuiTheme,
     );
-    expect(unlikeVerification.match(/keeps its strong identity/g)).toHaveLength(
-      2,
-    );
+    expect(unlikeVerification).toContain("stays installed");
 
     const pluginTarget = {
       kind: "plugin" as const,
@@ -622,7 +662,7 @@ describe("Update TUI", () => {
         { ...state, plan: pluginPlan, label: "fixture-plugin" },
         plainTuiTheme,
       ),
-    ).toContain("Boundary: Plugin fixture-plugin");
+    ).toContain("Plugin fixture-plugin");
   });
 
   it("maps the Update command and key only from Inventory or Disabled browse", () => {
@@ -900,22 +940,49 @@ describe("Update TUI", () => {
     };
     const defaultRendered = renderTui(state, plainTuiTheme);
     for (const expected of [
-      "1 Owner action · 1 affected Installation",
-      "Owner: Manager fixture-manager",
-      "Source: fixture-source (https://example.test/source) · ref main",
-      "Invocation: npx @fixture/manager@1.2.3 update … --yes",
-      "After Update, Lampwright will verify",
-      "Automatic rollback is unavailable",
+      "1 skill",
+      "1 skill from fixture-source",
+      "After the update",
+      "Lampwright cannot undo this update for you",
     ])
       expect(defaultRendered).toContain(expected);
     expect(defaultRendered).not.toContain("Owner record digest");
+    const truecolorTheme = createNightfallTheme("truecolor");
+    const colored = renderTui(state, truecolorTheme);
+    expect(colored).toContain(
+      styleTui(truecolorTheme, "title", "Lampwright - Update example-skill"),
+    );
+    for (const heading of [
+      "Review these warnings",
+      "Planned updates",
+      "Before update",
+      "After the update",
+    ])
+      expect(colored).toContain(styleTui(truecolorTheme, "title", heading));
+    for (const warning of [
+      "! This update needs internet access.",
+      "! Lampwright may download @fixture/manager@1.2.3 before the update.",
+      "Lampwright cannot undo this update for you.",
+    ])
+      expect(colored).toContain(styleTui(truecolorTheme, "warning", warning));
+    for (const key of ["y", "d", "Esc", "q"])
+      expect(colored).toContain(styleTui(truecolorTheme, "title", key));
+    expect(colored).toContain(styleTui(truecolorTheme, "muted", " update · "));
+    expect(colored).toContain(
+      styleTui(truecolorTheme, "muted", " returns to the previous view · "),
+    );
+    const top = defaultRendered.split("Review these warnings")[0]!;
+    expect(top).not.toContain("Update example-skill?");
+    expect(top).not.toContain("READY TO UPDATE");
+    expect(top).not.toContain("REVIEW BEFORE UPDATE");
+    expect(top).not.toContain("1 skill");
 
     const rendered = renderTui(
       { ...state, technicalDetails: true },
       plainTuiTheme,
     );
     for (const expected of [
-      "Review Update",
+      "Lampwright - Update example-skill",
       "Owner: Manager fixture-manager",
       "Adapter fixture-adapter",
       "selector fixture-lock-key",
@@ -931,7 +998,7 @@ describe("Update TUI", () => {
       `package trust: npx:@fixture/manager@1.2.3:${"a".repeat(64)}`,
       "revision manifest value: json 1 at /fixtures/manager.json /skills/fixture/revision",
       "keeps its strong identity, Owner, source, ref, Scope, boundary, and availability",
-      "Automatic rollback is unavailable",
+      "Lampwright cannot undo this update for you",
     ])
       expect(rendered).toContain(expected);
     expect(rendered.toLowerCase()).not.toContain("up-to-date");
@@ -954,7 +1021,7 @@ describe("Update TUI", () => {
         { ...compact, scrollOffset: metrics.maximumOffset },
         plainTuiTheme,
       ),
-    ).toContain("Automatic rollback is unavailable");
+    ).toContain("Lampwright cannot undo this update for you");
   });
 
   it("discloses exact Native Disable and Plugin availability expectations before confirmation", () => {
@@ -1005,7 +1072,7 @@ describe("Update TUI", () => {
       scrollOffset: 0,
     };
     expect(renderTui(state, plainTuiTheme)).toContain(
-      "Harness fixture-agent for Installation installation-1 must remain disabled.",
+      "The same skill stays installed, and each app keeps its prior on/off setting.",
     );
 
     const pluginTarget = {
@@ -1036,7 +1103,7 @@ describe("Update TUI", () => {
       ],
     };
     expect(renderTui({ ...state, plan: pluginPlan }, plainTuiTheme)).toContain(
-      "Plugin must remain enabled.",
+      "The plugin stays installed, and it keeps its prior on/off setting.",
     );
   });
 
@@ -1111,8 +1178,38 @@ describe("Update TUI", () => {
         scrollOffset: 0,
       };
       const rendered = renderTui(state, plainTuiTheme);
-      expect(rendered).toContain(`Installation installation-1: ${status}`);
+      const reportLines = rendered.split("\n");
+      expect(reportLines[0]?.trimEnd()).toBe(
+        "Lampwright - Update example-skill",
+      );
+      expect(reportLines[1]?.trim()).toBe("");
+      expect(reportLines[2]).toContain("example-skill:");
+      expect(reportLines[3]?.trim()).toBe("");
+      expect(reportLines[4]?.trimEnd()).toBe(
+        "d technical details · Esc refreshes Inventory · q quits",
+      );
+      expect(rendered).not.toContain("Installation Group");
+      expect(rendered).not.toContain("Final Inventory scan");
+      expect(rendered).not.toContain("verification check");
+      expect(rendered).not.toContain("completed");
+      expect(rendered).toContain(
+        `example-skill: ${status === "updated" ? 1 : 0} updated, ${status === "updated" ? 0 : 1} unchanged${status === "updated" || status === "unchanged" ? "" : ` (${status === "partially-updated" ? "partially updated" : status})`}`,
+      );
       expect(rendered.toLowerCase()).not.toContain("up-to-date");
+      const truecolorTheme = createNightfallTheme("truecolor");
+      const colored = renderTui(state, truecolorTheme);
+      const summary = `example-skill: ${status === "updated" ? 1 : 0} updated, ${status === "updated" ? 0 : 1} unchanged${status === "updated" || status === "unchanged" ? "" : ` (${status === "partially-updated" ? "partially updated" : status})`}`;
+      expect(colored).toContain(
+        styleTui(
+          truecolorTheme,
+          status === "updated" || status === "unchanged"
+            ? "success"
+            : status === "partially-updated"
+              ? "warning"
+              : "error",
+          summary,
+        ),
+      );
       const compact = {
         ...state,
         browse: {
@@ -1128,6 +1225,54 @@ describe("Update TUI", () => {
       ).toBeGreaterThanOrEqual(0);
     },
   );
+
+  it("uses the shared header and footer styling and keeps report details behind d", () => {
+    const inventory = buildInventory();
+    const planValue = detailedPlan(inventory);
+    const state = {
+      screen: "update-report" as const,
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 40,
+          columns: 110,
+        }),
+        view: "inventory" as const,
+        disabledEntries: [],
+      },
+      report: updateReport(planValue, "unchanged"),
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    const truecolorTheme = createNightfallTheme("truecolor");
+    const rendered = renderTui(state, truecolorTheme);
+
+    expect(rendered).toContain(
+      styleTui(truecolorTheme, "title", "Lampwright - Update example-skill"),
+    );
+    for (const key of ["d", "Esc", "q"])
+      expect(rendered).toContain(styleTui(truecolorTheme, "title", key));
+    for (const description of [
+      " technical details · ",
+      " refreshes Inventory · ",
+      " quits",
+    ])
+      expect(rendered).toContain(
+        styleTui(truecolorTheme, "muted", description),
+      );
+
+    const details = renderTui(
+      { ...state, technicalDetails: true },
+      plainTuiTheme,
+    );
+    expect(details).toContain("Technical details");
+    expect(details).toContain("Target Installation installation-1: unchanged");
+    expect(details).toContain("Final Inventory scan completed.");
+    expect(details).toContain(
+      "d hide technical details · Esc refreshes Inventory · q quits",
+    );
+  });
 
   it("reports updated and unchanged Installation counts for a successful mixed Update", () => {
     const inventory = buildInventory();
@@ -1152,8 +1297,7 @@ describe("Update TUI", () => {
       plainTuiTheme,
     );
 
-    expect(rendered).toContain("24 updated, 1 unchanged.");
-    expect(rendered).toContain("Installation installation-1: updated");
+    expect(rendered).toContain("example-skill: 24 updated, 1 unchanged");
   });
 
   it.each(["unsupported-update", "git-protection", "local-changes"] as const)(
@@ -1208,7 +1352,7 @@ describe("Update TUI", () => {
     },
   );
 
-  it("refreshes Inventory with the saved target label and preserved views on Esc", async () => {
+  it("returns to a fresh startup state after an Update report", async () => {
     const before = buildInventory({ id: "inventory-before" });
     const after = buildInventory({
       id: "inventory-after",
@@ -1228,6 +1372,7 @@ describe("Update TUI", () => {
       executeUpdate: async () => updateReport(planValue, "updated"),
     });
     await controller.start();
+    await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "switch-view", view: "disabled" });
     await controller.dispatch({ kind: "switch-view", view: "trash" });
     await controller.dispatch({ kind: "cancel" });
@@ -1235,14 +1380,22 @@ describe("Update TUI", () => {
     await controller.dispatch({ kind: "confirm" });
     await controller.waitForUpdateExecution();
     await controller.dispatch({ kind: "cancel" });
+    const returned = controller.state;
+    expect(returned.screen).toBe("browse");
+    if (returned.screen !== "browse") throw new Error("Expected browse state");
+    expect(returned.model).toEqual(
+      createBrowseModel(createTuiSections(after), returned.model.viewport),
+    );
     expect(controller.state).toMatchObject({
       screen: "browse",
       inventory: { id: "inventory-after" },
       view: "inventory",
-      model: { notice: "Update result — example-skill: updated." },
-      viewSnapshots: {
-        disabled: { view: "disabled", inventory: { id: "inventory-after" } },
-        trash: { view: "trash", inventory: { id: "inventory-after" } },
+      model: {
+        focus: "sections",
+        sectionIndex: 0,
+        entryIndex: 0,
+        selected: new Set(),
+        notice: null,
       },
     });
   });

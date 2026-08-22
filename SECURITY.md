@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-The initial supported release line is `0.1.x`. Version `0.1.0` is being
-prepared for publication; until its registry release is verified, security
-fixes for that line also target the latest commit on `main`.
+The current supported release line is `0.2.x`. Security fixes also support the
+published `0.1.x` line when the fix applies to that line.
 
 | Version | Supported |
 | --- | --- |
+| `0.2.x` | Yes |
 | `0.1.x` | Yes |
 | `< 0.1.0` | No |
 

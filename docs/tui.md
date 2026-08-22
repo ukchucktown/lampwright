@@ -310,19 +310,33 @@ actions, verification checks, identifiers, and approval boundary.
 
 ### Update review and report
 
-Update review leads with the selected target, readiness, action count,
-Installation count, material risks, recoverability, and verification outcomes.
-Lampwright groups Owner actions only when their Owner, source, ref, Scope,
-invocation pattern, trust, network use, and risks match. A Plugin boundary has
-its own summary. Each repeated warning appears once with the affected count and
-the consequence. Each distinct block remains prominent.
+Update review leads with the selected target, warnings, and verification
+results. The screen uses one title, `Lampwright - Update <skill>`. All section
+headings use the cyan title color. Warning bodies use the gold warning color,
+and block text uses the error color. The default view shows the source and the
+skills that the update will change. It does not show internal scope, command,
+network, or trust details. Each repeated warning appears once with its count
+and consequence. Each distinct block remains prominent.
 
-The default review groups checks that promise the same outcome. Package consent
-shows each exact runner, pinned version, and Adapter identity one time for each
-trust tuple. The review states that Update has no automatic rollback and creates
-no Trash or Disabled Storage copy. Press `d` to see exact targets, selectors,
+The review explains when the update contacts a remote service. Before the
+update, the review names the exact runner and package and asks for permission
+to run them. Verification says that the same skills stay installed and that
+each app keeps its prior on/off setting. The review also warns that Lampwright
+cannot undo the update for the user. Press `d` to see exact targets, selectors,
 revisions, hashes, effects, paths, approvals, commands, action IDs, and check
-IDs. The body supports paging, wheel scrolling, and resize clamping.
+IDs. The body supports paging, wheel scrolling, and resize clamping. The footer
+uses cyan keys for `y`, `d`, `Esc`, and `q`. It uses muted text for descriptions
+and separators, and it keeps those key colors when the footer is shortened for
+a narrow terminal.
+
+The Update result uses one title, one summary (`<skill>: N updated, M
+unchanged`), and one segmented footer, with one blank line between each block. A
+non-success result adds the target status, such as `partially updated`,
+`blocked`, `failed`, or `unresolved`. The default result hides target blocks,
+scan messages, verification counts, and action/check messages. Press `d` to see
+them. When you leave an Update result, Lampwright rescans Inventory and opens a
+fresh Inventory view in the same state as startup: an empty selection and no
+notice.
 
 Update Execution offers no Removal or brute-force fallback. You cannot confirm
 a blocked plan.

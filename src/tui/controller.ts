@@ -954,24 +954,14 @@ export class TuiController {
         this.dependencies.listDisabled === undefined
           ? []
           : await this.dependencies.listDisabled();
-      const oldSnapshots = state.browse.viewSnapshots ?? {};
-      const inventoryOld =
-        state.browse.view === "inventory"
-          ? state.browse
-          : oldSnapshots.inventory;
-      const disabledOld =
-        state.browse.view === "disabled" ? state.browse : oldSnapshots.disabled;
-      const statuses = state.report.targetResults
-        .map((result) => result.status)
-        .join(" · ");
       const inventorySnapshot: TuiViewSnapshot = {
         inventory,
         model: {
-          ...preserveBrowseModel(
-            inventoryOld?.model ?? state.browse.model,
+          ...createBrowseModel(
             createTuiSections(inventory),
+            state.browse.model.viewport,
           ),
-          notice: `Update result — ${state.label}: ${statuses}.`,
+          notice: null,
         },
         view: "inventory",
         disabledEntries,
@@ -979,32 +969,9 @@ export class TuiController {
           ? {}
           : { operations: state.browse.operations }),
       };
-      const disabledSnapshot: TuiViewSnapshot = {
-        inventory,
-        model: preserveBrowseModel(
-          disabledOld?.model ?? state.browse.model,
-          createDisabledSections(inventory, disabledEntries),
-        ),
-        view: "disabled",
-        disabledEntries,
-        ...(state.browse.operations === undefined
-          ? {}
-          : { operations: state.browse.operations }),
-      };
-      const viewSnapshots = {
-        ...Object.fromEntries(
-          Object.entries(oldSnapshots).map(([view, snapshot]) => [
-            view,
-            snapshot === undefined ? snapshot : { ...snapshot, inventory },
-          ]),
-        ),
-        inventory: inventorySnapshot,
-        disabled: disabledSnapshot,
-      };
       this.stateValue = {
         screen: "browse",
         ...inventorySnapshot,
-        viewSnapshots,
       };
     } catch {
       this.stateValue = { screen: "done", report: state.report };
