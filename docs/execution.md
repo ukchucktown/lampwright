@@ -207,6 +207,11 @@ new Plugin boundary. The Update can remove an owned Skill. Execution still
 preserves the complete Plugin's availability and its opaque settings record
 hashes and presence bits.
 
+For a Gemini extension, Execution also preserves the install type, automatic
+Update policy, and prerelease policy. It accepts changed owned resources inside
+the same management boundary. It rejects a changed enablement record even when
+the effective enabled or disabled state stays the same.
+
 An Update audit record contains the approved plan, the exact grants, and the
 complete report. Execution writes this record only after an Owner process
 starts. Freshness rejection, a missing approval, and a live protection failure

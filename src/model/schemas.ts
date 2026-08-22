@@ -1077,6 +1077,14 @@ const pluginBoundarySchema = z.strictObject({
   installationIds: z.array(modelId),
   resources: z.array(pluginResourceSchema),
   settingsRecords: z.array(pluginSettingsRecordSnapshotSchema).optional(),
+  updatePolicy: z
+    .strictObject({
+      kind: z.literal("gemini-extension"),
+      installType: z.enum(["git", "local", "github-release"]),
+      autoUpdate: z.boolean().nullable(),
+      allowPreRelease: z.boolean().nullable(),
+    })
+    .optional(),
   availability: pluginAvailabilitySchema,
   update: updateEvidenceSchema,
   removal: removalEvidenceSchema,

@@ -325,9 +325,27 @@ owned Skill does not fail Plugin verification by itself.
 
 ### Gemini extensions
 
-A later slice supports one complete extension boundary with `gemini extensions
-update`. Gemini standalone Skills remain unsupported because the current Owner
-interface has no Skill Update operation.
+Lampwright supports one complete Gemini extension boundary with `gemini
+extensions update <name>`. The operation uses the exact manifest name and a new
+isolated directory. It never updates every extension.
+
+The plan preserves the source, ref, install type, automatic Update policy,
+prerelease policy, and Native Disable state. The effects contain the management
+root and the exact enablement and integrity configuration paths. A linked source
+path is not an effect. Git extensions include `HEAD` and dirty-state evidence.
+GitHub release extensions include the recorded release tag. Local copies and
+GitHub release copies do not claim proof of unchanged local content.
+
+For a Git copy, the dirty-state check excludes only the root Owner metadata
+file. It retains every other tracked or untracked change. Recorded `git@`, SSO,
+`github:`, and `gitlab:` source forms remain structured source evidence. They
+never become shell text.
+
+Lampwright blocks linked, migrated, malformed, ambiguous, escaping, protected,
+unsupported, and proven-dirty extension state. Final verification reports
+version and owned-resource changes inside the stable extension boundary.
+Gemini standalone Skills remain unsupported because the Owner has no standalone
+Skill Update operation.
 
 ### Codex Plugins and filesystem ownership
 

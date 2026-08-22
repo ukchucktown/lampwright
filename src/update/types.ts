@@ -2,6 +2,7 @@ import type {
   ApprovalRequirement,
   ArtifactLocation,
   ExecutionApprovals,
+  GeminiExtensionUpdatePolicy,
   InstallationGroupId,
   InstallationId,
   InventoryId,
@@ -74,6 +75,7 @@ export interface UpdatePluginBoundaryFacts {
   readonly version: string | null;
   readonly resourceKeys: readonly string[];
   readonly settingsRecords: readonly PluginSettingsRecordSnapshot[];
+  readonly policy: GeminiExtensionUpdatePolicy | null;
   readonly ownership: Extract<Ownership, { readonly kind: "plugin" }>;
   readonly lifecycle: UpdateLifecycleFacts;
 }

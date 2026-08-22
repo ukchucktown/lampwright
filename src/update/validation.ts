@@ -76,6 +76,14 @@ const pluginBoundaryFactsSchema = z.strictObject({
   version: nonBlank.nullable(),
   resourceKeys: z.array(nonBlank),
   settingsRecords: z.array(pluginSettingsRecordSnapshotSchema),
+  policy: z
+    .strictObject({
+      kind: z.literal("gemini-extension"),
+      installType: z.enum(["git", "local", "github-release"]),
+      autoUpdate: z.boolean().nullable(),
+      allowPreRelease: z.boolean().nullable(),
+    })
+    .nullable(),
   ownership: z.strictObject({
     kind: z.literal("plugin"),
     pluginId: nonBlank,
