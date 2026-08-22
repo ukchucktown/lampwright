@@ -15,9 +15,9 @@ describe("release readiness", () => {
       // @ts-expect-error The exercised release helper is intentionally executable ESM.
       await import("../scripts/npm-pack-result.mjs");
     const pack = {
-      id: "lampwright@0.1.1",
+      id: "lampwright@0.2.0",
       name: "lampwright",
-      version: "0.1.1",
+      version: "0.2.0",
     };
 
     expect(normalizeNpmPackResult([pack], "lampwright")).toBe(pack);
@@ -43,11 +43,11 @@ describe("release readiness", () => {
     const command = join(repositoryRoot, "scripts", "verify-release.mjs");
     const authority = {
       ...process.env,
-      GITHUB_REF_NAME: "v0.1.1",
+      GITHUB_REF_NAME: "v0.2.0",
       GITHUB_REF_TYPE: "tag",
       GITHUB_REPOSITORY: "ukchucktown/lampwright",
-      RELEASE_CONFIRMATION: "lampwright@0.1.1",
-      GITHUB_RELEASE_CONFIRMATION: "v0.1.1",
+      RELEASE_CONFIRMATION: "lampwright@0.2.0",
+      GITHUB_RELEASE_CONFIRMATION: "v0.2.0",
       REPOSITORY_PRIVATE: "false",
     };
 
@@ -57,7 +57,7 @@ describe("release readiness", () => {
     if (supportsTrustedPublishingRuntime())
       await expect(exactAuthority).resolves.toMatchObject({
         stdout: expect.stringContaining(
-          "Release authority verified for lampwright@0.1.1",
+          "Release authority verified for lampwright@0.2.0",
         ),
       });
     else
@@ -260,34 +260,35 @@ describe("release readiness", () => {
     }
   });
 
-  it("keeps the packed first-release documentation complete", async () => {
+  it("keeps the packed current-release documentation complete", async () => {
     const [readme, security, specification, releaseNotes, verifier] =
       await Promise.all(
         [
           "README.md",
           "SECURITY.md",
           "docs/spec.md",
-          "docs/releases/0.1.1.md",
+          "docs/releases/0.2.0.md",
           "scripts/verify-package.mjs",
         ].map((path) => readFile(join(repositoryRoot, path), "utf8")),
       );
 
-    expect(readme).toContain("npx lampwright@0.1.1");
+    expect(readme).toContain("npx lampwright@0.2.0");
     expect(readme).not.toContain("No npm version has been published yet");
+    expect(security).toContain("`0.2.x`");
     expect(security).toContain("`0.1.x`");
     expect(security).toContain("security/advisories/new");
     expect(specification).toContain("npx lampwright@0.1.0");
     expect(specification).not.toContain("Future published invocation");
-    expect(verifier).toContain('"docs/releases/0.1.1.md"');
+    expect(verifier).toContain('"docs/releases/0.2.0.md"');
     for (const requiredTopic of [
-      "isolated CLI startup failure",
-      "Gemini",
+      "targeted Update",
+      "Vercel",
+      "Claude Code",
+      "Gemini CLI",
       "Git-protected",
       "System Skills",
-      "Managed Removal",
-      "Quarantine",
-      "Disabled",
-      "GitHub `v0.1.1` release",
+      "Owner",
+      "GitHub `v0.2.0` release",
     ])
       expect(releaseNotes).toContain(requiredTopic);
   });

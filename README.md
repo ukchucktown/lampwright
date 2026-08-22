@@ -48,7 +48,7 @@ The primary interface is an interactive terminal Inventory. The supported,
 version-pinned invocation for the current release is:
 
 ```console
-npx lampwright@0.1.1
+npx lampwright@0.2.0
 ```
 
 This command downloads the package to npm's cache. Lampwright does not install
@@ -107,7 +107,7 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Execution and fallback](./docs/execution.md)
 - [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
-- [0.1.1 release notes](./docs/releases/0.1.1.md)
+- [0.2.0 release notes](./docs/releases/0.2.0.md)
 - [Release readiness](./docs/release.md)
 - [Product ideas](./docs/ideas.md) — unapproved directions under consideration
 - [Architectural decisions](./docs/adr/)
