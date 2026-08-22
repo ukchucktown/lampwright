@@ -763,6 +763,18 @@ export interface PluginAvailability {
   readonly control: PluginAvailabilityControl;
 }
 
+interface PluginSettingsRecordSnapshotBase {
+  readonly path: string;
+  readonly format: DeclarativeDocumentFormat;
+  readonly recordPointer: string;
+}
+
+export type PluginSettingsRecordSnapshot = PluginSettingsRecordSnapshotBase &
+  (
+    | { readonly present: true; readonly digest: Sha256Digest }
+    | { readonly present: false; readonly digest: null }
+  );
+
 export interface PluginBoundary {
   readonly id: string;
   readonly pluginId: string;
@@ -781,6 +793,8 @@ export interface PluginBoundary {
   readonly runtimeDefault: boolean;
   readonly installationIds: readonly InstallationId[];
   readonly resources: readonly PluginResource[];
+  /** Opaque hashes of settings records whose state the Owner must preserve. */
+  readonly settingsRecords?: readonly PluginSettingsRecordSnapshot[];
   /** Whole-Plugin runtime availability, independent from child Skill controls. */
   readonly availability: PluginAvailability;
   /** Complete offline evidence for one whole-Plugin Update operation. */

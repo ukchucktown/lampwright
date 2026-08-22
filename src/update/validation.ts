@@ -7,6 +7,7 @@ import {
   managedOwnershipSchema,
   managedUpdateEvidenceSchema,
   ownershipSchema,
+  pluginSettingsRecordSnapshotSchema,
   scopeSchema,
   skillIdentitySchema,
   softReferenceSchema,
@@ -72,6 +73,9 @@ const installationBoundaryFactsSchema = z.strictObject({
 const pluginBoundaryFactsSchema = z.strictObject({
   id: nonBlank,
   pluginId: nonBlank,
+  version: nonBlank.nullable(),
+  resourceKeys: z.array(nonBlank),
+  settingsRecords: z.array(pluginSettingsRecordSnapshotSchema),
   ownership: z.strictObject({
     kind: z.literal("plugin"),
     pluginId: nonBlank,

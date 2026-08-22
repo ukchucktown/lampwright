@@ -200,6 +200,13 @@ A mixed result uses `partially-updated`. Owner failures use `failed`, approval
 and plan blocks use `blocked`, and an unproved final state uses `unresolved`.
 A final scan failure cannot produce an `updated` result.
 
+For a complete Plugin, the verification result compares the version and the
+owned-resource keys. The result lists the prior version, the final version, and
+the added or removed resources. A versioned cache-root change does not create a
+new Plugin boundary. The Update can remove an owned Skill. Execution still
+preserves the complete Plugin's availability and its opaque settings record
+hashes and presence bits.
+
 An Update audit record contains the approved plan, the exact grants, and the
 complete report. Execution writes this record only after an Owner process
 starts. Freshness rejection, a missing approval, and a live protection failure
