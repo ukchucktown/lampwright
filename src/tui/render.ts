@@ -798,9 +798,7 @@ function updatePlanBodyLines(
         ? style.success("READY TO UPDATE")
         : style.warning("REVIEW BEFORE UPDATE")
       : style.error("CANNOT UPDATE"),
-    style.muted(
-      `${countLabel(plan.actions.length, "Owner action")} · ${countLabel(affectedUpdateInstallationCount(state), "affected Installation")}`,
-    ),
+    style.muted(`${countLabel(affectedUpdateSkillCount(state), "skill")}`),
     "",
   ];
   if (plan.blocks.length > 0) {
@@ -820,29 +818,32 @@ function updatePlanBodyLines(
     lines.push(
       style.warning("Review these warnings"),
       ...groups.flatMap((group) =>
-        wrapPlanLine(`! ${describeUpdateWarningGroup(group)}`, width).map(
-          style.warning,
-        ),
+        wrapPlanLine(
+          `! ${describeUpdateWarningGroup(group, state)}`,
+          width,
+        ).map(style.warning),
       ),
       "",
     );
   }
   if (plan.actions.length > 0) {
     lines.push(
-      style.title("Planned Owner actions"),
+      style.title("Planned updates"),
       ...groupUpdateActions(plan.actions, plan.warnings).flatMap((group) =>
-        updateActionGroupLines(group).flatMap((line) =>
+        updateActionGroupLines(group, state).flatMap((line) =>
           wrapPlanLine(line, width).map(style.muted),
         ),
       ),
       "",
     );
-    const approvals = uniqueUpdateApprovals(plan.actions);
+    const approvals = uniqueUpdateApprovals(plan.actions).filter(
+      (approval) => approval.kind === "package-trust",
+    );
     if (approvals.length > 0)
       lines.push(
-        style.title("Required consent"),
+        style.title("Before update"),
         ...approvals.flatMap((approval) =>
-          wrapPlanLine(`• ${describeApproval(approval)}`, width).map(
+          wrapPlanLine(`• ${describeUpdateApproval(approval)}`, width).map(
             style.muted,
           ),
         ),
@@ -851,22 +852,22 @@ function updatePlanBodyLines(
   }
   if (plan.verificationChecks.length > 0) {
     lines.push(
-      style.title("After Update, Lampwright will verify"),
+      style.title("After the update"),
       ...groupUpdateVerificationChecks(plan.verificationChecks).flatMap(
         (group) =>
-          updateVerificationGroupLines(group).flatMap((line) =>
-            wrapPlanLine(line, width).map(style.muted),
-          ),
+          updateVerificationGroupLines(
+            group,
+            state,
+            state.technicalDetails,
+          ).flatMap((line) => wrapPlanLine(line, width).map(style.muted)),
       ),
       "",
     );
   }
   lines.push(
-    style.warning("Automatic rollback is unavailable."),
-    ...wrapPlanLine(
-      "Lampwright does not copy the old content into Trash or Disabled Storage. A failed Update stops for review.",
-      width,
-    ).map(style.warning),
+    ...wrapPlanLine("Lampwright cannot undo this update for you.", width).map(
+      style.warning,
+    ),
   );
   if (state.technicalDetails) {
     lines.push(
@@ -974,27 +975,38 @@ function affectedUpdateInstallationIds(
   ];
 }
 
-function affectedUpdateInstallationCount(state: TuiUpdatePlanState): number {
-  const fromActions = affectedUpdateInstallationIds(state.plan.actions);
-  if (fromActions.length > 0) return fromActions.length;
+function affectedUpdateSkillCount(
+  state: TuiUpdatePlanState,
+  actions = state.plan.actions,
+): number {
   const target = state.plan.intent.target;
+  if (target.kind === "plugin") return 1;
+  const fromActions = affectedUpdateInstallationIds(actions);
+  if (fromActions.length > 0)
+    return affectedSkillCountForInstallationIds(state, fromActions);
   if (target.kind === "installation") return 1;
-  if (target.kind === "logical-skill")
-    return (
-      state.browse.inventory.logicalSkills.find(
-        (skill) => skill.id === target.logicalSkillId,
-      )?.installationIds.length ?? 0
-    );
   if (target.kind === "source-group")
-    return (
+    return affectedSkillCountForInstallationIds(
+      state,
       state.browse.inventory.groups.find((group) => group.id === target.groupId)
-        ?.installationIds.length ?? 0
+        ?.installationIds ?? [],
     );
-  return (
-    state.browse.inventory.plugins.find(
-      (plugin) => plugin.id === target.pluginBoundaryId,
-    )?.installationIds.length ?? 0
+  return 1;
+}
+
+function affectedSkillCountForInstallationIds(
+  state: TuiUpdatePlanState,
+  installationIds: readonly string[],
+): number {
+  const installationToSkill: ReadonlyMap<string, string> = new Map(
+    state.browse.inventory.logicalSkills.flatMap((skill) =>
+      skill.installationIds.map(
+        (installationId) => [installationId, skill.id] as const,
+      ),
+    ),
   );
+  return new Set(installationIds.map((id) => installationToSkill.get(id) ?? id))
+    .size;
 }
 
 function groupValues<Value>(
@@ -1099,28 +1111,17 @@ function groupUpdateActions(
   ).map((group) => ({ actions: group }));
 }
 
-function updateActionGroupLines(group: UpdateActionGroup): readonly string[] {
+function updateActionGroupLines(
+  group: UpdateActionGroup,
+  state: TuiUpdatePlanState,
+): readonly string[] {
   const action = group.actions[0];
   const operation = action.operation;
-  const owner =
-    operation.owner.kind === "manager"
-      ? `Manager ${operation.owner.managerId}`
-      : `Plugin ${operation.owner.pluginId}`;
-  const affected = affectedUpdateInstallationIds(group.actions);
-  const packageConsent = group.actions.some((item) =>
-    item.approvals.some((approval) => approval.kind === "package-trust"),
-  );
+  const skillCount = affectedUpdateSkillCount(state, group.actions);
   return [
-    `• ${countLabel(group.actions.length, "Owner action")} · ${countLabel(affected.length, "affected Installation")}`,
-    ...(action.target.kind === "plugin"
-      ? [`  Boundary: Plugin ${action.target.pluginBoundaryId}`]
-      : []),
-    `  Owner: ${owner}`,
-    `  Source: ${operation.source.id}${operation.source.url === null ? "" : ` (${operation.source.url})`} · ref ${operation.ref ?? "not pinned"}`,
-    `  Scope: ${describeUpdateScope(operation.scope)}`,
-    `  Invocation: ${describeUpdateInvocationPattern(operation)}`,
-    `  Network: ${operation.network.kind === "required" ? `required — ${operation.network.reason}` : "not required by the reviewed operation"}`,
-    `  Trust: Adapter ${operation.adapterId} ${operation.trust.kind === "trusted" ? "trusted" : "not trusted"} · ${packageConsent ? "pinned package consent required" : "no package consent required"}`,
+    action.target.kind === "plugin"
+      ? `• Plugin ${action.target.pluginBoundaryId}`
+      : `• ${countLabel(skillCount, "skill")} from ${operation.source.id}`,
   ];
 }
 
@@ -1158,12 +1159,6 @@ function updateInvocationPattern(
   };
 }
 
-function describeUpdateInvocationPattern(
-  operation: UpdateAction["operation"],
-): string {
-  return describeUpdateInvocation(updateInvocationPattern(operation));
-}
-
 function groupUpdateWarnings(
   warnings: readonly UpdateWarning[],
 ): readonly UpdateWarningGroup[] {
@@ -1172,17 +1167,20 @@ function groupUpdateWarnings(
   }));
 }
 
-function describeUpdateWarningGroup(group: UpdateWarningGroup): string {
+function describeUpdateWarningGroup(
+  group: UpdateWarningGroup,
+  state: TuiUpdatePlanState,
+): string {
   const description = describeUpdateWarning(group.warnings[0]);
   if (group.warnings.length === 1) return description;
-  const warning = group.warnings[0];
-  const noun =
-    warning.kind === "network-access" || warning.kind === "package-download"
-      ? "affected action"
-      : warning.kind === "local-change-unavailable"
-        ? "affected Installation"
-        : "affected relationship";
-  return `${description} — ${countLabel(group.warnings.length, noun)}`;
+  const actions = state.plan.actions.filter((action) =>
+    group.warnings.some((warning) =>
+      updateWarningAppliesToAction(warning, action),
+    ),
+  );
+  const target = group.warnings[0].target;
+  const count = affectedUpdateSkillCount(state, actions);
+  return `${description} — ${countLabel(count, target.kind === "plugin" ? "plugin" : "skill")}`;
 }
 
 function groupUpdateBlocks(
@@ -1226,8 +1224,26 @@ function updateRevisionShape(
 
 function updateVerificationGroupLines(
   group: UpdateVerificationGroup,
+  state: TuiUpdatePlanState,
+  technicalDetails = false,
 ): readonly string[] {
   const check = group.checks[0];
+  if (!technicalDetails) {
+    const hasPlugin = group.checks.some(
+      (item) => item.pluginBoundaryId !== null,
+    );
+    const skillCount = affectedSkillCountForInstallationIds(
+      state,
+      group.checks.flatMap((item) =>
+        item.installationId === null ? [] : [item.installationId],
+      ),
+    );
+    return [
+      hasPlugin
+        ? "• The plugin stays installed, and it keeps its prior on/off setting."
+        : `• The same ${skillCount === 1 ? "skill stays" : `${skillCount} skills stay`} installed, and each app keeps its prior on/off setting.`,
+    ];
+  }
   if (group.checks.length === 1)
     return [
       `• ${describeUpdateTarget(check.target)} keeps its strong identity, Owner, source, ref, Scope, boundary, and availability.`,
@@ -1330,7 +1346,6 @@ function updatePlanFooterLines(
     ? "hide technical details"
     : "technical details";
   return [
-    style.success("Nothing has changed yet."),
     style.muted(
       `y update · d ${details} · Esc returns to the previous view · q quits`,
     ),
@@ -1515,7 +1530,7 @@ function describeUpdateBlock(block: UpdateBlock): string {
 
 function describeUpdateWarning(warning: UpdateWarning): string {
   if (warning.kind === "package-download")
-    return `Package download: ${warning.packageName}@${warning.packageVersion} may download or use a cache`;
+    return `Lampwright may download ${warning.packageName}@${warning.packageVersion} before the update.`;
   if (warning.kind === "soft-reference")
     return `Soft reference: ${warning.reference.evidence} — Update does not change the reference, so it can become stale`;
   if (warning.kind === "hard-dependency")
@@ -1523,8 +1538,8 @@ function describeUpdateWarning(warning: UpdateWarning): string {
   if (warning.kind === "plugin-impact")
     return `Plugin impact: Plugin ${warning.pluginId} and ${String(warning.installationIds.length)} owned Installation(s) can change together`;
   if (warning.kind === "local-change-unavailable")
-    return `Local edits: ${warning.reason} — Lampwright cannot detect local edits, so Update can overwrite them`;
-  return `Network access: ${warning.reason} — the Owner can contact a remote service`;
+    return "Lampwright cannot check for edits, so this update may overwrite them.";
+  return "This update needs internet access.";
 }
 
 function describeUpdateInvocation(
@@ -3351,6 +3366,13 @@ function describeApproval(approval: ApprovalRequirement): string {
   if (approval.kind === "adapter-trust")
     return `adapter trust: ${approval.adapterId}:${approval.contentHash}`;
   return `package trust: ${approval.runner}:${approval.packageName}@${approval.packageVersion}:${approval.adapterHash}`;
+}
+
+function describeUpdateApproval(approval: ApprovalRequirement): string {
+  if (approval.kind === "adapter-trust")
+    return `Adapter ${approval.adapterId} must be trusted before the update`;
+  if (approval.kind !== "package-trust") return describeApproval(approval);
+  return `Allow ${approval.runner} to run ${approval.packageName}@${approval.packageVersion}`;
 }
 
 function describeTarget(target: RemovalTarget): string {

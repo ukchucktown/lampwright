@@ -310,17 +310,17 @@ actions, verification checks, identifiers, and approval boundary.
 
 ### Update review and report
 
-Update review leads with the selected target, readiness, action count,
-Installation count, material risks, recoverability, and verification outcomes.
-Lampwright groups Owner actions only when their Owner, source, ref, Scope,
-invocation pattern, trust, network use, and risks match. A Plugin boundary has
-its own summary. Each repeated warning appears once with the affected count and
-the consequence. Each distinct block remains prominent.
+Update review leads with the selected target, readiness, skill count, warnings,
+and verification results. The default view shows the source and the skills that
+the update will change. It does not show internal scope, command,
+network, or trust details. Each repeated warning appears once with its count
+and consequence. Each distinct block remains prominent.
 
-The default review groups checks that promise the same outcome. Package consent
-shows each exact runner, pinned version, and Adapter identity one time for each
-trust tuple. The review states that Update has no automatic rollback and creates
-no Trash or Disabled Storage copy. Press `d` to see exact targets, selectors,
+The review explains when the update contacts a remote service. Before the
+update, the review names the exact runner and package and asks for permission
+to run them. Verification says that the same skills stay installed and that
+each app keeps its prior on/off setting. The review also warns that Lampwright
+cannot undo the update for the user. Press `d` to see exact targets, selectors,
 revisions, hashes, effects, paths, approvals, commands, action IDs, and check
 IDs. The body supports paging, wheel scrolling, and resize clamping.
 
