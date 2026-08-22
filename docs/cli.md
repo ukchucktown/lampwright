@@ -124,4 +124,8 @@ entry. An Update target result of `updated` or `unchanged` uses status `0`.
 `partially-updated`, `failed`, and `unresolved` use status `1`. `blocked` uses
 status `3`. `unchanged` means that the Owner completed, but the local revision
 evidence did not change. It does not claim that a remote release is
-current. Other partial and failed execution reports use status `1`.
+current. A successful target with changed and unchanged Installations uses
+`updated`, exits with status `0`, and reports both counts in human output.
+`partially-updated` requires an action or final verification that does not
+complete successfully after another Installation changes. Other partial and
+failed execution reports use status `1`.

@@ -41,6 +41,11 @@ The module owns:
 
 The returned Inventory is immutable and disposable. Tests exercise the module through `scan` against temporary filesystem fixtures and fake command execution.
 
+Git protection performs a bounded ancestor-marker lookup before it invokes
+Git. The Inventory interface hides that optimization. Tests assert both the
+protection outcome and the number of structured Git commands, so discovery
+cannot regress to one worktree probe per Artifact outside a worktree.
+
 The normalized Harness Exposure and native evidence contract is defined in
 [Native Skill and Plugin availability controls](./availability-controls.md). Status and
 control support are independent; malformed or ambiguous configuration is

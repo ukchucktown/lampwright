@@ -296,7 +296,14 @@ Removal and availability protections are evaluated independently.
 
 ### 9.2 Project protection
 
-For every path inside a Git worktree, the planner asks Git whether the path is ignored. If Git does not classify it as ignored, the path is Git-protected and no Lampwright action may mutate it. This invariant is not bypassed by force.
+For every path inside a Git worktree, the planner asks Git whether the path is
+ignored. If Git does not classify it as ignored, the path is Git-protected and
+no Lampwright action may mutate it. This invariant is not bypassed by force.
+Inventory uses a bounded ancestor search for a `.git` directory or file before
+it starts a Git process. When that search proves that an Artifact is outside a
+worktree, Inventory does not run `git rev-parse` for that Artifact. Linked
+worktrees, `.git` files, permission errors, unreadable evidence, and absent
+effect paths retain conservative protection.
 
 ### 9.3 Availability planning
 
@@ -404,9 +411,14 @@ preimages.
 
 A final rescan reports `updated`, `unchanged`, `partially-updated`, `blocked`,
 `failed`, or `unresolved`. Lampwright reports `updated` only when observable
-revision or content evidence changes and the lifecycle identity stays stable.
-Lampwright does not describe `unchanged` as `up-to-date` without verifiable
-remote revision evidence.
+revision or content evidence changes for at least one represented Installation,
+every Owner action succeeds, every final verification passes, and the lifecycle
+identity stays stable. A successful mix of changed and unchanged Installations
+reports `updated`. Human output shows both counts. `partially-updated` requires
+an action or verification that does not complete successfully after another
+Installation changes. Lampwright does not describe `unchanged` as `up-to-date`
+without verifiable remote revision evidence. These semantics refine the
+existing status values and do not change the stable JSON schema version.
 
 ## 11. Quarantine and local state
 

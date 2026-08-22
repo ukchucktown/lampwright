@@ -56,3 +56,8 @@ Issue #15 prepares a release but explicitly does not publish to npm or make the 
   6. [#106 Stable targeted Update command and JSON output](https://github.com/ukchucktown/lampwright/issues/106) and [#107 Targeted Update review in the terminal UI](https://github.com/ukchucktown/lampwright/issues/107) depend on #105 and can proceed in parallel.
   7. [#108 Cross-platform hardening for targeted Update](https://github.com/ukchucktown/lampwright/issues/108) depends on #106 and #107.
   8. [#109 Claude Code Plugin Managed Update](https://github.com/ukchucktown/lampwright/issues/109) and [#110 Gemini extension Managed Update](https://github.com/ukchucktown/lampwright/issues/110) depend on #108 and can proceed in parallel.
+
+## Update acceptance follow-up
+
+1. [#121 Specify Update outcome clarity and TUI response time](https://github.com/ukchucktown/lampwright/issues/121) defines the accepted corrections after Update acceptance testing.
+2. [#122 Report successful mixed Update outcomes](https://github.com/ukchucktown/lampwright/issues/122), [#123 bound Git-protection process count](https://github.com/ukchucktown/lampwright/issues/123), and [#124 retain the Update hint in narrow TUI headers](https://github.com/ukchucktown/lampwright/issues/124) depend on #121 and can proceed independently.

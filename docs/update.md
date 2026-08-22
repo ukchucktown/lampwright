@@ -253,16 +253,24 @@ Inventory. Verification checks these properties:
 An Update Report uses these target results:
 
 - `updated`: The target keeps its lifecycle identity and its observable revision
-  or content changes.
+  or content changes for at least one represented Installation. Every Owner
+  action succeeds, and every final verification passes. Other represented
+  Installations can remain unchanged.
 - `unchanged`: The Owner succeeds and the observable local evidence does not
-  change.
-- `partially-updated`: Some represented Installations update and others do not.
+  change for any represented Installation. Every final verification passes.
+- `partially-updated`: At least one represented Installation changes, but
+  another action fails, is skipped, or is blocked, or another final
+  verification fails.
 - `blocked`: Planning or approval prevents execution.
 - `failed`: The Owner operation fails.
 - `unresolved`: Execution cannot prove the final lifecycle state.
 
 `unchanged` does not mean `up-to-date`. Lampwright can use that phrase only when
 the Owner supplies verifiable evidence for the permitted remote revision.
+
+Human reports for targets with more than one represented Installation show the
+number updated and the number unchanged. This count does not add a status or
+change the stable Update Report schema.
 
 ## Initial Owner support
 
@@ -412,6 +420,10 @@ Target results map to CLI exit statuses as follows:
 11. The final rescan detects identity loss, scope change, and an unexpected lifecycle boundary.
 12. The CLI and the terminal UI use the same Update Plan and Update Report values.
 13. Isolated tests cover macOS, Linux, and Windows without access to real Skill installations.
+14. A successful target with changed and unchanged Installations reports
+    `updated` and shows both counts in human output.
+15. `partially-updated` requires an action or verification that does not
+    complete successfully after another Installation changes.
 
 ## Non-goals
 
