@@ -13,6 +13,7 @@ import {
   type ApprovalRequirement,
   type Inventory,
   type DisabledEntry,
+  type LogicalSkillId,
   type UpdateAvailabilityExpectation,
   type UpdateIntent,
   type UpdatePlan,
@@ -242,6 +243,111 @@ function detailedPlan(inventory: Inventory): UpdatePlan {
   };
 }
 
+function equivalentInstallationPlan(count: number): {
+  readonly inventory: Inventory;
+  readonly plan: UpdatePlan;
+} {
+  const installations = Array.from({ length: count }, (_, index) => {
+    const number = String(index + 1);
+    const path = `/fixtures/skills/example-skill-${number}`;
+    return buildInstallation({
+      id: `installation-${number}`,
+      location: {
+        path,
+        canonicalPath: path,
+        artifactType: { kind: "directory" },
+      },
+      identity: {
+        strongEvidence: [
+          { strength: "strong", kind: "canonical-target", canonicalPath: path },
+        ],
+        weakEvidence: [],
+      },
+    });
+  });
+  const inventory = buildInventory({ installations });
+  const fixture = detailedPlan(inventory);
+  const firstAction = fixture.actions[0]!;
+  const firstCheck = fixture.verificationChecks[0]!;
+  const target = {
+    kind: "logical-skill" as const,
+    logicalSkillId: "logical-skill-1" as LogicalSkillId,
+  };
+  const actions = installations.map((installation, index) => {
+    const number = String(index + 1);
+    const availabilityExpectation: UpdateAvailabilityExpectation = {
+      harnessStatuses: ["claude", "codex", "gemini"].map((harnessId) => ({
+        installationId: installation.id,
+        strongEvidence: [installation.identity.strongEvidence[0]!],
+        harnessId,
+        status: "enabled" as const,
+      })),
+      pluginStatus: null,
+    };
+    return {
+      ...firstAction,
+      id: `update-action-${number}`,
+      target,
+      affectedInstallationIds: [installation.id],
+      operation: {
+        ...firstAction.operation,
+        externalId: `fixture-lock-key-${number}`,
+        invocation: {
+          ...firstAction.operation.invocation,
+          packageArguments: ["update", `fixture-lock-key-${number}`, "--yes"],
+        },
+        effects: firstAction.operation.effects.map((effect) => ({
+          ...effect,
+          path:
+            effect.kind === "mutation-root"
+              ? installation.location.path
+              : effect.path,
+        })),
+      },
+      availabilityExpectation,
+    };
+  });
+  return {
+    inventory,
+    plan: {
+      ...fixture,
+      intent: { target, force: false },
+      targets: [target],
+      actions,
+      warnings: actions.flatMap((action) => [
+        {
+          kind: "network-access" as const,
+          target,
+          actionId: action.id,
+          reason: "Owner fetches the recorded source",
+        },
+        {
+          kind: "package-download" as const,
+          target,
+          actionId: action.id,
+          packageName: "@fixture/manager",
+          packageVersion: "1.2.3",
+        },
+        {
+          kind: "local-change-unavailable" as const,
+          target,
+          installationId: action.affectedInstallationIds[0]!,
+          reason: "Owner cannot compare local content",
+        },
+      ]),
+      verificationChecks: installations.map((installation, index) => ({
+        ...firstCheck,
+        id: `update-check-${String(index + 1)}`,
+        actionId: `update-action-${String(index + 1)}`,
+        target,
+        installationId: installation.id,
+        identity: installation.identity,
+        availabilityExpectation: actions[index]!.availabilityExpectation,
+      })),
+    },
+  };
+}
+
 function updateReport(
   planValue: UpdatePlan,
   targetStatus: UpdateReport["targetResults"][0]["status"] = "updated",
@@ -364,6 +470,161 @@ function suspendedEntry(installation = buildInstallation()): DisabledEntry {
 }
 
 describe("Update TUI", () => {
+  it("keeps an equivalent 25-Installation Update review decision-focused", () => {
+    const fixture = equivalentInstallationPlan(25);
+    const state = {
+      screen: "update-plan" as const,
+      browse: {
+        inventory: fixture.inventory,
+        model: createBrowseModel(createTuiSections(fixture.inventory), {
+          rows: 1_000,
+          columns: 80,
+        }),
+        view: "inventory" as const,
+        disabledEntries: [],
+      },
+      plan: fixture.plan,
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+
+    const rendered = renderTui(state, plainTuiTheme);
+    const renderedLines = rendered.trimEnd().split("\n");
+    const footerLineCount = 2;
+    expect(renderedLines.length - footerLineCount).toBeLessThanOrEqual(60);
+    expect(rendered).toContain("25 Owner actions");
+    expect(rendered).toContain("25 affected Installations");
+    expect(rendered).toContain("Owner: Manager fixture-manager");
+    expect(rendered).toContain("Network: required");
+    expect(rendered).toContain("Automatic rollback is unavailable");
+    expect(rendered).toContain("25 Installations will be verified");
+    expect(rendered.match(/Network access/g)).toHaveLength(1);
+    expect(rendered).toContain("25 affected Installations");
+    expect(rendered.replaceAll(/\s+/g, " ")).toContain(
+      "Lampwright cannot detect local edits, so Update can overwrite them",
+    );
+    for (const machineLabel of [
+      "network-access",
+      "package-download",
+      "local-change-unavailable",
+    ])
+      expect(rendered).not.toContain(machineLabel);
+    expect(rendered.match(/package trust:/g)).toHaveLength(1);
+    expect(rendered).not.toContain("update-action-25");
+    expect(rendered).not.toContain("fixture-lock-key-25");
+    expect(rendered).not.toContain("/fixtures/skills/example-skill-25");
+
+    const technicalTop = renderTui(
+      { ...state, technicalDetails: true },
+      plainTuiTheme,
+    );
+    expect(technicalTop).toContain('"actionId":"update-action-1"');
+    expect(technicalTop).toContain('"installationId":"installation-1"');
+    expect(technicalTop).toContain('"kind":"network-access"');
+
+    const technicalState = { ...state, technicalDetails: true };
+    const details = renderTui(
+      {
+        ...technicalState,
+        scrollOffset: updatePlanScrollMetrics(technicalState).maximumOffset,
+      },
+      plainTuiTheme,
+    );
+    expect(details).toContain("Action ID: update-action-25");
+    expect(details).toContain("Check ID: update-check-25");
+    expect(details).toContain("fixture-lock-key-25");
+    expect(details).toContain(
+      "• Invocation: npx @fixture/manager@1.2.3 update",
+    );
+    expect(details).toContain("/fixtures/skills/example-skill-25");
+  });
+
+  it("keeps unlike Owner actions and a Plugin boundary in separate summaries", () => {
+    const fixture = equivalentInstallationPlan(2);
+    const first = fixture.plan.actions[0]!;
+    const second = fixture.plan.actions[1]!;
+    const unlikePlan: UpdatePlan = {
+      ...fixture.plan,
+      actions: [
+        first,
+        {
+          ...second,
+          operation: {
+            ...second.operation,
+            source: { id: "other-source", url: "https://example.test/other" },
+          },
+        },
+      ],
+    };
+    const state = {
+      screen: "update-plan" as const,
+      browse: {
+        inventory: fixture.inventory,
+        model: createBrowseModel(createTuiSections(fixture.inventory), {
+          rows: 100,
+          columns: 80,
+        }),
+        view: "inventory" as const,
+        disabledEntries: [],
+      },
+      plan: unlikePlan,
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    const unlike = renderTui(state, plainTuiTheme);
+    expect(unlike.match(/• 1 Owner action/g)).toHaveLength(2);
+    expect(unlike).toContain("Source: fixture-source");
+    expect(unlike).toContain("Source: other-source");
+
+    const firstCheck = fixture.plan.verificationChecks[0]!;
+    const secondCheck = fixture.plan.verificationChecks[1]!;
+    const unlikeVerificationPlan: UpdatePlan = {
+      ...fixture.plan,
+      warnings: [],
+      verificationChecks: [
+        firstCheck,
+        {
+          ...secondCheck,
+          currentRevision: [
+            {
+              kind: "content-hash",
+              path: "/fixtures/skills/example-skill-2",
+              digest: { algorithm: "sha256", digest: "d".repeat(64) },
+            },
+          ],
+        },
+      ],
+    };
+    const unlikeVerification = renderTui(
+      { ...state, plan: unlikeVerificationPlan },
+      plainTuiTheme,
+    );
+    expect(unlikeVerification.match(/keeps its strong identity/g)).toHaveLength(
+      2,
+    );
+
+    const pluginTarget = {
+      kind: "plugin" as const,
+      pluginBoundaryId: "fixture-plugin",
+    };
+    const pluginPlan: UpdatePlan = {
+      ...fixture.plan,
+      intent: { target: pluginTarget, force: false },
+      targets: [pluginTarget],
+      actions: [{ ...first, target: pluginTarget }],
+      warnings: [],
+      verificationChecks: [],
+    };
+    expect(
+      renderTui(
+        { ...state, plan: pluginPlan, label: "fixture-plugin" },
+        plainTuiTheme,
+      ),
+    ).toContain("Boundary: Plugin fixture-plugin");
+  });
+
   it("maps the Update command and key only from Inventory or Disabled browse", () => {
     for (const state of [
       browseState(),
@@ -637,7 +898,22 @@ describe("Update TUI", () => {
       technicalDetails: false,
       scrollOffset: 0,
     };
-    const rendered = renderTui(state, plainTuiTheme);
+    const defaultRendered = renderTui(state, plainTuiTheme);
+    for (const expected of [
+      "1 Owner action · 1 affected Installation",
+      "Owner: Manager fixture-manager",
+      "Source: fixture-source (https://example.test/source) · ref main",
+      "Invocation: npx @fixture/manager@1.2.3 update … --yes",
+      "After Update, Lampwright will verify",
+      "Automatic rollback is unavailable",
+    ])
+      expect(defaultRendered).toContain(expected);
+    expect(defaultRendered).not.toContain("Owner record digest");
+
+    const rendered = renderTui(
+      { ...state, technicalDetails: true },
+      plainTuiTheme,
+    );
     for (const expected of [
       "Review Update",
       "Owner: Manager fixture-manager",
@@ -914,6 +1190,18 @@ describe("Update TUI", () => {
       await blocked.start();
       await blocked.dispatch({ kind: "update-review" });
       expect(renderTui(blocked.state, plainTuiTheme)).toContain(kind);
+      await blocked.dispatch({ kind: "toggle-details" });
+      const exact = renderTui(blocked.state, plainTuiTheme).replaceAll(
+        /\s+/g,
+        " ",
+      );
+      expect(exact).toContain(`"kind":"${kind}"`);
+      expect(exact).toContain(
+        `"installationId":"${before.installations[0]!.id}"`,
+      );
+      expect(exact).toContain(
+        `"path":"${before.installations[0]!.location.path}"`,
+      );
       await blocked.dispatch({ kind: "confirm" });
       expect(blocked.state.screen).toBe("update-plan");
       expect(blockedExecute).not.toHaveBeenCalled();
