@@ -1178,8 +1178,38 @@ describe("Update TUI", () => {
         scrollOffset: 0,
       };
       const rendered = renderTui(state, plainTuiTheme);
-      expect(rendered).toContain(`Installation installation-1: ${status}`);
+      const reportLines = rendered.split("\n");
+      expect(reportLines[0]?.trimEnd()).toBe(
+        "Lampwright - Update example-skill",
+      );
+      expect(reportLines[1]?.trim()).toBe("");
+      expect(reportLines[2]).toContain("example-skill:");
+      expect(reportLines[3]?.trim()).toBe("");
+      expect(reportLines[4]?.trimEnd()).toBe(
+        "d technical details · Esc refreshes Inventory · q quits",
+      );
+      expect(rendered).not.toContain("Installation Group");
+      expect(rendered).not.toContain("Final Inventory scan");
+      expect(rendered).not.toContain("verification check");
+      expect(rendered).not.toContain("completed");
+      expect(rendered).toContain(
+        `example-skill: ${status === "updated" ? 1 : 0} updated, ${status === "updated" ? 0 : 1} unchanged${status === "updated" || status === "unchanged" ? "" : ` (${status === "partially-updated" ? "partially updated" : status})`}`,
+      );
       expect(rendered.toLowerCase()).not.toContain("up-to-date");
+      const truecolorTheme = createNightfallTheme("truecolor");
+      const colored = renderTui(state, truecolorTheme);
+      const summary = `example-skill: ${status === "updated" ? 1 : 0} updated, ${status === "updated" ? 0 : 1} unchanged${status === "updated" || status === "unchanged" ? "" : ` (${status === "partially-updated" ? "partially updated" : status})`}`;
+      expect(colored).toContain(
+        styleTui(
+          truecolorTheme,
+          status === "updated" || status === "unchanged"
+            ? "success"
+            : status === "partially-updated"
+              ? "warning"
+              : "error",
+          summary,
+        ),
+      );
       const compact = {
         ...state,
         browse: {
@@ -1195,6 +1225,54 @@ describe("Update TUI", () => {
       ).toBeGreaterThanOrEqual(0);
     },
   );
+
+  it("uses the shared header and footer styling and keeps report details behind d", () => {
+    const inventory = buildInventory();
+    const planValue = detailedPlan(inventory);
+    const state = {
+      screen: "update-report" as const,
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 40,
+          columns: 110,
+        }),
+        view: "inventory" as const,
+        disabledEntries: [],
+      },
+      report: updateReport(planValue, "unchanged"),
+      label: "example-skill",
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+    const truecolorTheme = createNightfallTheme("truecolor");
+    const rendered = renderTui(state, truecolorTheme);
+
+    expect(rendered).toContain(
+      styleTui(truecolorTheme, "title", "Lampwright - Update example-skill"),
+    );
+    for (const key of ["d", "Esc", "q"])
+      expect(rendered).toContain(styleTui(truecolorTheme, "title", key));
+    for (const description of [
+      " technical details · ",
+      " refreshes Inventory · ",
+      " quits",
+    ])
+      expect(rendered).toContain(
+        styleTui(truecolorTheme, "muted", description),
+      );
+
+    const details = renderTui(
+      { ...state, technicalDetails: true },
+      plainTuiTheme,
+    );
+    expect(details).toContain("Technical details");
+    expect(details).toContain("Target Installation installation-1: unchanged");
+    expect(details).toContain("Final Inventory scan completed.");
+    expect(details).toContain(
+      "d hide technical details · Esc refreshes Inventory · q quits",
+    );
+  });
 
   it("reports updated and unchanged Installation counts for a successful mixed Update", () => {
     const inventory = buildInventory();
@@ -1219,8 +1297,7 @@ describe("Update TUI", () => {
       plainTuiTheme,
     );
 
-    expect(rendered).toContain("24 updated, 1 unchanged.");
-    expect(rendered).toContain("Installation installation-1: updated");
+    expect(rendered).toContain("example-skill: 24 updated, 1 unchanged");
   });
 
   it.each(["unsupported-update", "git-protection", "local-changes"] as const)(

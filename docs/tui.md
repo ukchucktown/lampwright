@@ -329,6 +329,13 @@ uses cyan keys for `y`, `d`, `Esc`, and `q`. It uses muted text for descriptions
 and separators, and it keeps those key colors when the footer is shortened for
 a narrow terminal.
 
+The Update result uses one title, one summary (`<skill>: N updated, M
+unchanged`), and one segmented footer, with one blank line between each block. A
+non-success result adds the target status, such as `partially updated`,
+`blocked`, `failed`, or `unresolved`. The default result hides target blocks,
+scan messages, verification counts, and action/check messages. Press `d` to see
+them.
+
 Update Execution offers no Removal or brute-force fallback. You cannot confirm
 a blocked plan.
 

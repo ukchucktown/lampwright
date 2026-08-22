@@ -1391,7 +1391,7 @@ function renderUpdateReport(
     return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     updateReportBodyLines(state, style),
-    [style.muted("d technical details · Esc refreshes Inventory · q quits")],
+    updateReportFooterLines(state, style),
     state.scrollOffset,
     state.browse.model.viewport,
     "report",
@@ -1404,91 +1404,34 @@ function updateReportBodyLines(
 ): readonly string[] {
   const { report } = state;
   const width = Math.max(1, state.browse.model.viewport.columns - 1);
-  const lines: string[] = [
-    style.title("Lampwright — Update result"),
-    "",
-    report.status === "succeeded"
-      ? style.success(`${state.label}: completed`)
-      : report.status === "partial"
-        ? style.warning(`${state.label}: completed only in part`)
-        : style.error(`${state.label}: ${report.status}`),
-    "",
-  ];
-  for (const result of report.targetResults) {
-    const paint =
-      result.status === "updated" || result.status === "unchanged"
-        ? style.success
-        : result.status === "partially-updated"
-          ? style.warning
-          : style.error;
-    lines.push(
-      ...wrapPlanLine(
-        `${result.status === "updated" || result.status === "unchanged" ? "✓" : "!"} ${describeUpdateTarget(result.target)}: ${result.status}${result.reason === null ? "" : ` — ${result.reason}`}`,
-        width,
-      ).map(paint),
-    );
-    if (result.status === "unchanged")
-      lines.push(
-        ...wrapPlanLine(
-          "  The Owner completed, but observable local revision evidence did not change.",
-          width,
-        ).map(style.muted),
-      );
-  }
-  const successfulTarget = report.targetResults.every(
-    (result) => result.status === "updated" || result.status === "unchanged",
-  );
   const updated = report.verificationResults.filter(
     (result) => result.status === "passed" && result.changed,
   ).length;
   const unchanged = report.verificationResults.filter(
     (result) => result.status === "passed" && !result.changed,
   ).length;
-  if (
-    successfulTarget &&
-    report.verificationResults.length > 1 &&
-    updated + unchanged === report.verificationResults.length
-  )
-    lines.push(
-      style.success(
-        `${String(updated)} updated, ${String(unchanged)} unchanged.`,
-      ),
-    );
-  lines.push(
-    report.rescanError === null
-      ? style.success("Final Inventory scan completed.")
-      : style.error(
-          `Final Inventory scan failed: ${report.rescanError.message}`,
-        ),
-  );
-  for (const result of report.actionResults)
-    if (result.status !== "succeeded")
-      lines.push(
-        ...wrapPlanLine(
-          `Owner action ${result.status}: ${"error" in result ? result.error.message : "reason" in result ? result.reason : "did not finish"}`,
-          width,
-        ).map(result.status === "failed" ? style.error : style.warning),
-      );
-  const passed = report.verificationResults.filter(
-    (result) => result.status === "passed",
-  ).length;
-  lines.push(
-    style.muted(
-      `${String(passed)} of ${String(report.verificationResults.length)} verification check(s) passed.`,
+  const targetStatus =
+    report.targetResults.length === 1
+      ? report.targetResults[0]!.status.replace(
+          "partially-updated",
+          "partially updated",
+        )
+      : report.status;
+  const lines: string[] = [
+    style.title(`Lampwright - Update ${state.label}`),
+    "",
+    (report.status === "succeeded"
+      ? style.success
+      : report.status === "partial"
+        ? style.warning
+        : style.error)(
+      `${state.label}: ${String(updated)} updated, ${String(unchanged)} unchanged${report.status === "succeeded" ? "" : ` (${targetStatus})`}`,
     ),
-  );
-  for (const result of report.verificationResults)
-    if (result.status !== "passed")
-      lines.push(
-        ...wrapPlanLine(
-          `Verification ${result.status}: ${"error" in result ? result.error.message : result.reason}`,
-          width,
-        ).map(result.status === "failed" ? style.error : style.warning),
-      );
+  ];
   if (state.technicalDetails)
     lines.push(
       "",
-      style.info("Technical details"),
+      style.title("Technical details"),
       ...wrapPlanLine(`Plan ID: ${report.planId}`, width).map(style.muted),
       ...wrapPlanLine(`Inventory ID: ${report.inventoryId}`, width).map(
         style.muted,
@@ -1507,8 +1450,65 @@ function updateReportBodyLines(
           style.muted,
         ),
       ),
+      ...report.targetResults.flatMap((result) =>
+        wrapPlanLine(
+          `Target ${describeUpdateTarget(result.target)}: ${result.status}${result.reason === null ? "" : ` — ${result.reason}`}`,
+          width,
+        ).map(style.muted),
+      ),
+      ...report.actionResults.flatMap((result) =>
+        "error" in result
+          ? wrapPlanLine(
+              `Action ${result.actionId} error: ${result.error.message}`,
+              width,
+            ).map(style.error)
+          : "reason" in result
+            ? wrapPlanLine(
+                `Action ${result.actionId} reason: ${result.reason}`,
+                width,
+              ).map(style.warning)
+            : [],
+      ),
+      ...report.verificationResults.flatMap((result) =>
+        result.status === "passed"
+          ? []
+          : wrapPlanLine(
+              `Check ${result.checkId}: ${"error" in result ? result.error.message : result.reason}`,
+              width,
+            ).map(result.status === "failed" ? style.error : style.warning),
+      ),
+      report.rescanError === null
+        ? style.muted("Final Inventory scan completed.")
+        : style.error(
+            `Final Inventory scan failed: ${report.rescanError.message}`,
+          ),
     );
   return lines;
+}
+
+function updateReportFooterLines(
+  state: TuiUpdateReportState,
+  style: TuiPaint,
+): readonly string[] {
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const details = state.technicalDetails
+    ? "hide technical details"
+    : "technical details";
+  return [
+    "",
+    fitStyledSegments(
+      [
+        { text: "d", paint: style.title },
+        { text: ` ${details} · `, paint: style.muted },
+        { text: "Esc", paint: style.title },
+        { text: " refreshes Inventory · ", paint: style.muted },
+        { text: "q", paint: style.title },
+        { text: " quits", paint: style.muted },
+      ],
+      width,
+      style.muted,
+    ),
+  ];
 }
 
 export function updateReportScrollMetrics(state: TuiUpdateReportState): {
@@ -1524,7 +1524,7 @@ export function updateReportScrollMetrics(state: TuiUpdateReportState): {
   return trashScrollMetricsFor(
     state.browse.model.viewport,
     updateReportBodyLines(state, style).length,
-    1,
+    updateReportFooterLines(state, style).length,
   );
 }
 
