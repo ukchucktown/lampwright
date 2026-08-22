@@ -790,21 +790,13 @@ function updatePlanBodyLines(
   const { plan } = state;
   const width = Math.max(1, state.browse.model.viewport.columns - 1);
   const lines: string[] = [
-    style.title("Lampwright — Review Update"),
-    "",
-    style.title(`Update ${state.label}?`),
-    plan.blocks.length === 0
-      ? plan.warnings.length === 0
-        ? style.success("READY TO UPDATE")
-        : style.warning("REVIEW BEFORE UPDATE")
-      : style.error("CANNOT UPDATE"),
-    style.muted(`${countLabel(affectedUpdateSkillCount(state), "skill")}`),
+    style.title(`Lampwright - Update ${state.label}`),
     "",
   ];
   if (plan.blocks.length > 0) {
     const groups = groupUpdateBlocks(plan.blocks);
     lines.push(
-      style.error("Why Update cannot run"),
+      style.title("Why Update cannot run"),
       ...groups.flatMap((group) =>
         wrapPlanLine(`! ${describeUpdateBlockGroup(group)}`, width).map(
           style.error,
@@ -816,7 +808,7 @@ function updatePlanBodyLines(
   if (plan.warnings.length > 0) {
     const groups = groupUpdateWarnings(plan.warnings);
     lines.push(
-      style.warning("Review these warnings"),
+      style.title("Review these warnings"),
       ...groups.flatMap((group) =>
         wrapPlanLine(
           `! ${describeUpdateWarningGroup(group, state)}`,
@@ -872,7 +864,7 @@ function updatePlanBodyLines(
   if (state.technicalDetails) {
     lines.push(
       "",
-      style.info("Exact Update evidence"),
+      style.title("Exact Update evidence"),
       ...wrapPlanLine(`Plan ID: ${plan.id}`, width).map(style.muted),
       ...wrapPlanLine(`Inventory ID: ${plan.inventoryId}`, width).map(
         style.muted,
@@ -1345,9 +1337,21 @@ function updatePlanFooterLines(
   const details = state.technicalDetails
     ? "hide technical details"
     : "technical details";
+  const width = Math.max(1, state.browse.model.viewport.columns - 1);
   return [
-    style.muted(
-      `y update · d ${details} · Esc returns to the previous view · q quits`,
+    fitStyledSegments(
+      [
+        { text: "y", paint: style.title },
+        { text: " update · ", paint: style.muted },
+        { text: "d", paint: style.title },
+        { text: ` ${details} · `, paint: style.muted },
+        { text: "Esc", paint: style.title },
+        { text: " returns to the previous view · ", paint: style.muted },
+        { text: "q", paint: style.title },
+        { text: " quits", paint: style.muted },
+      ],
+      width,
+      style.muted,
     ),
   ];
 }

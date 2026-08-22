@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBrowseModel,
   createTuiSections,
+  createNightfallTheme,
   parseLineTuiAction,
   plan,
   plainTuiTheme,
   renderTui,
+  styleTui,
   TuiController,
   updatePlanScrollMetrics,
   updateReportScrollMetrics,
@@ -945,13 +947,42 @@ describe("Update TUI", () => {
     ])
       expect(defaultRendered).toContain(expected);
     expect(defaultRendered).not.toContain("Owner record digest");
+    const truecolorTheme = createNightfallTheme("truecolor");
+    const colored = renderTui(state, truecolorTheme);
+    expect(colored).toContain(
+      styleTui(truecolorTheme, "title", "Lampwright - Update example-skill"),
+    );
+    for (const heading of [
+      "Review these warnings",
+      "Planned updates",
+      "Before update",
+      "After the update",
+    ])
+      expect(colored).toContain(styleTui(truecolorTheme, "title", heading));
+    for (const warning of [
+      "! This update needs internet access.",
+      "! Lampwright may download @fixture/manager@1.2.3 before the update.",
+      "Lampwright cannot undo this update for you.",
+    ])
+      expect(colored).toContain(styleTui(truecolorTheme, "warning", warning));
+    for (const key of ["y", "d", "Esc", "q"])
+      expect(colored).toContain(styleTui(truecolorTheme, "title", key));
+    expect(colored).toContain(styleTui(truecolorTheme, "muted", " update · "));
+    expect(colored).toContain(
+      styleTui(truecolorTheme, "muted", " returns to the previous view · "),
+    );
+    const top = defaultRendered.split("Review these warnings")[0]!;
+    expect(top).not.toContain("Update example-skill?");
+    expect(top).not.toContain("READY TO UPDATE");
+    expect(top).not.toContain("REVIEW BEFORE UPDATE");
+    expect(top).not.toContain("1 skill");
 
     const rendered = renderTui(
       { ...state, technicalDetails: true },
       plainTuiTheme,
     );
     for (const expected of [
-      "Review Update",
+      "Lampwright - Update example-skill",
       "Owner: Manager fixture-manager",
       "Adapter fixture-adapter",
       "selector fixture-lock-key",

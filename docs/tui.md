@@ -310,9 +310,11 @@ actions, verification checks, identifiers, and approval boundary.
 
 ### Update review and report
 
-Update review leads with the selected target, readiness, skill count, warnings,
-and verification results. The default view shows the source and the skills that
-the update will change. It does not show internal scope, command,
+Update review leads with the selected target, warnings, and verification
+results. The screen uses one title, `Lampwright - Update <skill>`. All section
+headings use the cyan title color. Warning bodies use the gold warning color,
+and block text uses the error color. The default view shows the source and the
+skills that the update will change. It does not show internal scope, command,
 network, or trust details. Each repeated warning appears once with its count
 and consequence. Each distinct block remains prominent.
 
@@ -322,7 +324,10 @@ to run them. Verification says that the same skills stay installed and that
 each app keeps its prior on/off setting. The review also warns that Lampwright
 cannot undo the update for the user. Press `d` to see exact targets, selectors,
 revisions, hashes, effects, paths, approvals, commands, action IDs, and check
-IDs. The body supports paging, wheel scrolling, and resize clamping.
+IDs. The body supports paging, wheel scrolling, and resize clamping. The footer
+uses cyan keys for `y`, `d`, `Esc`, and `q`. It uses muted text for descriptions
+and separators, and it keeps those key colors when the footer is shortened for
+a narrow terminal.
 
 Update Execution offers no Removal or brute-force fallback. You cannot confirm
 a blocked plan.
