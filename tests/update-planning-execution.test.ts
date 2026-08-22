@@ -353,6 +353,104 @@ describe("targeted Update planning", () => {
 });
 
 describe("managed Update execution", () => {
+  it("reports a successful Logical Skill when 24 Installations change and one stays unchanged", async () => {
+    const sharedIdentity = installation("shared").identity;
+    const beforeInstallations = Array.from({ length: 25 }, (_, index) =>
+      installation(`installation-${String(index + 1)}`, 1, {
+        identity: sharedIdentity,
+      }),
+    );
+    const logical = buildLogicalSkill({
+      id: "logical",
+      identity: sharedIdentity,
+      installationIds: beforeInstallations.map((item) => item.id),
+    });
+    const before = buildInventory({
+      id: "inventory-before",
+      installations: beforeInstallations,
+      logicalSkills: [logical],
+    });
+    const planned = planUpdate(before, {
+      target: { kind: "logical-skill", logicalSkillId: logical.id },
+      force: false,
+    });
+    const finalInstallations = beforeInstallations.map((item, index) =>
+      installation(item.id, index < 24 ? 2 : 1, {
+        identity: sharedIdentity,
+      }),
+    );
+    const final = buildInventory({
+      id: "inventory-final",
+      installations: finalInstallations,
+      logicalSkills: [
+        buildLogicalSkill({
+          id: logical.id,
+          identity: sharedIdentity,
+          installationIds: finalInstallations.map((item) => item.id),
+        }),
+      ],
+    });
+
+    const report = await createExecutionModule(
+      options(before, final, planned),
+    ).executeUpdate(planned, {
+      grants: [{ kind: "confirmation" }],
+    });
+
+    expect(report).toMatchObject({
+      schemaVersion: 1,
+      status: "succeeded",
+      targetResults: [{ status: "updated" }],
+    });
+    expect(report.actionResults).toHaveLength(25);
+    expect(report.verificationResults).toHaveLength(25);
+    expect(
+      report.verificationResults.filter(
+        (result) => result.status === "passed" && result.changed,
+      ),
+    ).toHaveLength(24);
+    expect(
+      report.verificationResults.filter(
+        (result) => result.status === "passed" && !result.changed,
+      ),
+    ).toHaveLength(1);
+    expect(() => parseUpdateReport(report)).not.toThrow();
+
+    const falsePartial = structuredClone(report) as UpdateReport;
+    (falsePartial as unknown as { status: string }).status = "partial";
+    (
+      falsePartial.targetResults[0] as unknown as {
+        status: string;
+        reason: string | null;
+      }
+    ).status = "partially-updated";
+    (
+      falsePartial.targetResults[0] as unknown as {
+        status: string;
+        reason: string | null;
+      }
+    ).reason = "some Installations did not change";
+    expect(() => parseUpdateReport(falsePartial)).toThrow(
+      /target result differs/,
+    );
+
+    const unchangedReport = await createExecutionModule(
+      options(before, before, planned),
+    ).executeUpdate(planned, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(unchangedReport).toMatchObject({
+      schemaVersion: 1,
+      status: "succeeded",
+      targetResults: [{ status: "unchanged" }],
+    });
+    expect(
+      unchangedReport.verificationResults.every(
+        (result) => result.status === "passed" && !result.changed,
+      ),
+    ).toBe(true);
+  });
+
   it("reports updated only after the final revision changes", async () => {
     const beforeItem = installation();
     const before = inventory(beforeItem);
@@ -822,7 +920,7 @@ describe("managed Update execution", () => {
     });
   });
 
-  it("continues an independent action and blocks a failed dependency branch", async () => {
+  it("reports a real partial failure when one action changes evidence and another branch fails", async () => {
     const sharedIdentity = installation("shared").identity;
     const withSelector = (id: string, version = 1): ManagedUpdateEvidence => {
       const value = operation(version, id);

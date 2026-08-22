@@ -473,11 +473,10 @@ export function parseUpdateReport(value: unknown): UpdateReport {
       "invalid Update Report: top-level status differs from the target result",
     );
   if (
-    (target.status === "updated" &&
-      (!completedUpdate || changed !== passed.length)) ||
+    (target.status === "updated" && (!completedUpdate || changed === 0)) ||
     (target.status === "unchanged" && (!completedUpdate || changed !== 0)) ||
     (target.status === "partially-updated" &&
-      (changed === 0 || (completedUpdate && changed === passed.length))) ||
+      (changed === 0 || completedUpdate)) ||
     (target.status === "failed" && (!failed || changed > 0)) ||
     (target.status === "blocked" &&
       ((!interrupted && report.actionResults.length > 0) || changed > 0)) ||

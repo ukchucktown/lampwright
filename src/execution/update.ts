@@ -844,17 +844,9 @@ function targetResultFor(
       actionIds,
       reason: "final lifecycle state was not verified",
     };
-  if (changed > 0 && changed < passed.length)
-    return {
-      target: plan.intent.target,
-      status: "partially-updated",
-      actionIds,
-      reason: "some represented Installations changed and others did not",
-    };
   return {
     target: plan.intent.target,
-    status:
-      changed === passed.length && passed.length > 0 ? "updated" : "unchanged",
+    status: changed > 0 ? "updated" : "unchanged",
     actionIds,
     reason: null,
   };

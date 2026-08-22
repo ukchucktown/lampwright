@@ -14,6 +14,7 @@ import type {
   UpdateReport,
   UpdateTarget,
 } from "../src/index.js";
+import { parseUpdateReport } from "../src/index.js";
 import {
   buildInstallation,
   buildInventory,
@@ -231,6 +232,44 @@ function report(
       details: {},
     })),
   };
+}
+
+function mixedSuccessfulReport(plan: UpdatePlan): UpdateReport {
+  const actionIds = Array.from(
+    { length: 25 },
+    (_, index) => `update-action-${String(index + 1)}`,
+  );
+  return parseUpdateReport({
+    schemaVersion: 1,
+    planId: plan.id,
+    inventoryId: plan.inventoryId,
+    finalInventoryId: plan.inventoryId,
+    rescanError: null,
+    startedAt: "2026-08-21T12:00:00.000Z",
+    completedAt: "2026-08-21T12:01:00.000Z",
+    status: "succeeded",
+    actionResults: actionIds.map((actionId) => ({
+      actionId,
+      status: "succeeded",
+      startedAt: "2026-08-21T12:00:00.000Z",
+      completedAt: "2026-08-21T12:01:00.000Z",
+      details: {},
+    })),
+    targetResults: [
+      {
+        target: plan.intent.target,
+        status: "updated",
+        actionIds,
+        reason: null,
+      },
+    ],
+    verificationResults: actionIds.map((_, index) => ({
+      checkId: `update-check-${String(index + 1)}`,
+      status: "passed",
+      changed: index < 24,
+      details: {},
+    })),
+  });
 }
 
 describe("Update CLI", () => {
@@ -468,6 +507,48 @@ describe("Update CLI", () => {
       expect(human.toLowerCase()).not.toContain("up-to-date");
     },
   );
+
+  it("reports updated and unchanged Installation counts for a successful mixed Update", async () => {
+    const inventory = managedInventory(false);
+    const output = await runCli(
+      ["update", "installation:installation-1", "--yes"],
+      {
+        scan: async () => inventory,
+        executeUpdate: async (plan) => mixedSuccessfulReport(plan),
+      },
+    );
+
+    expect(output).toMatchObject({
+      exitCode: 0,
+      output: {
+        schemaVersion: 1,
+        kind: "update-report",
+        report: {
+          schemaVersion: 1,
+          targetResults: [{ status: "updated" }],
+          actionResults: expect.arrayContaining([
+            expect.objectContaining({ actionId: "update-action-25" }),
+          ]),
+          verificationResults: expect.arrayContaining([
+            expect.objectContaining({
+              checkId: "update-check-25",
+              changed: false,
+            }),
+          ]),
+        },
+      },
+    });
+    const mixedReport = (output.output as { report: UpdateReport }).report;
+    expect(mixedReport.actionResults).toHaveLength(25);
+    expect(mixedReport.verificationResults).toHaveLength(25);
+    expect(formatCliOutput(output.output, false)).toMatchInlineSnapshot(`
+      "Update succeeded.
+      Target Installation installation-1: updated.
+      24 updated, 1 unchanged.
+      Verification: 25/25 check(s) passed.
+      "
+    `);
+  });
 
   it("keeps blocked plans zero-mutation and validates every Update envelope against CLI v1", async () => {
     const inventory = managedInventory(false);
