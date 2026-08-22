@@ -18,6 +18,7 @@ import {
   createExecutionModule,
   createInventoryScanner,
   createQuarantineModule,
+  defaultInventoryScanEnvironment,
   nodeQuarantineFileSystem,
   plan,
   planUpdate,
@@ -245,6 +246,18 @@ async function globalFixture(managerAvailable: boolean, name = "review-tools") {
 }
 
 describe("Vercel Managed Update evidence", () => {
+  it("retains only the presence of agent-detection secrets", () => {
+    vi.stubEnv("COPILOT_GITHUB_TOKEN", "fixture-secret");
+    try {
+      expect(
+        defaultInventoryScanEnvironment().agentProcessEnvironment
+          ?.COPILOT_GITHUB_TOKEN,
+      ).toBe("present");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("keeps scan, Planning, and CLI dry-run at zero footprint without an Owner request", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
@@ -342,7 +355,7 @@ describe("Vercel Managed Update evidence", () => {
           kind: "mutation-root",
           path: join(
             value.environment.homeDirectory,
-            "agent",
+            ".adal",
             "skills",
             "review-tools",
           ),
@@ -355,7 +368,7 @@ describe("Vercel Managed Update evidence", () => {
         kind: "path-present",
         path: join(
           value.environment.homeDirectory,
-          "agent",
+          ".adal",
           "skills",
           "review-tools",
         ),
@@ -825,6 +838,204 @@ describe("Vercel Managed Update execution", () => {
 });
 
 describe("Vercel Update safety blocks", () => {
+  it("excludes unreachable global agent paths behind a linked config worktree", async () => {
+    const fixture = await createTestEnvironment();
+    const configDirectory = join(fixture.home, ".config");
+    const dotfiles = join(fixture.temporary, "dotfiles");
+    await mkdir(join(dotfiles, ".git"), { recursive: true });
+    await symlink(
+      dotfiles,
+      configDirectory,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const environment = {
+      ...scanEnvironment(fixture),
+      configDirectory,
+      agentProcessEnvironment: { CODEX_THREAD_ID: "fixture-thread" },
+    };
+    const name = "linked-config";
+    const canonical = globalSkillPath(environment, name);
+    const claudePath = join(
+      environment.homeDirectory,
+      ".claude",
+      "skills",
+      name,
+    );
+    await writeSkill(canonical, name);
+    await mkdir(dirname(claudePath), { recursive: true });
+    await symlink(
+      canonical,
+      claudePath,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        [name]: {
+          source: "acme/linked-config",
+          sourceType: "github",
+          sourceUrl: "https://github.com/acme/linked-config.git",
+          skillPath: `skills/${name}/SKILL.md`,
+          skillFolderHash: "source-tree-v1",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true, dotfiles).scan({});
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === canonical,
+    )!;
+    if (installation.update.kind !== "managed")
+      throw new Error("expected managed Vercel Update");
+    const effectPaths = installation.update.operation.effects.map(
+      (effect) => effect.path,
+    );
+    expect(effectPaths).toEqual(
+      expect.arrayContaining([canonical, claudePath]),
+    );
+    expect(effectPaths).not.toEqual(
+      expect.arrayContaining([
+        join(configDirectory, "agents", "skills", name),
+        join(configDirectory, "crush", "skills", name),
+        join(configDirectory, "devin", "skills", name),
+        join(configDirectory, "goose", "skills", name),
+        join(configDirectory, "kimchi", "harness", "skills", name),
+        join(configDirectory, "opencode", "skills", name),
+      ]),
+    );
+    expect(
+      planUpdate(inventory, updateIntent(installation)).blocks,
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "git-protection" }),
+      ]),
+    );
+  });
+
+  it("keeps a reachable absent global path protected behind a linked config worktree", async () => {
+    const fixture = await createTestEnvironment();
+    const configDirectory = join(fixture.home, ".config");
+    const dotfiles = join(fixture.temporary, "reachable-dotfiles");
+    await mkdir(join(dotfiles, ".git"), { recursive: true });
+    await mkdir(join(dotfiles, "crush"), { recursive: true });
+    await symlink(
+      dotfiles,
+      configDirectory,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const environment = {
+      ...scanEnvironment(fixture),
+      configDirectory,
+    };
+    const name = "reachable-config";
+    const canonical = globalSkillPath(environment, name);
+    const crushPath = join(configDirectory, "crush", "skills", name);
+    await writeSkill(canonical, name);
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        [name]: {
+          source: "acme/reachable-config",
+          sourceType: "github",
+          sourceUrl: "https://github.com/acme/reachable-config.git",
+          skillPath: `skills/${name}/SKILL.md`,
+          skillFolderHash: "source-tree-v1",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true, dotfiles).scan({});
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === canonical,
+    )!;
+    if (installation.update.kind !== "managed")
+      throw new Error("expected managed Vercel Update");
+    expect(installation.update.operation.effects).toContainEqual(
+      expect.objectContaining({
+        kind: "mutation-root",
+        path: crushPath,
+        exists: false,
+        protection: {
+          git: { kind: "protected", worktreeRoot: configDirectory },
+          system: { kind: "none" },
+          filesystem: { kind: "writable" },
+        },
+      }),
+    );
+    expect(
+      planUpdate(inventory, updateIntent(installation)).blocks,
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "git-protection",
+        path: crushPath,
+      }),
+    );
+  });
+
+  it("keeps an environment-selected absent non-universal agent path", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = {
+      ...scanEnvironment(fixture),
+      agentProcessEnvironment: { AUGMENT_AGENT: "1" },
+    };
+    const name = "selected-agent";
+    const canonical = globalSkillPath(environment, name);
+    const augmentPath = join(
+      environment.homeDirectory,
+      ".augment",
+      "skills",
+      name,
+    );
+    await writeSkill(canonical, name);
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        [name]: {
+          source: "acme/selected-agent",
+          sourceType: "github",
+          sourceUrl: "https://github.com/acme/selected-agent.git",
+          skillPath: `skills/${name}/SKILL.md`,
+          skillFolderHash: "source-tree-v1",
+        },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === canonical,
+    )!;
+    if (installation.update.kind !== "managed")
+      throw new Error("expected managed Vercel Update");
+    expect(installation.update.operation.effects).toContainEqual(
+      expect.objectContaining({
+        kind: "mutation-root",
+        path: augmentPath,
+        exists: false,
+      }),
+    );
+
+    await mkdir(join(environment.workspaceDirectory, ".jazz"));
+    const traceOnlyInventory = await scanner(
+      {
+        ...environment,
+        agentProcessEnvironment: { CURSOR_TRACE_ID: "weak-trace" },
+      },
+      true,
+    ).scan({});
+    const traceOnlyInstallation = traceOnlyInventory.installations.find(
+      (candidate) => candidate.location.path === canonical,
+    )!;
+    if (traceOnlyInstallation.update.kind !== "managed")
+      throw new Error("expected managed Vercel Update");
+    expect(traceOnlyInstallation.update.operation.effects).toContainEqual(
+      expect.objectContaining({
+        kind: "mutation-root",
+        path: join(environment.homeDirectory, ".adal", "skills", name),
+        exists: false,
+      }),
+    );
+  });
+
   it("withholds Update authority from an unexpected external link or junction", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);

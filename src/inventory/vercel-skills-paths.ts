@@ -1,5 +1,5 @@
 import { lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { VERCEL_SKILLS_GLOBAL_AGENT_IDS } from "../adapter/built-ins.js";
 import type { InventoryScanEnvironment } from "./types.js";
@@ -186,23 +186,27 @@ export async function vercelUpdateCandidatePaths(
 ): Promise<readonly VercelAgentPath[]> {
   const resolved = await vercelAgentPaths(scope, environment, sanitizedName);
   if (scope === "project") return resolved;
-  return [
-    ...resolved,
-    ...definitions.flatMap((definition) =>
-      definition.global === undefined
-        ? [
-            {
-              agentId: definition.agentId,
-              path: join(
-                environment.homeDirectory,
-                ...definition.project,
-                sanitizedName,
-              ),
-            },
-          ]
-        : [],
-    ),
-  ];
+  const resolvedByAgent = new Map(
+    resolved.map((candidate) => [candidate.agentId, candidate]),
+  );
+  const processAgent = await selectedProcessAgent(environment);
+  const detected =
+    processAgent === null
+      ? await detectedAgents(environment, resolvedByAgent)
+      : [];
+  const selected = new Set(
+    processAgent !== null
+      ? [processAgent, ...universalAgentIds()]
+      : detected.length === 0
+        ? definitions.map((definition) => definition.agentId)
+        : [...detected, ...universalAgentIds()],
+  );
+  return resolved.filter((candidate) => {
+    const definition = definitions.find(
+      (entry) => entry.agentId === candidate.agentId,
+    )!;
+    return !isUniversalAgent(definition) && selected.has(candidate.agentId);
+  });
 }
 
 export function vercelCanonicalPath(
@@ -244,6 +248,190 @@ function agentHomeDirectory(
     "mistral-vibe": ".vibe",
   };
   return join(environment.homeDirectory, defaults[agentId] ?? `.${agentId}`);
+}
+
+async function detectedAgents(
+  environment: InventoryScanEnvironment,
+  resolvedByAgent: ReadonlyMap<string, VercelAgentPath>,
+): Promise<readonly string[]> {
+  const results = await Promise.all(
+    definitions.map(async (definition) => ({
+      agentId: definition.agentId,
+      installed: await anyPathExists(
+        detectionPaths(
+          definition.agentId,
+          environment,
+          resolvedByAgent.get(definition.agentId)?.path ?? null,
+        ),
+      ),
+    })),
+  );
+  return results
+    .filter((result) => result.installed)
+    .map((result) => result.agentId);
+}
+
+function detectionPaths(
+  agentId: string,
+  environment: InventoryScanEnvironment,
+  candidatePath: string | null,
+): readonly string[] {
+  const home = environment.homeDirectory;
+  const config = configDirectory(environment);
+  switch (agentId) {
+    case "amp":
+      return [join(config, "amp")];
+    case "cline":
+      return [join(home, ".cline")];
+    case "codex":
+      return [agentHomeDirectory(environment, "codex"), "/etc/codex"];
+    case "cursor":
+      return [join(home, ".cursor")];
+    case "deepagents":
+      return [join(home, ".deepagents")];
+    case "dexto":
+      return [join(home, ".dexto")];
+    case "firebender":
+      return [join(home, ".firebender")];
+    case "gemini-cli":
+      return [join(home, ".gemini")];
+    case "github-copilot":
+      return [join(home, ".copilot")];
+    case "kimi-code-cli":
+      return [join(home, ".kimi-code"), join(home, ".kimi")];
+    case "loaf":
+      return [join(home, ".loaf")];
+    case "opencode":
+      return [join(config, "opencode")];
+    case "replit":
+      return [];
+    case "warp":
+      return [join(home, ".warp")];
+    case "zed": {
+      const processEnvironment = environment.agentProcessEnvironment ?? {};
+      return [
+        join(config, "zed"),
+        ...(processEnvironment.APPDATA === undefined
+          ? []
+          : [join(processEnvironment.APPDATA, "Zed")]),
+        ...(processEnvironment.FLATPAK_XDG_CONFIG_HOME === undefined
+          ? []
+          : [join(processEnvironment.FLATPAK_XDG_CONFIG_HOME, "zed")]),
+      ];
+    }
+    case "universal":
+      return [];
+    case "promptscript":
+      return [];
+    case "eve":
+      return [];
+    case "astrbot":
+      return [join(home, ".astrbot")];
+    case "codebuddy":
+      return [join(home, ".codebuddy")];
+    case "continue":
+      return [join(home, ".continue")];
+    case "jazz":
+      return [join(home, ".jazz")];
+    case "kimchi":
+      return [join(home, ".config", "kimchi")];
+    case "minimax-code":
+      return [join(home, ".minimax"), "/Applications/MiniMax Code.app"];
+    case "tabnine-cli":
+      return [join(home, ".tabnine")];
+    case "zcode":
+      return [join(home, ".zcode"), "/Applications/ZCode.app"];
+    default:
+      return candidatePath === null ? [] : [dirname(dirname(candidatePath))];
+  }
+}
+
+async function selectedProcessAgent(
+  environment: InventoryScanEnvironment,
+): Promise<string | null> {
+  const values = environment.agentProcessEnvironment ?? {};
+  const strongCursorSignal =
+    Boolean(values.CURSOR_AGENT?.trim()) ||
+    values.CURSOR_EXTENSION_HOST_ROLE === "agent-exec";
+  const explicit = values.AI_AGENT?.trim();
+  if (explicit !== undefined && explicit.length > 0) {
+    if (
+      (explicit === "cursor" || explicit === "cursor-cli") &&
+      !strongCursorSignal
+    )
+      return null;
+    return mappedAgentId(explicit);
+  }
+  if (values.CURSOR_TRACE_ID) return strongCursorSignal ? "cursor" : null;
+  if (strongCursorSignal) return "cursor";
+  if (values.GEMINI_CLI) return "gemini-cli";
+  if (values.CODEX_SANDBOX || values.CODEX_CI || values.CODEX_THREAD_ID)
+    return "codex";
+  if (values.ANTIGRAVITY_AGENT) return "antigravity";
+  if (values.AUGMENT_AGENT) return "augment";
+  if (values.OPENCODE_CLIENT) return "opencode";
+  if (values.CLAUDECODE || values.CLAUDE_CODE) return "claude-code";
+  if (values.REPL_ID) return "replit";
+  if (
+    values.COPILOT_MODEL ||
+    values.COPILOT_ALLOW_ALL ||
+    values.COPILOT_GITHUB_TOKEN
+  )
+    return "github-copilot";
+  return (await pathMayExist("/opt/.devin")) ? "universal" : null;
+}
+
+function mappedAgentId(agentName: string): string | null {
+  const mappings: Readonly<Record<string, string>> = {
+    cursor: "cursor",
+    "cursor-cli": "cursor",
+    claude: "claude-code",
+    cowork: "claude-code",
+    devin: "universal",
+    replit: "replit",
+    gemini: "gemini-cli",
+    codex: "codex",
+    antigravity: "antigravity",
+    "augment-cli": "augment",
+    opencode: "opencode",
+    "github-copilot": "github-copilot",
+    "github-copilot-cli": "github-copilot",
+  };
+  return mappings[agentName] ?? null;
+}
+
+function universalAgentIds(): readonly string[] {
+  return definitions
+    .filter(isUniversalAgent)
+    .map((definition) => definition.agentId);
+}
+
+function isUniversalAgent(definition: AgentPathDefinition): boolean {
+  return (
+    definition.project.length === 2 &&
+    definition.project[0] === ".agents" &&
+    definition.project[1] === "skills"
+  );
+}
+
+async function anyPathExists(paths: readonly string[]): Promise<boolean> {
+  for (const path of paths) if (await pathMayExist(path)) return true;
+  return false;
+}
+
+async function pathMayExist(path: string): Promise<boolean> {
+  return lstat(path)
+    .then(() => true)
+    .catch((error: unknown) => !isMissingPathError(error));
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
 }
 
 function path(

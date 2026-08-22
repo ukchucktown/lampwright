@@ -89,6 +89,10 @@ export interface InventoryScanEnvironment {
   readonly cacheDirectory?: string;
   readonly nodeVersion?: string;
   readonly agentHomeDirectories?: Readonly<Record<string, string>>;
+  /** Process signals that the pinned Vercel manager uses to select an agent. */
+  readonly agentProcessEnvironment?: Readonly<
+    Record<string, string | undefined>
+  >;
   /** Durable Gemini folder-trust evidence for this workspace, when available. */
   readonly geminiWorkspaceTrusted?: boolean | null;
 }
