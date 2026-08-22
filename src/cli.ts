@@ -1321,6 +1321,22 @@ function humanUpdateReport(report: Record<string, unknown>): string {
       `Target ${describeTarget(target.target)}: ${String(target.status)}${typeof target.reason === "string" ? `; ${target.reason}` : ""}.`,
     );
   }
+  const successfulTarget = targets.every(
+    (target) => target.status === "updated" || target.status === "unchanged",
+  );
+  const updated = checks.filter(
+    (check) => check.status === "passed" && check.changed === true,
+  ).length;
+  const unchanged = checks.filter(
+    (check) => check.status === "passed" && check.changed === false,
+  ).length;
+  if (
+    targets.length === 1 &&
+    successfulTarget &&
+    checks.length > 1 &&
+    updated + unchanged === checks.length
+  )
+    lines.push(`${String(updated)} updated, ${String(unchanged)} unchanged.`);
   const passed = checks.filter((check) => check.status === "passed").length;
   lines.push(`Verification: ${passed}/${checks.length} check(s) passed.`);
   if (targets.some((target) => target.status === "unchanged"))

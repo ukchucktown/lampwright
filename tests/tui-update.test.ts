@@ -290,6 +290,44 @@ function updateReport(
   };
 }
 
+function mixedSuccessfulUpdateReport(planValue: UpdatePlan): UpdateReport {
+  const actionIds = Array.from(
+    { length: 25 },
+    (_, index) => `update-action-${String(index + 1)}`,
+  );
+  return {
+    schemaVersion: 1,
+    planId: planValue.id,
+    inventoryId: planValue.inventoryId,
+    finalInventoryId: planValue.inventoryId,
+    rescanError: null,
+    startedAt: "2026-08-21T12:00:00.000Z",
+    completedAt: "2026-08-21T12:01:00.000Z",
+    status: "succeeded",
+    actionResults: actionIds.map((actionId) => ({
+      actionId,
+      status: "succeeded",
+      startedAt: "2026-08-21T12:00:00.000Z",
+      completedAt: "2026-08-21T12:01:00.000Z",
+      details: {},
+    })),
+    targetResults: [
+      {
+        target: planValue.intent.target,
+        status: "updated",
+        actionIds,
+        reason: null,
+      },
+    ],
+    verificationResults: actionIds.map((_, index) => ({
+      checkId: `update-check-${String(index + 1)}`,
+      status: "passed",
+      changed: index < 24,
+      details: {},
+    })),
+  };
+}
+
 function dependencies(
   inventory: Inventory,
   planner = vi.fn((value: Inventory, intent: UpdateIntent) =>
@@ -814,6 +852,33 @@ describe("Update TUI", () => {
       ).toBeGreaterThanOrEqual(0);
     },
   );
+
+  it("reports updated and unchanged Installation counts for a successful mixed Update", () => {
+    const inventory = buildInventory();
+    const planValue = detailedPlan(inventory);
+    const rendered = renderTui(
+      {
+        screen: "update-report",
+        browse: {
+          inventory,
+          model: createBrowseModel(createTuiSections(inventory), {
+            rows: 40,
+            columns: 110,
+          }),
+          view: "inventory",
+          disabledEntries: [],
+        },
+        report: mixedSuccessfulUpdateReport(planValue),
+        label: "example-skill",
+        technicalDetails: false,
+        scrollOffset: 0,
+      },
+      plainTuiTheme,
+    );
+
+    expect(rendered).toContain("24 updated, 1 unchanged.");
+    expect(rendered).toContain("Installation installation-1: updated");
+  });
 
   it.each(["unsupported-update", "git-protection", "local-changes"] as const)(
     "does not execute a %s blocked plan",

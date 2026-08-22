@@ -1009,6 +1009,25 @@ function updateReportBodyLines(
         ).map(style.muted),
       );
   }
+  const successfulTarget = report.targetResults.every(
+    (result) => result.status === "updated" || result.status === "unchanged",
+  );
+  const updated = report.verificationResults.filter(
+    (result) => result.status === "passed" && result.changed,
+  ).length;
+  const unchanged = report.verificationResults.filter(
+    (result) => result.status === "passed" && !result.changed,
+  ).length;
+  if (
+    successfulTarget &&
+    report.verificationResults.length > 1 &&
+    updated + unchanged === report.verificationResults.length
+  )
+    lines.push(
+      style.success(
+        `${String(updated)} updated, ${String(unchanged)} unchanged.`,
+      ),
+    );
   lines.push(
     report.rescanError === null
       ? style.success("Final Inventory scan completed.")
