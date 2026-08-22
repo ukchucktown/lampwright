@@ -334,7 +334,9 @@ unchanged`), and one segmented footer, with one blank line between each block. A
 non-success result adds the target status, such as `partially updated`,
 `blocked`, `failed`, or `unresolved`. The default result hides target blocks,
 scan messages, verification counts, and action/check messages. Press `d` to see
-them.
+them. When you leave an Update result, Lampwright rescans Inventory and opens a
+fresh Inventory view in the same state as startup: an empty selection and no
+notice.
 
 Update Execution offers no Removal or brute-force fallback. You cannot confirm
 a blocked plan.

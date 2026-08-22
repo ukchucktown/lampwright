@@ -1352,7 +1352,7 @@ describe("Update TUI", () => {
     },
   );
 
-  it("refreshes Inventory with the saved target label and preserved views on Esc", async () => {
+  it("returns to a fresh startup state after an Update report", async () => {
     const before = buildInventory({ id: "inventory-before" });
     const after = buildInventory({
       id: "inventory-after",
@@ -1372,6 +1372,7 @@ describe("Update TUI", () => {
       executeUpdate: async () => updateReport(planValue, "updated"),
     });
     await controller.start();
+    await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "switch-view", view: "disabled" });
     await controller.dispatch({ kind: "switch-view", view: "trash" });
     await controller.dispatch({ kind: "cancel" });
@@ -1379,14 +1380,22 @@ describe("Update TUI", () => {
     await controller.dispatch({ kind: "confirm" });
     await controller.waitForUpdateExecution();
     await controller.dispatch({ kind: "cancel" });
+    const returned = controller.state;
+    expect(returned.screen).toBe("browse");
+    if (returned.screen !== "browse") throw new Error("Expected browse state");
+    expect(returned.model).toEqual(
+      createBrowseModel(createTuiSections(after), returned.model.viewport),
+    );
     expect(controller.state).toMatchObject({
       screen: "browse",
       inventory: { id: "inventory-after" },
       view: "inventory",
-      model: { notice: "Update result — example-skill: updated." },
-      viewSnapshots: {
-        disabled: { view: "disabled", inventory: { id: "inventory-after" } },
-        trash: { view: "trash", inventory: { id: "inventory-after" } },
+      model: {
+        focus: "sections",
+        sectionIndex: 0,
+        entryIndex: 0,
+        selected: new Set(),
+        notice: null,
       },
     });
   });
