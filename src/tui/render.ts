@@ -1408,7 +1408,7 @@ export function renderBrowseLines(
   const grid = layout(model);
   const { rows, columns, usable, paneRows, detailRows, leftWidth, rightWidth } =
     grid;
-  if (rows < grid.headerRows + 4 || columns < 4)
+  if (rows < grid.headerRows + 4 || columns < 9)
     return renderCompactBrowse(rows, usable, style);
   const view = panes(model);
   const section = currentSection(model);
@@ -1436,6 +1436,23 @@ export function renderBrowseLines(
     { text: "q", paint: style.title },
     { text: " quit", paint: style.muted },
   ] as const;
+  const navigationControls = [
+    { text: "↑↓/wheel", paint: style.title },
+    { text: " move · ", paint: style.muted },
+    { text: "space/dbl-click", paint: style.title },
+    { text: " select", paint: style.muted },
+  ];
+  const updateControls = [
+    { text: "u", paint: style.title },
+    { text: " update", paint: style.muted },
+  ] as const;
+  const lifecycleControls = isDisabled
+    ? updateControls
+    : [
+        { text: "enter", paint: style.title },
+        { text: " remove · ", paint: style.muted },
+        ...updateControls,
+      ];
   out.push(
     `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
       isTrash
@@ -1446,28 +1463,33 @@ export function renderBrowseLines(
     }`,
   );
   out.push(
-    fitStyledSegments(
-      isTrash
-        ? [
+    isTrash
+      ? fitStyledSegments(
+          [
             { text: "↑↓/wheel", paint: style.title },
             { text: " move · ", paint: style.muted },
             { text: "enter/dbl-click", paint: style.title },
             { text: " restore · ", paint: style.muted },
             { text: "p", paint: style.title },
             { text: " purge", paint: style.muted },
-          ]
-        : model.focus === "detail"
-          ? [
+          ],
+          usable,
+          style.muted,
+        )
+      : model.focus === "detail"
+        ? fitStyledSegments(
+            [
               { text: "↑↓/wheel", paint: style.title },
               { text: " scroll · ", paint: style.muted },
               { text: "PgUp/PgDn", paint: style.title },
               { text: " page", paint: style.muted },
-            ]
-          : [
-              { text: "↑↓/wheel", paint: style.title },
-              { text: " move · ", paint: style.muted },
-              { text: "space/dbl-click", paint: style.title },
-              { text: " select", paint: style.muted },
+            ],
+            usable,
+            style.muted,
+          )
+        : fitPrioritizedStyledSegments(
+            [
+              ...navigationControls,
               ...(isDisabled
                 ? []
                 : [
@@ -1477,9 +1499,13 @@ export function renderBrowseLines(
               { text: " · u", paint: style.title },
               { text: " update", paint: style.muted },
             ],
-      usable,
-      style.muted,
-    ),
+            navigationControls,
+            lifecycleControls,
+            updateControls,
+            usable,
+            { text: " · ", paint: style.muted },
+            style.muted,
+          ),
   );
   out.push(fitStyledSegments(paneControls, usable, style.muted));
   out.push(
@@ -1809,6 +1835,59 @@ function fitStyledSegments(
   }
   if (truncated) return result + paintEllipsis("…");
   return result + " ".repeat(remaining);
+}
+
+function fitPrioritizedStyledSegments(
+  wideSegments: readonly {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  }[],
+  secondarySegments: readonly {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  }[],
+  lifecycleSegments: readonly {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  }[],
+  requiredSegments: readonly {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  }[],
+  width: number,
+  separator: {
+    readonly text: string;
+    readonly paint: (value: string) => string;
+  },
+  paintEllipsis: (value: string) => string,
+): string {
+  const wideLength = wideSegments.reduce(
+    (total, segment) => total + [...segment.text].length,
+    0,
+  );
+  if (wideLength <= width)
+    return fitStyledSegments(wideSegments, width, paintEllipsis);
+
+  const lifecycleLength = lifecycleSegments.reduce(
+    (total, segment) => total + [...segment.text].length,
+    0,
+  );
+  if (width < lifecycleLength)
+    return fitStyledSegments(requiredSegments, width, paintEllipsis);
+
+  const separatorLength = [...separator.text].length;
+  if (width < lifecycleLength + separatorLength + 1)
+    return fitStyledSegments(lifecycleSegments, width, paintEllipsis);
+  const secondaryWidth = width - lifecycleLength - separatorLength;
+  return `${fitStyledSegments(
+    lifecycleSegments,
+    lifecycleLength,
+    paintEllipsis,
+  )}${separator.paint(separator.text)}${fitStyledSegments(
+    secondarySegments,
+    secondaryWidth,
+    paintEllipsis,
+  )}`;
 }
 
 /** Fits to an exact visible width. Styling is applied after, never before. */

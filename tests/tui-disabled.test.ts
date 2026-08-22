@@ -16,6 +16,7 @@ import {
   buildSystemSkillFinding,
 } from "../src/testing/index.js";
 import {
+  createBrowseModel,
   createDisabledSections,
   createTuiSections,
   selectionTargets,
@@ -23,6 +24,7 @@ import {
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
   layout,
+  renderBrowseLines,
   renderTui,
   plainTuiTheme,
 } from "../src/tui/index.js";
@@ -138,6 +140,8 @@ function fixture() {
   });
   return { inventory, enabled, disabled, partial };
 }
+
+const visibleWidth = (value: string): number => [...value].length;
 
 function pluginAvailabilityInventory(status: "enabled" | "disabled") {
   const plugin = buildPluginBoundary({
@@ -543,6 +547,32 @@ describe("Disabled TUI projection", () => {
       .flatMap((section) => section.entries)
       .find((entry) => entry.key.includes("plugin-installation"));
     expect(pluginRow?.selectable).toBe(false);
+  });
+
+  it.each([
+    { name: "60 columns", columns: 60 },
+    { name: "the minimum browse width", columns: 9 },
+  ])("keeps the complete Disabled Update hint at $name", ({ columns }) => {
+    const { inventory } = fixture();
+    const model = createBrowseModel(createDisabledSections(inventory, []), {
+      rows: 24,
+      columns,
+    });
+    const lines = renderBrowseLines(
+      {
+        screen: "browse",
+        inventory,
+        model,
+        view: "disabled",
+        disabledEntries: [],
+      },
+      plainTuiTheme,
+    );
+
+    expect(lines[1]).toContain("u update");
+    for (const line of lines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(columns - 1);
+    }
   });
 
   it("uses the Plugin parent as the whole-boundary Disable and Enable target", async () => {

@@ -890,6 +890,48 @@ describe("terminal theme", () => {
     expect(visibleWidth(narrow)).toBe(61);
   });
 
+  it.each([
+    { name: "60 columns", columns: 60 },
+    { name: "the minimum browse width", columns: 9 },
+  ])("keeps the complete Update hint at $name", ({ columns }) => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns,
+    });
+    const lines = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    );
+
+    expect(lines[1]).toContain("u update");
+    if (columns === 60) expect(lines[1]).toContain("enter remove");
+    for (const line of lines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(columns - 1);
+    }
+  });
+
+  it("preserves the wide Inventory help while prioritizing Update", () => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 180,
+    });
+    const lines = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    );
+
+    expect(lines[1]).toContain(
+      "↑↓/wheel move · space/dbl-click select · enter remove · u update",
+    );
+    for (const line of lines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(
+        model.viewport.columns - 1,
+      );
+    }
+  });
+
   it("shows detail scrolling and resizing controls when detail has focus", () => {
     const inventory = groupedInventory();
     const model = reduceBrowse(
