@@ -17,27 +17,38 @@ import {
   sep,
 } from "node:path";
 
+import { type ParseError, parseTree } from "jsonc-parser";
+
 import {
   GEMINI_CLI_ADAPTER_ID,
   GEMINI_CLI_EXECUTABLE,
   geminiExtensionUninstallArguments,
+  geminiExtensionUpdateArguments,
   geminiSkillUninstallArguments,
 } from "../adapter/built-ins.js";
 import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
+import { stringifyModel } from "../model/json.js";
 import type {
   ArtifactLocation,
   Installation,
   InstallationId,
   ManagedRemovalEvidence,
+  ManagedUpdateEvidence,
   PluginBoundary,
   PluginResource,
+  PluginSettingsRecordSnapshot,
   ProtectionStatus,
   Scope,
   StrongIdentityEvidence,
   WeakIdentityEvidence,
 } from "../model/types.js";
 import { hashSkillDirectory } from "./content-hash.js";
-import { pathKey, readStableRegularFile } from "./evidence.js";
+import {
+  digest,
+  hasDuplicateKeys,
+  pathKey,
+  readStableRegularFile,
+} from "./evidence.js";
 import { inspectGitProtection } from "./git-protection.js";
 import { stableId } from "./identity.js";
 import { readSkillMetadata } from "./metadata.js";
@@ -75,6 +86,19 @@ interface ExtensionManifest {
   readonly excludeTools?: unknown;
   readonly migratedTo?: unknown;
 }
+
+interface StableJsonDocument {
+  readonly path: string;
+  readonly bytes: Buffer;
+  readonly value: unknown;
+  readonly location: ArtifactLocation;
+  readonly protection: ProtectionStatus;
+}
+
+type StableJsonResult =
+  | { readonly kind: "absent"; readonly path: string }
+  | { readonly kind: "invalid"; readonly path: string }
+  | { readonly kind: "valid"; readonly document: StableJsonDocument };
 
 export async function scanGeminiCli(
   environment: InventoryScanEnvironment,
@@ -180,6 +204,11 @@ export async function scanGeminiCli(
           reference: { ...extension.reference, enabled: false },
           boundary: {
             ...extension.boundary,
+            update: {
+              kind: "unresolved" as const,
+              reason:
+                "multiple installed Gemini extensions share this manifest name",
+            },
             removal: {
               ...extension.boundary.removal,
               managed:
@@ -492,7 +521,10 @@ async function scanExtensions(
   }[]
 > {
   const root = join(home, "extensions");
-  const rawEnablement = await readJson(join(root, "extension-enablement.json"));
+  const enablementPath = join(root, "extension-enablement.json");
+  const enablementResult = await readStableJson(enablementPath, runner);
+  const rawEnablement =
+    enablementResult.kind === "valid" ? enablementResult.document.value : null;
   const enablement = validEnablement(rawEnablement) ? rawEnablement : null;
   const directories = await readdir(root, { withFileTypes: true }).catch(
     () => [],
@@ -520,16 +552,27 @@ async function scanExtensions(
     )
       continue;
     const managementRoot = join(root, entry.name);
-    const install = (await readJson(
+    const installResult = await readStableJson(
       join(managementRoot, extensionInstallFile),
-    )) as ExtensionInstall | null;
+      runner,
+    );
+    const install =
+      installResult.kind === "valid" && isInstall(installResult.document.value)
+        ? installResult.document.value
+        : null;
     if (!isInstall(install)) continue;
     const effectiveRoot =
       install.type === "link" ? install.source : managementRoot;
     if (!isAbsolute(effectiveRoot)) continue;
-    const manifest = (await readJson(
+    const manifestResult = await readStableJson(
       join(effectiveRoot, "gemini-extension.json"),
-    )) as ExtensionManifest | null;
+      runner,
+    );
+    const manifest =
+      manifestResult.kind === "valid" &&
+      isManifest(manifestResult.document.value)
+        ? manifestResult.document.value
+        : null;
     if (!isManifest(manifest)) continue;
     if (basename(managementRoot) !== manifest.name) continue;
     const declaredContexts =
@@ -641,7 +684,6 @@ async function scanExtensions(
           cleanupId: null,
         });
       }
-    const enablementPath = join(root, "extension-enablement.json");
     const hasEnablementRecord =
       !!enablement &&
       typeof enablement === "object" &&
@@ -666,6 +708,50 @@ async function scanExtensions(
       available,
       runner,
     );
+    const settingsRecords = extensionSettingsRecords(
+      enablementResult,
+      manifest.name,
+    );
+    const escapedResource = resources.find(
+      (resource) =>
+        resource.id !== "enablement" &&
+        resource.location !== null &&
+        (resource.location.artifactType.kind === "symbolic-link" ||
+          resource.location.artifactType.kind === "junction" ||
+          (resource.location.canonicalPath !== null &&
+            !canonicalWithin(managementRoot, resource.location.canonicalPath))),
+    );
+    const linkedSkill = (
+      await Promise.all(skills.map((path) => locationFor(path, runner)))
+    ).find(
+      (location) =>
+        location !== null &&
+        (location.artifactType.kind === "symbolic-link" ||
+          location.artifactType.kind === "junction" ||
+          (location.canonicalPath !== null &&
+            !canonicalWithin(managementRoot, location.canonicalPath))),
+    );
+    const update = await managedExtensionUpdate({
+      home,
+      name: manifest.name,
+      managementRoot,
+      rootLocation,
+      install,
+      installDocument:
+        installResult.kind === "valid" ? installResult.document : null,
+      manifest,
+      manifestDocument:
+        manifestResult.kind === "valid" ? manifestResult.document : null,
+      enablementSafe:
+        enablementResult.kind === "absent" ||
+        (enablementResult.kind === "valid" && enablement !== null),
+      unsafeReason:
+        escapedResource !== undefined || linkedSkill !== undefined
+          ? "a Gemini extension resource resolves outside its management boundary"
+          : null,
+      available,
+      runner,
+    });
     output.push({
       skills,
       reference,
@@ -684,6 +770,17 @@ async function scanExtensions(
         runtimeDefault: false,
         installationIds: [],
         resources,
+        settingsRecords,
+        ...(install.type === "link"
+          ? {}
+          : {
+              updatePolicy: {
+                kind: "gemini-extension" as const,
+                installType: install.type,
+                autoUpdate: install.autoUpdate ?? null,
+                allowPreRelease: install.allowPreRelease ?? null,
+              },
+            }),
         availability: {
           status: reference.enabled ? "enabled" : "disabled",
           control: {
@@ -691,10 +788,7 @@ async function scanExtensions(
             reason: "Gemini Plugin availability evidence is not materialized",
           },
         },
-        update: {
-          kind: "unsupported",
-          reason: "Gemini extension Update support is not materialized",
-        },
+        update,
         removal: {
           managed,
           fallback:
@@ -824,6 +918,411 @@ async function managedExtension(
   };
 }
 
+async function managedExtensionUpdate(input: {
+  readonly home: string;
+  readonly name: string;
+  readonly managementRoot: string;
+  readonly rootLocation: ArtifactLocation;
+  readonly install: ExtensionInstall;
+  readonly installDocument: StableJsonDocument | null;
+  readonly manifest: ExtensionManifest;
+  readonly manifestDocument: StableJsonDocument | null;
+  readonly enablementSafe: boolean;
+  readonly unsafeReason: string | null;
+  readonly available: boolean;
+  readonly runner: InventoryCommandRunner;
+}): Promise<PluginBoundary["update"]> {
+  if (input.install.type === "link")
+    return {
+      kind: "unresolved",
+      reason: "Gemini does not update linked extension sources",
+    };
+  if (input.manifest.migratedTo !== undefined)
+    return {
+      kind: "unresolved",
+      reason:
+        "a migrated Gemini extension can change its source or Plugin identity",
+    };
+  if (input.installDocument === null || input.manifestDocument === null)
+    return {
+      kind: "unresolved",
+      reason: "Gemini extension install or manifest evidence is not stable",
+    };
+  if (!input.enablementSafe)
+    return {
+      kind: "unresolved",
+      reason: "Gemini extension enablement evidence is malformed or unstable",
+    };
+  if (input.unsafeReason !== null)
+    return { kind: "unresolved", reason: input.unsafeReason };
+  const source = extensionUpdateSource(input.install);
+  if (source === null)
+    return {
+      kind: "unresolved",
+      reason: "the Gemini extension source type or value is unsupported",
+    };
+  const configurationPaths = [
+    join(input.home, "extensions", "extension-enablement.json"),
+    join(input.home, "extension_integrity.json"),
+    join(input.home, "extension_integrity.json.tmp"),
+    join(input.home, "integrity.key"),
+  ];
+  const configurationEffects = await Promise.all(
+    configurationPaths.map((path) =>
+      updateConfigurationEffect(path, input.runner),
+    ),
+  );
+  if (configurationEffects.some((effect) => effect === null))
+    return {
+      kind: "unresolved",
+      reason:
+        "a Gemini extension configuration effect is linked or has no safe parent",
+    };
+  const versionRevision = {
+    kind: "owner-value" as const,
+    path: input.manifestDocument.path,
+    format: "json" as const,
+    recordPointer: "/version",
+    value: input.manifest.version,
+  };
+  const releaseRevision =
+    input.install.releaseTag === undefined
+      ? []
+      : [
+          {
+            kind: "owner-value" as const,
+            path: input.installDocument.path,
+            format: "json" as const,
+            recordPointer: "/releaseTag",
+            value: input.install.releaseTag,
+          },
+        ];
+  const git =
+    input.install.type === "git"
+      ? await gitUpdateEvidence(input.managementRoot, input.runner)
+      : null;
+  if (input.install.type === "git" && git === null)
+    return {
+      kind: "unresolved",
+      reason:
+        "Gemini Git extension revision or dirty-state evidence is unavailable",
+    };
+  const revisions: ManagedUpdateEvidence["currentRevision"] = [
+    versionRevision,
+    ...releaseRevision,
+    ...(git === null
+      ? []
+      : [
+          {
+            kind: "content-hash" as const,
+            path: input.managementRoot,
+            digest: git.head,
+          },
+        ]),
+  ];
+  const effects: ManagedUpdateEvidence["effects"] = [
+    {
+      kind: "mutation-root" as const,
+      path: input.managementRoot,
+      exists: true,
+      protection: await protectionFor(input.rootLocation, input.runner),
+    },
+    ...configurationEffects.filter(
+      (effect): effect is NonNullable<typeof effect> => effect !== null,
+    ),
+  ].sort((left, right) => left.path.localeCompare(right.path));
+  const operation: ManagedUpdateEvidence = {
+    adapterId: GEMINI_CLI_ADAPTER_ID,
+    operationId: "update-extension",
+    availability: input.available
+      ? { kind: "available" }
+      : {
+          kind: "unavailable",
+          reason: "the Gemini CLI executable is not available",
+        },
+    trust: { kind: "trusted" },
+    owner: {
+      kind: "plugin",
+      pluginId: input.name,
+      independentlySelectable: false,
+      confidence: "declared",
+    },
+    externalId: input.name,
+    invocation: {
+      kind: "direct",
+      command: {
+        executable: GEMINI_CLI_EXECUTABLE,
+        arguments: geminiExtensionUpdateArguments(input.name),
+      },
+      workingDirectory: { kind: "isolated-temporary" },
+    },
+    source,
+    ref: input.install.ref ?? null,
+    scope: { kind: "user" },
+    currentRevision: revisions,
+    ownerRecordDigest: digest(
+      Buffer.concat([
+        input.installDocument.bytes,
+        input.manifestDocument.bytes,
+      ]),
+    ),
+    effects,
+    network:
+      input.install.type === "local"
+        ? { kind: "none" }
+        : {
+            kind: "required",
+            reason: "the Gemini Owner retrieves the recorded extension source",
+          },
+    packageDownload: { kind: "none" },
+    localChanges: git?.localChanges ?? {
+      kind: "unavailable",
+      reason:
+        "Gemini extension metadata does not prove that local content is unchanged",
+    },
+    verifications: [
+      {
+        kind: "path-present",
+        path: input.managementRoot,
+      },
+      {
+        kind: "record-present",
+        path: input.installDocument.path,
+        format: "json",
+        recordPointer: "/source",
+      },
+      {
+        kind: "record-present",
+        path: input.manifestDocument.path,
+        format: "json",
+        recordPointer: "/name",
+      },
+      ...revisions.map((revision) =>
+        revision.kind === "content-hash"
+          ? {
+              kind: "revision-content-hash" as const,
+              path: revision.path,
+            }
+          : {
+              kind: "revision-manifest-value" as const,
+              path: revision.path,
+              format: revision.format,
+              recordPointer: revision.recordPointer,
+              value: revision.value,
+            },
+      ),
+      { kind: "owner-state-present", externalId: input.name },
+    ],
+  };
+  return { kind: "managed", operation };
+}
+
+function extensionUpdateSource(
+  install: Exclude<ExtensionInstall, { readonly type: "link" }>,
+): Installation["source"] {
+  if (install.source.includes("\0")) return null;
+  if (install.type === "local")
+    return isAbsolute(install.source)
+      ? { id: `gemini-extension:local:${install.source}`, url: null }
+      : null;
+  if (install.type === "github-release") {
+    const repository = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(install.source)
+      ? install.source
+      : null;
+    return repository === null
+      ? null
+      : {
+          id: `gemini-extension:github-release:${repository}`,
+          url: `https://github.com/${repository}`,
+        };
+  }
+  const url = safeRemoteUrl(install.source);
+  return url === null
+    ? null
+    : {
+        id: `gemini-extension:git:${url}`,
+        url:
+          isScpLikeGitSource(url) || /^(?:github|gitlab):/.test(url)
+            ? null
+            : url,
+      };
+}
+
+function safeRemoteUrl(value: string): string | null {
+  if (isScpLikeGitSource(value)) return value;
+  if (/^(?:github|gitlab):/.test(value)) {
+    const separator = value.indexOf(":");
+    const repository = value.slice(separator + 1);
+    return validRepositoryPath(repository) ? value : null;
+  }
+  try {
+    const url = new URL(value);
+    return ["https:", "http:", "ssh:", "git:", "sso:"].includes(url.protocol)
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isScpLikeGitSource(value: string): boolean {
+  const match = /^git@([A-Za-z0-9.-]+):([A-Za-z0-9._~/-]+)$/.exec(value);
+  return (
+    match !== null && match[1]!.length > 0 && validRepositoryPath(match[2]!)
+  );
+}
+
+function validRepositoryPath(value: string): boolean {
+  const segments = value.split("/");
+  return (
+    segments.length >= 2 &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== "." &&
+        segment !== ".." &&
+        /^[A-Za-z0-9._~-]+$/.test(segment),
+    )
+  );
+}
+
+async function gitUpdateEvidence(
+  root: string,
+  runner: InventoryCommandRunner,
+): Promise<{
+  readonly head: ReturnType<typeof digest>;
+  readonly localChanges: ManagedUpdateEvidence["localChanges"];
+} | null> {
+  const head = await runner
+    .run({ executable: "git", arguments: ["-C", root, "rev-parse", "HEAD"] })
+    .catch(() => null);
+  const status = await runner
+    .run({
+      executable: "git",
+      arguments: [
+        "-C",
+        root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--",
+        ".",
+        `:(exclude,top)${extensionInstallFile}`,
+      ],
+    })
+    .catch(() => null);
+  const revision = head?.stdout.trim() ?? "";
+  if (
+    head?.exitCode !== 0 ||
+    status?.exitCode !== 0 ||
+    !/^[0-9a-fA-F]{40,64}$/.test(revision)
+  )
+    return null;
+  const expectedDigest = digest(Buffer.alloc(0));
+  const actualDigest = digest(Buffer.from(status.stdout, "utf8"));
+  return {
+    head: digest(Buffer.from(revision, "utf8")),
+    localChanges: {
+      kind: status.stdout.length === 0 ? "unchanged" : "changed",
+      path: root,
+      expectedDigest,
+      actualDigest,
+    },
+  };
+}
+
+async function updateConfigurationEffect(
+  path: string,
+  runner: InventoryCommandRunner,
+): Promise<ManagedUpdateEvidence["effects"][number] | null> {
+  const stats = await lstat(path).catch(() => null);
+  if (stats !== null) {
+    const location = await locationFor(path, runner, true);
+    if (
+      location === null ||
+      location.artifactType.kind !== "file" ||
+      location.canonicalPath === null ||
+      pathKey(location.canonicalPath) !== pathKey(path)
+    )
+      return null;
+    return {
+      kind: "configuration-path",
+      path,
+      exists: true,
+      protection: await protectionFor(location, runner),
+    };
+  }
+  let parent = dirname(path);
+  let parentStats = await lstat(parent).catch(() => null);
+  while (parentStats === null) {
+    const next = dirname(parent);
+    if (next === parent) return null;
+    parent = next;
+    parentStats = await lstat(parent).catch(() => null);
+  }
+  if (!parentStats.isDirectory() || parentStats.isSymbolicLink()) return null;
+  const canonicalParent = await realpath(parent).catch(() => null);
+  if (canonicalParent === null || pathKey(canonicalParent) !== pathKey(parent))
+    return null;
+  const writable = await access(parent, constants.W_OK)
+    .then(() => true)
+    .catch(() => false);
+  return {
+    kind: "configuration-path",
+    path,
+    exists: false,
+    protection: {
+      git: await inspectGitProtection(path, false, runner),
+      system: { kind: "none" },
+      filesystem: writable
+        ? { kind: "writable" }
+        : {
+            kind: "read-only",
+            reason: "filesystem denied write access to the nearest parent",
+          },
+    },
+  };
+}
+
+function extensionSettingsRecords(
+  result: StableJsonResult,
+  name: string,
+): readonly PluginSettingsRecordSnapshot[] {
+  const recordPointer = `/${name}`;
+  if (result.kind !== "valid" || !validEnablement(result.document.value))
+    return result.kind === "absent"
+      ? [
+          {
+            path: result.path,
+            format: "json",
+            recordPointer,
+            present: false,
+            digest: null,
+          },
+        ]
+      : [];
+  const present = Object.hasOwn(result.document.value, name);
+  return [
+    present
+      ? {
+          path: result.document.path,
+          format: "json",
+          recordPointer,
+          present: true,
+          digest: digest(
+            Buffer.from(stringifyModel(result.document.value[name], 0), "utf8"),
+          ),
+        }
+      : {
+          path: result.document.path,
+          format: "json",
+          recordPointer,
+          present: false,
+          digest: null,
+        },
+  ];
+}
+
 function homeDirectory(environment: InventoryScanEnvironment): string {
   return environment.homeDirectory;
 }
@@ -854,15 +1353,41 @@ function canonicalWithin(root: string, candidate: string): boolean {
     (!value.startsWith(`..${sep}`) && value !== ".." && !isAbsolute(value))
   );
 }
-async function readJson(path: string): Promise<unknown | null> {
+async function readStableJson(
+  path: string,
+  runner: InventoryCommandRunner,
+): Promise<StableJsonResult> {
   const initial = await lstat(path).catch(() => null);
-  if (initial === null) return null;
+  if (initial === null) return { kind: "absent", path };
   const stable = await readStableRegularFile(path, initial);
-  if (stable === null) return null;
+  if (stable === null) return { kind: "invalid", path };
   try {
-    return JSON.parse(stable.bytes.toString("utf8"));
+    const text = stable.bytes.toString("utf8");
+    const errors: ParseError[] = [];
+    const tree = parseTree(text, errors, {
+      allowTrailingComma: false,
+      disallowComments: true,
+    });
+    if (tree === undefined || errors.length > 0 || hasDuplicateKeys(tree))
+      return { kind: "invalid", path };
+    const value: unknown = JSON.parse(text);
+    const location: ArtifactLocation = {
+      path,
+      canonicalPath: stable.canonicalPath,
+      artifactType: { kind: "file" },
+    };
+    return {
+      kind: "valid",
+      document: {
+        path,
+        bytes: stable.bytes,
+        value,
+        location,
+        protection: await protectionFor(location, runner),
+      },
+    };
   } catch {
-    return null;
+    return { kind: "invalid", path };
   }
 }
 function isInstall(value: unknown): value is ExtensionInstall {
@@ -877,7 +1402,8 @@ function isInstall(value: unknown): value is ExtensionInstall {
     ["ref", "releaseTag"].every(
       (key) =>
         (value as Record<string, unknown>)[key] === undefined ||
-        typeof (value as Record<string, unknown>)[key] === "string",
+        (typeof (value as Record<string, unknown>)[key] === "string" &&
+          ((value as Record<string, string>)[key]?.length ?? 0) > 0),
     ) &&
     ["autoUpdate", "allowPreRelease"].every(
       (key) =>

@@ -310,6 +310,30 @@ children. Enablement rules and disabled extensions remain inventory evidence;
 unsafe, malformed, escaping, linked-management, or ambiguous state fails
 closed. Linked sources are never declared as removal effects.
 
+Gemini extension Update authority uses stable regular install metadata and a
+stable regular manifest. The Plugin boundary ID depends on the extension name
+and its management root, not its version. Inventory preserves the source, ref,
+install type, automatic Update policy, prerelease policy, and exact enablement
+record hash. It records the manifest version as revision evidence. A Git
+extension also requires a readable `HEAD` and Git status. A dirty Git root
+blocks Update. Local and GitHub release copies report local-change evidence as
+unavailable.
+
+Git status excludes only the root `.gemini-extension-install.json` file that
+the Owner writes after it copies the repository. Every other tracked or
+untracked change remains local-change evidence. Recorded Git sources can use an
+HTTP, SSH, Git, SSO, `git@`, `github:`, or `gitlab:` form. Inventory treats each
+source as data and never sends it to a shell. Unknown and local URL schemes do
+not grant Update authority.
+
+The Update effect set contains the selected management root and four exact
+configuration paths. These paths are `extension-enablement.json`,
+`extension_integrity.json`, `extension_integrity.json.tmp`, and `integrity.key`.
+An absent path contains protection evidence from its nearest safe parent. A
+linked source path is not an effect. Inventory blocks linked extensions,
+migrated extensions, unsafe sources, escaping resources, linked configuration,
+protected effects, and malformed or ambiguous evidence.
+
 ## Claude Code plugin reconciliation
 
 Inventory reads Claude Code's version 2 installed-plugin registry from

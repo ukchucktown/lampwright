@@ -383,6 +383,9 @@ function authorityBoundaryBlocks(
     const roots = unit.update.operation.effects
       .filter((effect) => effect.kind === "mutation-root")
       .map((effect) => effect.path);
+    const configurationPaths = unit.update.operation.effects
+      .filter((effect) => effect.kind === "configuration-path")
+      .map((effect) => effect.path);
     const affected =
       unit.installation === null ? resolved.installations : [unit.installation];
     const affectedPaths = [
@@ -392,7 +395,14 @@ function authorityBoundaryBlocks(
       ) ?? []),
     ];
     for (const path of affectedPaths) {
-      if (!roots.some((root) => pathContains(root, path)))
+      if (
+        !roots.some((root) => pathContains(root, path)) &&
+        !configurationPaths.some(
+          (configurationPath) =>
+            pathContains(configurationPath, path) &&
+            pathContains(path, configurationPath),
+        )
+      )
         blocks.push({
           kind: "incomplete-authority",
           target: resolved.target,
@@ -574,6 +584,7 @@ function actionForUnit(
               resolved.installations,
             ),
             settingsRecords: resolved.plugin.settingsRecords ?? [],
+            policy: resolved.plugin.updatePolicy ?? null,
             ownership: resolved.plugin.ownership,
             lifecycle: lifecycleFacts(operation),
           },

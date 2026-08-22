@@ -107,6 +107,12 @@ export function geminiExtensionUninstallArguments(
   return ["extensions", "uninstall", name];
 }
 
+export function geminiExtensionUpdateArguments(
+  name: string,
+): readonly string[] {
+  return ["extensions", "update", name];
+}
+
 function codexPluginRemoveArgumentTemplates() {
   return [
     { kind: "literal" as const, value: "plugin" },

@@ -587,6 +587,13 @@ async function verifyCheck(
       check.id,
       "the selected Plugin settings records changed",
     );
+  if (
+    selectedPlugin !== null &&
+    "pluginId" in record &&
+    stringifyModel(selectedPlugin.policy, 0) !==
+      stringifyModel(record.updatePolicy ?? null, 0)
+  )
+    return failedCheck(check.id, "the selected Plugin Update policy changed");
   const finalPluginResources =
     selectedPlugin !== null && "pluginId" in record
       ? pluginResourceKeys(record, inventory)

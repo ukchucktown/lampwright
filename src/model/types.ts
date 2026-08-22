@@ -775,6 +775,13 @@ export type PluginSettingsRecordSnapshot = PluginSettingsRecordSnapshotBase &
     | { readonly present: false; readonly digest: null }
   );
 
+export interface GeminiExtensionUpdatePolicy {
+  readonly kind: "gemini-extension";
+  readonly installType: "git" | "local" | "github-release";
+  readonly autoUpdate: boolean | null;
+  readonly allowPreRelease: boolean | null;
+}
+
 export interface PluginBoundary {
   readonly id: string;
   readonly pluginId: string;
@@ -795,6 +802,8 @@ export interface PluginBoundary {
   readonly resources: readonly PluginResource[];
   /** Opaque hashes of settings records whose state the Owner must preserve. */
   readonly settingsRecords?: readonly PluginSettingsRecordSnapshot[];
+  /** Owner policy fields that a Plugin Update must preserve exactly. */
+  readonly updatePolicy?: GeminiExtensionUpdatePolicy;
   /** Whole-Plugin runtime availability, independent from child Skill controls. */
   readonly availability: PluginAvailability;
   /** Complete offline evidence for one whole-Plugin Update operation. */
