@@ -1004,6 +1004,7 @@ describe("Vercel Update safety blocks", () => {
     const protectedFixture = await createTestEnvironment();
     const protectedEnvironment = scanEnvironment(protectedFixture);
     const protectedName = "protected-project";
+    await mkdir(join(protectedEnvironment.workspaceDirectory, ".git"));
     await writeSkill(
       projectSkillPath(protectedEnvironment, protectedName),
       protectedName,

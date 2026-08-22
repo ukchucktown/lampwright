@@ -2371,6 +2371,7 @@ describe("Inventory scan", () => {
       environment: scanEnvironment,
       commandRunner: unavailableCommandRunner,
     }).scan(request);
+    await mkdir(join(environment.home, ".git"));
     const protectedInventory = await createInventoryScanner({
       now: () => new Date("2026-02-05T04:05:06.000Z"),
       environment: scanEnvironment,
@@ -2815,6 +2816,8 @@ describe("Inventory scan", () => {
   it("marks every non-ignored worktree skill as protected", async () => {
     const environment = await createTestEnvironment();
     const root = join(environment.workspace, ".agents", "skills");
+    const observedCommands: InventoryCommand[] = [];
+    await mkdir(join(environment.workspace, ".git"));
     await createSkill(join(root, "protected-skill"), {
       name: "protected-skill",
     });
@@ -2822,9 +2825,11 @@ describe("Inventory scan", () => {
 
     const inventory = await createScanner(
       unusedDefaultEnvironment(environment),
-      createGitCommandRunner(environment.workspace, [
-        ".agents/skills/ignored-skill",
-      ]),
+      createGitCommandRunner(
+        environment.workspace,
+        [".agents/skills/ignored-skill"],
+        observedCommands,
+      ),
     ).scan({
       roots: [
         {
@@ -2845,6 +2850,293 @@ describe("Inventory scan", () => {
       installationByName(inventory.installations, "ignored-skill").protection
         .git,
     ).toEqual({ kind: "ignored", worktreeRoot: environment.workspace });
+    expect(
+      observedCommands.filter((command) =>
+        command.arguments.includes("rev-parse"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("starts no Git process for many Artifacts outside a worktree", async () => {
+    const environment = await createTestEnvironment();
+    const root = join(environment.home, "outside-worktree", "skills");
+    const observedCommands: InventoryCommand[] = [];
+    for (let index = 0; index < 64; index += 1)
+      await createSkill(join(root, `skill-${String(index + 1)}`), {
+        name: `skill-${String(index + 1)}`,
+      });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      {
+        async run(command) {
+          observedCommands.push(command);
+          return { exitCode: null, stdout: "" };
+        },
+      },
+    ).scan({
+      roots: [
+        {
+          kind: "user",
+          path: root,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations).toHaveLength(64);
+    expect(
+      inventory.installations.every(
+        (item) => item.protection.git.kind === "outside-worktree",
+      ),
+    ).toBe(true);
+    expect(
+      observedCommands.filter((command) => command.executable === "git"),
+    ).toEqual([]);
+  });
+
+  it("uses a regular .git file without probing for its worktree root", async () => {
+    const environment = await createTestEnvironment();
+    const root = join(environment.workspace, ".agents", "skills");
+    const observedCommands: InventoryCommand[] = [];
+    await writeFile(
+      join(environment.workspace, ".git"),
+      `gitdir: ${join(environment.temporary, "linked-git-directory")}\n`,
+      "utf8",
+    );
+    await createSkill(join(root, "protected-skill"), {
+      name: "protected-skill",
+    });
+    await createSkill(join(root, "ignored-skill"), { name: "ignored-skill" });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      createGitCommandRunner(
+        environment.workspace,
+        [".agents/skills/ignored-skill"],
+        observedCommands,
+      ),
+    ).scan({
+      roots: [
+        {
+          kind: "workspace",
+          path: root,
+          workspacePath: environment.workspace,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(
+      installationByName(inventory.installations, "protected-skill").protection
+        .git,
+    ).toEqual({ kind: "protected", worktreeRoot: environment.workspace });
+    expect(
+      installationByName(inventory.installations, "ignored-skill").protection
+        .git,
+    ).toEqual({ kind: "ignored", worktreeRoot: environment.workspace });
+    expect(
+      observedCommands.filter((command) =>
+        command.arguments.includes("rev-parse"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps an uncertain .git link protected when Git commands fail", async () => {
+    const environment = await createTestEnvironment();
+    const root = join(environment.workspace, ".agents", "skills");
+    const gitDirectory = join(environment.temporary, "git-directory");
+    const observedCommands: InventoryCommand[] = [];
+    await mkdir(gitDirectory);
+    await symlink(
+      gitDirectory,
+      join(environment.workspace, ".git"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await createSkill(join(root, "uncertain-skill"), {
+      name: "uncertain-skill",
+    });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      {
+        async run(command) {
+          observedCommands.push(command);
+          return { exitCode: null, stdout: "" };
+        },
+      },
+    ).scan({
+      roots: [
+        {
+          kind: "workspace",
+          path: root,
+          workspacePath: environment.workspace,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations[0]?.protection.git).toEqual({
+      kind: "protected",
+      worktreeRoot: environment.workspace,
+    });
+    expect(
+      observedCommands.filter((command) =>
+        command.arguments.includes("rev-parse"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("uses Git when a symlink ancestor can hide a physical worktree marker", async () => {
+    const environment = await createTestEnvironment();
+    const worktreeRoot = join(environment.workspace, "physical-worktree");
+    const physicalRoot = join(worktreeRoot, ".agents", "skills");
+    const aliasRoot = join(environment.home, "worktree-alias");
+    const observedCommands: InventoryCommand[] = [];
+    await mkdir(join(worktreeRoot, ".git"), { recursive: true });
+    await createSkill(join(physicalRoot, "linked-skill"), {
+      name: "linked-skill",
+    });
+    await symlink(
+      worktreeRoot,
+      aliasRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      createGitCommandRunner(worktreeRoot, [], observedCommands),
+    ).scan({
+      roots: [
+        {
+          kind: "workspace",
+          path: join(aliasRoot, ".agents", "skills"),
+          workspacePath: aliasRoot,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations[0]?.protection.git).toEqual({
+      kind: "protected",
+      worktreeRoot,
+    });
+    expect(
+      observedCommands.filter((command) =>
+        command.arguments.includes("rev-parse"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("protects an absent path behind a symlink ancestor without starting Git", async () => {
+    const environment = await createTestEnvironment();
+    const physicalConfig = join(environment.workspace, "physical-config");
+    const configAlias = join(environment.home, "config-alias");
+    const codexHome = join(configAlias, "codex");
+    const skillRoot = join(environment.home, "codex-skills");
+    const observedCommands: InventoryCommand[] = [];
+    await mkdir(physicalConfig);
+    await symlink(
+      physicalConfig,
+      configAlias,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await createSkill(join(skillRoot, "absent-config-skill"), {
+      name: "absent-config-skill",
+    });
+
+    const inventory = await createScanner(
+      {
+        ...unusedDefaultEnvironment(environment),
+        agentHomeDirectories: { codex: codexHome },
+      },
+      {
+        async run(command) {
+          observedCommands.push(command);
+          return { exitCode: null, stdout: "" };
+        },
+      },
+    ).scan({
+      roots: [
+        {
+          kind: "user",
+          path: skillRoot,
+          agentId: "codex",
+          adapterId: null,
+        },
+      ],
+    });
+
+    const control = inventory.installations[0]!.harnessExposures[0]!.control;
+    expect(control).toMatchObject({
+      kind: "native",
+      layers: [
+        {
+          path: join(codexHome, "config.toml"),
+          exists: false,
+          protection: {
+            git: { kind: "protected", worktreeRoot: configAlias },
+          },
+        },
+      ],
+    });
+    expect(
+      observedCommands.filter((command) => command.executable === "git"),
+    ).toEqual([]);
+  });
+
+  it("keeps a Git classification permission error protected", async () => {
+    const environment = await createTestEnvironment();
+    const root = join(environment.workspace, ".agents", "skills");
+    const observedCommands: InventoryCommand[] = [];
+    await mkdir(join(environment.workspace, ".git"));
+    await createSkill(join(root, "permission-skill"), {
+      name: "permission-skill",
+    });
+
+    const inventory = await createScanner(
+      unusedDefaultEnvironment(environment),
+      {
+        async run(command) {
+          observedCommands.push(command);
+          return { exitCode: null, stdout: "" };
+        },
+      },
+    ).scan({
+      roots: [
+        {
+          kind: "workspace",
+          path: root,
+          workspacePath: environment.workspace,
+          agentId: "fixture",
+          adapterId: null,
+        },
+      ],
+    });
+
+    expect(inventory.installations[0]?.protection.git).toEqual({
+      kind: "protected",
+      worktreeRoot: environment.workspace,
+    });
+    expect(
+      observedCommands.filter((command) => command.executable === "git"),
+    ).toEqual([
+      {
+        executable: "git",
+        arguments: [
+          "-C",
+          environment.workspace,
+          "check-ignore",
+          "--quiet",
+          "--",
+          ".agents/skills/permission-skill",
+        ],
+      },
+    ]);
   });
 
   it("protects a Skill directory that is itself a worktree root", async () => {
@@ -2852,6 +3144,7 @@ describe("Inventory scan", () => {
     const worktreeRoot = join(environment.workspace, "skill-worktree");
     const observedCommands: InventoryCommand[] = [];
     await createSkill(worktreeRoot, { name: "worktree-skill" });
+    await mkdir(join(worktreeRoot, ".git"));
 
     const inventory = await createScanner(
       unusedDefaultEnvironment(environment),
@@ -2875,10 +3168,6 @@ describe("Inventory scan", () => {
     expect(
       observedCommands.filter((command) => command.executable === "git"),
     ).toEqual([
-      {
-        executable: "git",
-        arguments: ["-C", worktreeRoot, "rev-parse", "--show-toplevel"],
-      },
       {
         executable: "git",
         arguments: ["-C", worktreeRoot, "check-ignore", "--quiet", "--", "."],

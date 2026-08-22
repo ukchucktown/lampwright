@@ -72,6 +72,7 @@ export async function createMvpEndToEndFixture(
       "Git-protected project skill",
     ),
     writeSkill(paths.systemSkill, "runtime-review", "System Skill"),
+    mkdir(join(isolated.workspace, ".git"), { recursive: true }),
   ]);
   await writeJson(paths.managerLock, {
     version: 3,
