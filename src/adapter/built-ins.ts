@@ -347,7 +347,7 @@ const vercelSkillsUpdateAuthority = {
   })),
   effects: {
     mutationRoots:
-      "every bounded agent candidate with materialized existence and protection",
+      "the canonical path plus every reachable selected or detected agent candidate with materialized existence and protection",
     configurationPaths: "exact resolved lock",
   },
   network: "required",

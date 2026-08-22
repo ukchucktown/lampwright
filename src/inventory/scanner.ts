@@ -128,7 +128,54 @@ export function defaultInventoryScanEnvironment(): InventoryScanEnvironment {
           : [],
       ),
     ),
+    agentProcessEnvironment: agentProcessEnvironment(),
   };
+}
+
+function agentProcessEnvironment(): Readonly<Record<string, string>> {
+  const valueBearing = new Set([
+    "AI_AGENT",
+    "CURSOR_EXTENSION_HOST_ROLE",
+    "APPDATA",
+    "FLATPAK_XDG_CONFIG_HOME",
+  ]);
+  return Object.fromEntries(
+    [
+      "AI_AGENT",
+      "CURSOR_TRACE_ID",
+      "CURSOR_AGENT",
+      "CURSOR_EXTENSION_HOST_ROLE",
+      "GEMINI_CLI",
+      "CODEX_SANDBOX",
+      "CODEX_CI",
+      "CODEX_THREAD_ID",
+      "ANTIGRAVITY_AGENT",
+      "AUGMENT_AGENT",
+      "OPENCODE_CLIENT",
+      "CLAUDECODE",
+      "CLAUDE_CODE",
+      "CLAUDE_CODE_IS_COWORK",
+      "REPL_ID",
+      "COPILOT_MODEL",
+      "COPILOT_ALLOW_ALL",
+      "COPILOT_GITHUB_TOKEN",
+      "APPDATA",
+      "FLATPAK_XDG_CONFIG_HOME",
+    ].flatMap((name) => {
+      const value = process.env[name];
+      const presence =
+        name === "CURSOR_AGENT"
+          ? value?.trim().length === 0
+            ? ""
+            : "present"
+          : value?.length === 0
+            ? ""
+            : "present";
+      return value === undefined
+        ? []
+        : [[name, valueBearing.has(name) ? value : presence]];
+    }),
+  );
 }
 
 export async function scan(request: ScanRequest = {}): Promise<Inventory> {
