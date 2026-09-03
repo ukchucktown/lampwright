@@ -864,7 +864,9 @@ function installationArtifactLocations(
   return installation.suspension.kind === "available"
     ? installation.suspension.artifacts.map((artifact) => artifact.location)
     : [
-        installation.location,
+        ...(installation.removal.primaryArtifactPresent !== false
+          ? [installation.location]
+          : []),
         ...(installation.removal.supplementalArtifacts ?? []).map(
           (artifact) => artifact.location,
         ),

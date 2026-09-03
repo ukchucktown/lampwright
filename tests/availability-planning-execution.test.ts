@@ -398,7 +398,7 @@ describe("Availability Planning and Execution", () => {
     ).toEqual(paths);
   });
 
-  it("disables and enables a complete Vercel-managed set while preserving Manager state", async () => {
+  it("round-trips a Vercel-managed set while its retained Manager record stays visible", async () => {
     const environment = await environmentFixture();
     const paths = ["a-primary", "b-claude-copy", "c-gemini-copy"].map((name) =>
       join(environment.temporary, "vercel-round-trip", name),
@@ -466,6 +466,59 @@ describe("Availability Planning and Execution", () => {
         recordCleanups: [],
       },
     });
+    const managerRecordOnlyInstallation = buildInstallation({
+      ...installation,
+      status: "broken",
+      identity: {
+        strongEvidence: installation.identity.strongEvidence.filter(
+          (evidence) => evidence.kind !== "canonical-target",
+        ),
+        weakEvidence: installation.identity.weakEvidence,
+      },
+      exposedTo: [],
+      harnessExposures: [],
+      location: {
+        ...installation.location,
+        canonicalPath: null,
+      },
+      contentHash: null,
+      modifiedAt: null,
+      suspension: {
+        kind: "unavailable",
+        reason: "only a complete active Vercel Installation can be suspended",
+      },
+      update: {
+        kind: "unresolved",
+        reason: "the Vercel lock record has no complete active artifact set",
+      },
+      removal: {
+        ...installation.removal,
+        primaryArtifactPresent: false,
+        supplementalArtifacts: [],
+        recordCleanups: [
+          {
+            id: "manager-record-cleanup",
+            adapterId: "vercel.skills",
+            location: {
+              path: managerRecord,
+              canonicalPath: managerRecord,
+              artifactType: { kind: "file" },
+            },
+            format: "json",
+            recordPointer: "/skills/managed-review",
+            expectedFileHash: {
+              algorithm: "sha256",
+              digest: "a".repeat(64),
+            },
+            expectedRecordHash: {
+              algorithm: "sha256",
+              digest: "b".repeat(64),
+            },
+            protection,
+          },
+        ],
+      },
+    });
     const scanLive = async () => {
       const present = await Promise.all(
         paths.map((path) =>
@@ -476,7 +529,9 @@ describe("Availability Planning and Execution", () => {
         ),
       );
       return buildInventory({
-        installations: present.every(Boolean) ? [installation] : [],
+        installations: present.every(Boolean)
+          ? [installation]
+          : [managerRecordOnlyInstallation],
       });
     };
     const target = {
@@ -494,14 +549,27 @@ describe("Availability Planning and Execution", () => {
       targets: [target],
       force: false,
     });
-    await expect(
-      runner.module.executeAvailability(disablePlan, {
-        grants: [{ kind: "confirmation" }],
-      }),
-    ).resolves.toMatchObject({ status: "succeeded" });
+    const disabled = await runner.module.executeAvailability(disablePlan, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(disabled.status).toBe("succeeded");
+    expect(disabled.verificationResults).toHaveLength(2);
+    expect(
+      disabled.verificationResults.every(
+        (result) => result.status === "passed",
+      ),
+    ).toBe(true);
     const entries = await runner.disabledStorage.list();
     expect(entries).toHaveLength(1);
     expect(entries[0]?.schemaVersion).toBe(2);
+    expect((await scanLive()).installations).toMatchObject([
+      {
+        status: "broken",
+        exposedTo: [],
+        harnessExposures: [],
+        removal: { primaryArtifactPresent: false },
+      },
+    ]);
     await expect(readFile(managerRecord, "utf8")).resolves.toBe(
       '{"installed":true}\n',
     );
@@ -510,6 +578,8 @@ describe("Availability Planning and Execution", () => {
       targets: [target],
       force: false,
     });
+    expect(enablePlan.blocks).toEqual([]);
+    expect(enablePlan.actions).toMatchObject([{ kind: "suspended-enable" }]);
     await expect(
       runner.module.executeAvailability(enablePlan, {
         grants: [{ kind: "confirmation" }],

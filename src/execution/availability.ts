@@ -288,7 +288,7 @@ function verify(
       if (
         !passed &&
         check.expectedStatus === "disabled" &&
-        installation === undefined
+        exposure === undefined
       )
         passed = entries.some((entry) =>
           entry.installationIds.includes(check.installationId),
