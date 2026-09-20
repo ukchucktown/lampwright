@@ -263,6 +263,26 @@ user intent or approvals. They must not:
 
 This keeps interactive and automated behavior equivalent and allows both presentation modules to be built in parallel after the core value types stabilize.
 
+## Session setup extension
+
+The [Session setup contract](./session-setup.md#shared-contracts-and-compatibility)
+adds `scanSessionSetup` to Inventory, `planSessionSetup` to Planning, and
+`executeSessionSetup` to Execution. Its snapshot and plans remain immutable
+values. Exact Skill Harness Exposures, complete Plugins, MCP Registrations,
+and App Bindings retain their distinct identities and native authority.
+
+These functions reuse existing discovery, protection, configuration mutation,
+dependency execution, audit, and verification seams. They do not introduce a
+second safety engine, a persistent registry, or a general MCP lifecycle module.
+The new intent permits only native Enable and Disable for one harness and
+workspace context. A Control Scope can still be user-wide and must appear in
+the complete plan.
+
+The TUI and CLI call the same injected functions. Existing public lifecycle
+interfaces and v1 JSON retain their behavior. The new setup schema is separate,
+and optional TUI dependencies preserve existing embedding hosts. The detailed
+profile and source requirements are in [Session setup controls](./session-setup-controls.md).
+
 ## Parallel work boundaries
 
 After the core types and fixture harness are merged, future sessions can work independently on:

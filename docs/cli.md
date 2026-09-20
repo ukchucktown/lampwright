@@ -7,6 +7,14 @@ paths themselves.
 
 ## Selectors and confirmation
 
+The selectors below retain their legacy lifecycle behavior. The accepted
+[Session setup extension](./session-setup.md#cli-parity) adds `setup:<id>`
+selectors for native Enable and Disable, an explicit `--harness`, and a
+workspace context. `scan --session-setup` exposes the corresponding targets.
+Setup uses a separate versioned JSON schema, and mixed setup/lifecycle
+selectors are invalid. Its delivery issues add this surface without changing
+the defaults below.
+
 `remove` accepts `installation:<id>`, `logical-skill:<id>`, `source:<source-id>`,
 `group:<group-id>`, and `plugin:<boundary-id>`.
 
