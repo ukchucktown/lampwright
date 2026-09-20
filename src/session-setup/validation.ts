@@ -854,6 +854,7 @@ function validateTargets(
   for (const [selectorId, controlledTargets] of selectors) {
     const expectedTargetIds = controlledTargets.map((target) => target.id);
     const first = controlledTargets[0]!.control.selector;
+    const firstTarget = controlledTargets[0]!;
     for (const target of controlledTargets) {
       const candidate = target.control.selector;
       if (
@@ -870,6 +871,17 @@ function validateTargets(
       issues.push({
         path: ["targets"],
         message: `exact selector ${selectorId} governs multiple targets`,
+      });
+    if (
+      controlledTargets.some(
+        (target) =>
+          target.harnessId !== firstTarget.harnessId ||
+          target.workspace.path !== firstTarget.workspace.path,
+      )
+    )
+      issues.push({
+        path: ["targets"],
+        message: `selector ${selectorId} crosses harness or workspace`,
       });
     if (
       first.authority === "shared-connector" &&
@@ -1158,6 +1170,22 @@ export function parseSessionSetupSnapshot(
     value.dependencies.flatMap((item) => [item.dependent, item.required]),
     ["dependencies"],
   );
+  for (const [index, dependency] of value.dependencies.entries()) {
+    const dependent = targetById.get(dependency.dependent.targetId);
+    const required = targetById.get(dependency.required.targetId);
+    if (
+      dependent &&
+      required &&
+      (dependent.harnessId !== required.harnessId ||
+        dependent.workspace.path !== required.workspace.path)
+    )
+      throw new SessionSetupValidationError([
+        {
+          path: ["dependencies", index],
+          message: "dependency crosses harness or workspace",
+        },
+      ]);
+  }
   for (const target of value.targets) {
     if (
       target.kind === "mcp-registration" &&
@@ -1326,6 +1354,60 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
         path: ["actions", action.id, "dependsOn"],
         message: "unknown action dependency",
       });
+  const mutationOwners = new Map<string, string>();
+  const methodOwners = new Map<string, string>();
+  for (const action of value.actions) {
+    if (new Set(action.mutations.map((mutation) => mutation.kind)).size !== 1)
+      planIssues.push({
+        path: ["actions", action.id, "mutations"],
+        message: "action mixes native mutation methods",
+      });
+    if (
+      action.approvals.filter((approval) => approval.kind === "confirmation")
+        .length !== 1
+    )
+      planIssues.push({
+        path: ["actions", action.id, "approvals"],
+        message: "action requires exactly one confirmation approval",
+      });
+    for (const targetRef of action.targets) {
+      const target = targetById.get(targetRef.targetId);
+      const operation = target?.control.availability[action.operation];
+      if (
+        operation?.kind === "available" &&
+        !action.approvals.some(
+          (approval) =>
+            approval.kind === "scope-disclosure" &&
+            JSON.stringify(approval.scope) ===
+              JSON.stringify(operation.controlScope),
+        )
+      )
+        planIssues.push({
+          path: ["actions", action.id, "approvals"],
+          message: "action omits its native control scope disclosure",
+        });
+    }
+    for (const mutation of action.mutations) {
+      const priorSelectorOwner = mutationOwners.get(mutation.selectorId);
+      if (priorSelectorOwner)
+        planIssues.push({
+          path: ["actions", action.id, "mutations"],
+          message: `selector mutation is already owned by action ${priorSelectorOwner}`,
+        });
+      else mutationOwners.set(mutation.selectorId, action.id);
+      const methodKey =
+        mutation.kind === "configuration"
+          ? `configuration:${mutation.authority.layerCanonicalPath ?? "missing"}`
+          : `native-command:${JSON.stringify(mutation.authority)}`;
+      const priorMethodOwner = methodOwners.get(methodKey);
+      if (priorMethodOwner && priorMethodOwner !== action.id)
+        planIssues.push({
+          path: ["actions", action.id, "mutations"],
+          message: `native method must be grouped with action ${priorMethodOwner}`,
+        });
+      else methodOwners.set(methodKey, action.id);
+    }
+  }
   if (planIssues.length) throw new SessionSetupValidationError(planIssues);
   const selectors = new Map(
     value.targets.map((target) => [
@@ -1333,7 +1415,7 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
       target.control.selector,
     ]),
   );
-  for (const action of value.actions)
+  for (const action of value.actions) {
     for (const mutation of action.mutations) {
       const selectorValue = selectors.get(mutation.selectorId);
       if (!selectorValue)
@@ -1417,7 +1499,7 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
       if (
         mutation.policy !==
           (action.operation === "enable" ? "enabled" : "disabled") ||
-        !action.targets.every((target) =>
+        !action.targets.some((target) =>
           selectorValue.governedTargetIds.includes(target.targetId),
         )
       )
@@ -1428,6 +1510,21 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
           },
         ]);
     }
+    if (
+      action.targets.some((target) =>
+        action.mutations.every((mutation) => {
+          const selectorValue = selectors.get(mutation.selectorId);
+          return !selectorValue?.governedTargetIds.includes(target.targetId);
+        }),
+      )
+    )
+      throw new SessionSetupValidationError([
+        {
+          path: ["actions", action.id, "targets"],
+          message: "action target lacks a native selector mutation",
+        },
+      ]);
+  }
   return value;
 }
 export function parseSessionSetupReport(input: unknown): SessionSetupReport {

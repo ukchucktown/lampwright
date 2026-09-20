@@ -414,6 +414,58 @@ export interface SessionSetupReport {
   readonly finalSnapshotId: string | null;
   readonly rescanError: SetupExecutionError | null;
 }
+export interface SessionSetupConfigurationRequest {
+  readonly path: string;
+  readonly format: SetupConfigurationLayer["format"];
+  readonly exists: boolean;
+  readonly expectedPreimage: Sha256Digest | null;
+  readonly selectors: readonly [SetupNativeSelector, ...SetupNativeSelector[]];
+  readonly mutations: readonly [
+    Extract<SetupMutation, { readonly kind: "configuration" }>,
+    ...Extract<SetupMutation, { readonly kind: "configuration" }>[],
+  ];
+}
+export interface SessionSetupPreparedConfiguration {
+  readonly token: string;
+  readonly status: "changed" | "unchanged";
+}
+/**
+ * Checked native-document writer. Implementations retain document contents
+ * behind the opaque token so public setup values cannot expose credentials.
+ */
+export interface SessionSetupConfigurationWriter {
+  prepare(
+    request: SessionSetupConfigurationRequest,
+  ): Promise<SessionSetupPreparedConfiguration>;
+  commit(prepared: SessionSetupPreparedConfiguration): Promise<void>;
+  discard(prepared: SessionSetupPreparedConfiguration): Promise<void>;
+}
+export interface SessionSetupExecutionAuditRecord {
+  readonly schemaVersion: 1;
+  readonly plan: SessionSetupPlan;
+  readonly approvals: SessionSetupApprovals;
+  readonly report: SessionSetupReport;
+}
+export interface SessionSetupExecutionAuditWriter {
+  write(record: SessionSetupExecutionAuditRecord): Promise<void>;
+}
+/** Injected effect boundaries for native-only Session setup execution. */
+export interface SessionSetupExecutionOptions {
+  readonly scan: () => Promise<SessionSetupSnapshot>;
+  readonly replan: (
+    snapshot: SessionSetupSnapshot,
+    intent: SessionSetupIntent,
+  ) => SessionSetupPlan;
+  readonly configurationWriter: SessionSetupConfigurationWriter;
+  readonly processRunner: import("../execution/types.js").ExecutionProcessRunner;
+  readonly inspectGitProtection: import("../execution/types.js").ExecutionGitProtectionInspector;
+  readonly auditWriter: SessionSetupExecutionAuditWriter;
+  readonly now: () => Date;
+  readonly maxConcurrency?: number;
+}
+export interface SessionSetupApprovals {
+  readonly grants: readonly SetupApproval[];
+}
 export type SessionSetupPublicValue =
   | SessionSetupSnapshot
   | SessionSetupIntent

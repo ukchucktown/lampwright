@@ -184,6 +184,19 @@ cannot represent deletion, credential changes, owner installation, suspension,
 or fallback. The schema generator builds the published JSON Schema from the Zod
 validators. The contract test requires byte-for-value equality with that schema.
 
+Issue #150 publishes `planSessionSetup` and `executeSessionSetup`. Planning
+groups mutations for one configuration document into one action. It records
+native scope approval, owner gates, dependency order, shared-selector
+collateral, and saved-policy and effective-state checks. Blocked targets do not
+prevent an independent target from receiving an action.
+
+Execution scans and replans before effects. Configuration adapters receive a
+typed selector and mutation request through the checked native-document writer.
+The writer keeps document contents behind an opaque prepared token. Execution
+then repeats Git protection checks, runs the fixed configuration or command
+method, audits attempted effects, rescans, and reports unverified state when a
+final scan fails. Rejected and read-only paths do not write an audit record.
+
 The bounded reuse manifest for commit `229f8cd` records deferred guidance.
 Issue #149 implements no recovered inventory or execution code. Later issues
 may review source/owner identity evidence, configuration parsing lessons,

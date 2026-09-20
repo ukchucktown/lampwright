@@ -278,6 +278,12 @@ The new intent permits only native Enable and Disable for one harness and
 workspace context. A Control Scope can still be user-wide and must appear in
 the complete plan.
 
+`SessionSetupExecutionOptions` injects the fresh setup scan, pure replanner,
+checked configuration writer, structured process runner, Git protection
+inspector, audit writer, clock, and optional concurrency bound. Configuration
+editors receive typed native selectors. Raw document contents stay inside the
+writer and never enter a plan, report, or audit record.
+
 The TUI and CLI call the same injected functions. Existing public lifecycle
 interfaces and v1 JSON retain their behavior. The new setup schema is separate,
 and optional TUI dependencies preserve existing embedding hosts. The detailed
