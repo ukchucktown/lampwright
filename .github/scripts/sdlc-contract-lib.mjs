@@ -151,11 +151,11 @@ export async function validatePullRequest({ event, config, api }) {
 export function runValidationCommands({ config, profile, repositoryRoot, runner = execFileSync }) {
   if (profile === "none") return [];
   const key = profile === "child" ? "childValidationCommands" : "featureValidationCommands";
-  const commands = config[key] ?? [];
+  const commands = [...(config.validationSetupCommands ?? []), ...(config[key] ?? [])];
   for (const command of commands) {
     if (!command || typeof command.executable !== "string" || !Array.isArray(command.args) ||
         command.args.some((argument) => typeof argument !== "string")) {
-      throw new Error(`invalid structured command in '${key}'`);
+      throw new Error("invalid structured validation command");
     }
     runner(command.executable, command.args, {
       cwd: repositoryRoot,
