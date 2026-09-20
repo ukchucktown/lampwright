@@ -39,6 +39,7 @@ import {
 import { createTuiSections, selectionTargets } from "./sections.js";
 import { createTrashSections, type TrashRestoreReadiness } from "./trash.js";
 import { createSearchModel, reduceSearch } from "./search.js";
+import { createSetupSections, selectedSetupTargetIds } from "./setup.js";
 import type {
   TuiAction,
   TuiAvailabilityPlanState,
@@ -63,6 +64,7 @@ export class TuiController {
   private trashExecution: Promise<void> | null = null;
   private availabilityExecution: Promise<void> | null = null;
   private updateExecution: Promise<void> | null = null;
+  private setupExecution: Promise<void> | null = null;
 
   constructor(
     private readonly dependencies: TuiDependencies,
@@ -180,6 +182,10 @@ export class TuiController {
         await this.updatePlanAction(state, action);
       else if (state.screen === "update-report")
         await this.updateReportAction(state, action);
+      else if (state.screen === "setup-plan")
+        await this.setupPlanAction(state, action);
+      else if (state.screen === "setup-report")
+        await this.setupReportAction(state, action);
       else if (state.screen === "trash-review")
         await this.trashReviewAction(state, action);
       else if (state.screen === "trash-report")
@@ -308,10 +314,43 @@ export class TuiController {
     await this.updateExecution;
   }
 
+  async waitForSetupExecution(): Promise<void> {
+    if (
+      this.setupExecution === null &&
+      this.stateValue.screen === "setup-executing"
+    ) {
+      const state = this.stateValue;
+      const execute = this.dependencies.executeSessionSetup;
+      if (execute === undefined) return;
+      this.setupExecution = execute(state.plan, {
+        grants: state.plan.actions.flatMap((action) => action.approvals),
+      })
+        .then((report) => {
+          this.stateValue = {
+            screen: "setup-report",
+            browse: state.browse,
+            report,
+            technicalDetails: false,
+            scrollOffset: 0,
+          };
+        })
+        .catch((error: unknown) => this.fail(error));
+    }
+    await this.setupExecution;
+  }
+
   private async browseAction(
     state: TuiBrowseState,
     action: TuiAction,
   ): Promise<void> {
+    if (action.kind === "switch-area") {
+      await this.openArea(state, action.area);
+      return;
+    }
+    if (state.area === "setup") {
+      await this.setupBrowseAction(state, action);
+      return;
+    }
     if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: null };
       return;
@@ -1072,6 +1111,274 @@ export class TuiController {
     };
   }
 
+  private async openArea(
+    state: TuiBrowseState,
+    area: "skills" | "setup",
+  ): Promise<void> {
+    if (area === (state.area ?? "skills")) return;
+    const saved = {
+      ...(state.areaSnapshots ?? {}),
+      [state.area ?? "skills"]: browseSnapshot(state),
+    };
+    if (saved[area] !== undefined) {
+      this.stateValue = {
+        screen: "browse",
+        ...saved[area],
+        areaSnapshots: saved,
+      };
+      return;
+    }
+    if (area === "setup") {
+      const setupInventory =
+        this.dependencies.scanSessionSetup === undefined
+          ? undefined
+          : await this.dependencies.scanSessionSetup();
+      if (setupInventory === undefined) {
+        this.stateValue = {
+          ...state,
+          model: {
+            ...state.model,
+            notice: "Session setup is unavailable in this host.",
+          },
+        };
+        return;
+      }
+      this.stateValue = {
+        screen: "browse",
+        inventory: state.inventory,
+        setupInventory,
+        area: "setup",
+        view: "inventory",
+        model: createBrowseModel(
+          createSetupSections(setupInventory, "inventory"),
+          state.model.viewport,
+        ),
+        areaSnapshots: saved,
+      };
+      return;
+    }
+    this.stateValue = {
+      screen: "browse",
+      inventory: state.inventory,
+      area: "skills",
+      view: "inventory",
+      model: createBrowseModel(
+        createTuiSections(state.inventory),
+        state.model.viewport,
+      ),
+      areaSnapshots: saved,
+    };
+  }
+
+  private async setupBrowseAction(
+    state: TuiBrowseState,
+    action: TuiAction,
+  ): Promise<void> {
+    const snapshot = state.setupInventory;
+    if (snapshot === undefined) return;
+    if (action.kind === "switch-view") {
+      const view = action.view === "disabled" ? "disabled" : "inventory";
+      if (view === state.view) return;
+      const snapshots = {
+        ...(state.viewSnapshots ?? {}),
+        [state.view ?? "inventory"]: viewSnapshot(state),
+      };
+      const saved = snapshots[view];
+      this.stateValue =
+        saved === undefined
+          ? {
+              ...state,
+              view,
+              model: createBrowseModel(
+                createSetupSections(snapshot, view),
+                state.model.viewport,
+              ),
+              viewSnapshots: snapshots,
+            }
+          : {
+              screen: "browse",
+              ...saved,
+              area: "setup",
+              setupInventory: snapshot,
+              viewSnapshots: snapshots,
+              ...(state.areaSnapshots === undefined
+                ? {}
+                : { areaSnapshots: state.areaSnapshots }),
+            };
+      return;
+    }
+    if (action.kind === "open-search" || action.kind === "append-query") {
+      let model = createSearchModel(state.model);
+      const value =
+        action.kind === "append-query" ? action.value : (action.value ?? "");
+      if (value)
+        model = reduceSearch(model, state.model.sections, {
+          kind: "type",
+          value,
+        });
+      this.stateValue = {
+        screen: "search",
+        browse: browseSnapshot(state),
+        model,
+      };
+      return;
+    }
+    const command = browseCommand(action);
+    if (command !== null) {
+      this.stateValue = { ...state, model: reduceBrowse(state.model, command) };
+      return;
+    }
+    if (
+      action.kind !== "disable-review" &&
+      action.kind !== "enable-review" &&
+      action.kind !== "select"
+    )
+      return;
+    if (action.kind === "select") return; // details is browse-only; never implies removal.
+    const ids = selectedSetupTargetIds(
+      state.model.sections,
+      state.model.selected,
+      state.model.sectionIndex,
+      state.model.entryIndex,
+    );
+    const targets = snapshot.targets.filter((target) =>
+      ids.includes(target.id),
+    );
+    if (!targets.length) {
+      this.stateValue = {
+        ...state,
+        model: { ...state.model, notice: "Nothing eligible is selected." },
+      };
+      return;
+    }
+    const planner = this.dependencies.planSessionSetup;
+    if (planner === undefined) {
+      this.stateValue = {
+        ...state,
+        model: {
+          ...state.model,
+          notice: "Session setup planning is unavailable in this host.",
+        },
+      };
+      return;
+    }
+    const refs = targets.map((target) =>
+      target.kind === "skill-exposure"
+        ? {
+            kind: "skill-exposure" as const,
+            targetId: target.id,
+            installationId: target.installationId,
+          }
+        : target.kind === "plugin"
+          ? {
+              kind: "plugin" as const,
+              targetId: target.id,
+              pluginBoundaryId: target.pluginBoundaryId,
+            }
+          : target.kind === "mcp-registration"
+            ? {
+                kind: "mcp-registration" as const,
+                targetId: target.id,
+                declarationSourceId: target.declarationSource.sourceId,
+                serverKey: target.serverKey,
+              }
+            : {
+                kind: "app-binding" as const,
+                targetId: target.id,
+                declarationSourceId: target.declarationSource.sourceId,
+                alias: target.alias,
+                connectorId: target.connectorId,
+              },
+    );
+    this.stateValue = {
+      screen: "setup-plan",
+      browse: browseSnapshot(state),
+      plan: planner(snapshot, {
+        schemaVersion: 1,
+        kind: "session-setup-intent",
+        action: action.kind === "disable-review" ? "disable" : "enable",
+        harnessId: targets[0]!.harnessId,
+        workspace: snapshot.workspace,
+        targets: refs as never,
+      }),
+      technicalDetails: false,
+      scrollOffset: 0,
+    };
+  }
+
+  private async setupPlanAction(
+    state: import("./types.js").TuiSetupPlanState,
+    action: TuiAction,
+  ): Promise<void> {
+    if (action.kind === "cancel") {
+      this.stateValue = { screen: "browse", ...state.browse };
+      return;
+    }
+    if (action.kind === "toggle-details") {
+      this.stateValue = { ...state, technicalDetails: !state.technicalDetails };
+      return;
+    }
+    if (action.kind === "owner-review") {
+      this.stateValue = {
+        screen: "browse",
+        ...state.browse,
+        model: {
+          ...state.browse.model,
+          notice:
+            "Select the complete owner explicitly to open its availability review.",
+        },
+      };
+      return;
+    }
+    if (
+      action.kind === "confirm" &&
+      state.plan.blocks.length === 0 &&
+      this.dependencies.executeSessionSetup !== undefined
+    ) {
+      this.setupExecution = null;
+      this.stateValue = {
+        screen: "setup-executing",
+        browse: state.browse,
+        plan: state.plan,
+      };
+    }
+  }
+
+  private async setupReportAction(
+    state: import("./types.js").TuiSetupReportState,
+    action: TuiAction,
+  ): Promise<void> {
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: state.report };
+      return;
+    }
+    if (action.kind !== "cancel" && action.kind !== "select") return;
+    try {
+      const snapshot =
+        this.dependencies.scanSessionSetup === undefined
+          ? state.browse.setupInventory
+          : await this.dependencies.scanSessionSetup();
+      if (snapshot === undefined) throw new Error();
+      const view = state.browse.view === "disabled" ? "disabled" : "inventory";
+      this.stateValue = {
+        screen: "browse",
+        inventory: state.browse.inventory,
+        setupInventory: snapshot,
+        area: "setup",
+        view,
+        model: createBrowseModel(
+          createSetupSections(snapshot, view),
+          state.browse.model.viewport,
+        ),
+        ...(state.browse.areaSnapshots === undefined
+          ? {}
+          : { areaSnapshots: state.browse.areaSnapshots }),
+      };
+    } catch {
+      this.stateValue = { screen: "done", report: state.report };
+    }
+  }
+
   private async openTrash(state: TuiBrowseState): Promise<void> {
     const quarantine = this.dependencies.quarantine;
     if (quarantine === undefined) {
@@ -1241,6 +1548,10 @@ export class TuiController {
 function browseSnapshot(state: TuiBrowseState): TuiBrowseSnapshot {
   return {
     inventory: state.inventory,
+    ...(state.area === undefined ? {} : { area: state.area }),
+    ...(state.setupInventory === undefined
+      ? {}
+      : { setupInventory: state.setupInventory }),
     model: state.model,
     ...(state.view === undefined ? {} : { view: state.view }),
     ...(state.operations === undefined ? {} : { operations: state.operations }),
@@ -1256,6 +1567,10 @@ function browseSnapshot(state: TuiBrowseState): TuiBrowseSnapshot {
 function viewSnapshot(state: TuiBrowseState): TuiViewSnapshot {
   return {
     inventory: state.inventory,
+    ...(state.area === undefined ? {} : { area: state.area }),
+    ...(state.setupInventory === undefined
+      ? {}
+      : { setupInventory: state.setupInventory }),
     model: state.model,
     ...(state.view === undefined ? {} : { view: state.view }),
     ...(state.operations === undefined ? {} : { operations: state.operations }),
@@ -1305,7 +1620,10 @@ function resizeState(
     | import("./types.js").TuiAvailabilityExecutingState
     | TuiUpdatePlanState
     | TuiUpdateReportState
-    | import("./types.js").TuiUpdateExecutingState,
+    | import("./types.js").TuiUpdateExecutingState
+    | import("./types.js").TuiSetupPlanState
+    | import("./types.js").TuiSetupExecutingState
+    | import("./types.js").TuiSetupReportState,
   viewport: TuiBrowseState["model"]["viewport"],
 ):
   | TuiBrowseState
@@ -1318,7 +1636,10 @@ function resizeState(
   | import("./types.js").TuiAvailabilityExecutingState
   | TuiUpdatePlanState
   | TuiUpdateReportState
-  | import("./types.js").TuiUpdateExecutingState {
+  | import("./types.js").TuiUpdateExecutingState
+  | import("./types.js").TuiSetupPlanState
+  | import("./types.js").TuiSetupExecutingState
+  | import("./types.js").TuiSetupReportState {
   if (state.screen === "browse")
     return { screen: "browse", ...resizeBrowse(state, viewport) };
   if (state.screen === "search")
@@ -1361,6 +1682,10 @@ function resizeState(
     };
   }
   if (state.screen === "availability-executing")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "setup-plan" || state.screen === "setup-report")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "setup-executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "update-report") {
     const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };

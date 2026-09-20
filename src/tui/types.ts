@@ -30,6 +30,12 @@ import type {
   UpdatePlan,
   UpdateReport,
 } from "../update/types.js";
+import type {
+  SessionSetupIntent,
+  SessionSetupPlan,
+  SessionSetupReport,
+  SessionSetupSnapshot,
+} from "../session-setup/types.js";
 
 export interface TuiDependencies {
   /** Invocation workspace supplied by the launcher without changing process cwd. */
@@ -65,6 +71,16 @@ export interface TuiDependencies {
     plan: UpdatePlan,
     approvals: readonly ApprovalRequirement[],
   ) => Promise<UpdateReport>;
+  /** Optional setup provider preserves existing embedding hosts. */
+  readonly scanSessionSetup?: () => Promise<SessionSetupSnapshot>;
+  readonly planSessionSetup?: (
+    snapshot: SessionSetupSnapshot,
+    intent: SessionSetupIntent,
+  ) => SessionSetupPlan;
+  readonly executeSessionSetup?: (
+    plan: SessionSetupPlan,
+    approvals: import("../session-setup/types.js").SessionSetupApprovals,
+  ) => Promise<SessionSetupReport>;
   /** Injected for deterministic retention display and expiry classification. */
   readonly now?: () => Date;
 }
@@ -187,9 +203,12 @@ export interface TuiVisibleRow extends TuiRow {
 }
 
 export type TuiBrowseView = "inventory" | "disabled" | "trash";
+export type TuiArea = "skills" | "setup";
 
 export interface TuiViewSnapshot {
   readonly inventory: Inventory;
+  readonly area?: TuiArea;
+  readonly setupInventory?: SessionSetupSnapshot;
   readonly model: TuiBrowseModel;
   readonly view?: TuiBrowseView;
   readonly operations?: ReadonlyMap<string, QuarantineOperation>;
@@ -199,6 +218,7 @@ export interface TuiViewSnapshot {
 export interface TuiBrowseSnapshot extends TuiViewSnapshot {
   /** Independent browse state for peer tabs; values never contain snapshots. */
   readonly viewSnapshots?: Partial<Record<TuiBrowseView, TuiViewSnapshot>>;
+  readonly areaSnapshots?: Partial<Record<TuiArea, TuiBrowseSnapshot>>;
 }
 
 export interface TuiLoadingState {
@@ -326,6 +346,26 @@ export interface TuiAvailabilityReportState {
   readonly scrollOffset: number;
 }
 
+export interface TuiSetupPlanState {
+  readonly screen: "setup-plan";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: SessionSetupPlan;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+}
+export interface TuiSetupExecutingState {
+  readonly screen: "setup-executing";
+  readonly browse: TuiBrowseSnapshot;
+  readonly plan: SessionSetupPlan;
+}
+export interface TuiSetupReportState {
+  readonly screen: "setup-report";
+  readonly browse: TuiBrowseSnapshot;
+  readonly report: SessionSetupReport;
+  readonly technicalDetails: boolean;
+  readonly scrollOffset: number;
+}
+
 export interface TuiUpdatePlanState {
   readonly screen: "update-plan";
   readonly browse: TuiBrowseSnapshot;
@@ -358,7 +398,12 @@ export interface TuiErrorState {
 
 export interface TuiDoneState {
   readonly screen: "done";
-  readonly report: ExecutionReport | AvailabilityReport | UpdateReport | null;
+  readonly report:
+    | ExecutionReport
+    | AvailabilityReport
+    | UpdateReport
+    | SessionSetupReport
+    | null;
 }
 
 export type TuiState =
@@ -371,6 +416,9 @@ export type TuiState =
   | TuiAvailabilityPlanState
   | TuiAvailabilityExecutingState
   | TuiAvailabilityReportState
+  | TuiSetupPlanState
+  | TuiSetupExecutingState
+  | TuiSetupReportState
   | TuiUpdatePlanState
   | TuiUpdateExecutingState
   | TuiUpdateReportState
@@ -419,8 +467,10 @@ export type TuiAction =
   | { readonly kind: "cancel" }
   | { readonly kind: "force" }
   | { readonly kind: "fallback" }
+  | { readonly kind: "owner-review" }
   | { readonly kind: "select-fallback"; readonly delta: number }
   | { readonly kind: "switch-view"; readonly view: TuiBrowseView }
+  | { readonly kind: "switch-area"; readonly area: TuiArea }
   | { readonly kind: "disable-review" }
   | { readonly kind: "enable-review" }
   | { readonly kind: "update-review" }
@@ -431,12 +481,20 @@ export type TuiAction =
 export type TuiOutcome =
   | {
       readonly status: "completed";
-      readonly report: ExecutionReport | AvailabilityReport | UpdateReport;
+      readonly report:
+        | ExecutionReport
+        | AvailabilityReport
+        | UpdateReport
+        | SessionSetupReport;
     }
   | {
       readonly status: "cancelled";
       readonly report:
-        ExecutionReport | AvailabilityReport | UpdateReport | null;
+        | ExecutionReport
+        | AvailabilityReport
+        | UpdateReport
+        | SessionSetupReport
+        | null;
     }
   | { readonly status: "failed"; readonly message: string };
 

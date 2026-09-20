@@ -45,6 +45,10 @@ export async function runTui(
         await controller.waitForUpdateExecution();
         terminal.render(controller.state);
       }
+      if (nextState.screen === "setup-executing") {
+        await controller.waitForSetupExecution();
+        terminal.render(controller.state);
+      }
     }
     if (controller.state.screen === "error")
       return { status: "failed", message: controller.state.message };

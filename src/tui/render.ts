@@ -67,6 +67,10 @@ export function renderTui(
     return renderAvailabilityExecuting(state, style);
   if (state.screen === "availability-report")
     return renderAvailabilityReport(state, style);
+  if (state.screen === "setup-plan") return renderSetupPlan(state, style);
+  if (state.screen === "setup-executing")
+    return `${style.title("Lampwright — Session setup")}\n\n${style.info("Applying reviewed native availability…")}\n`;
+  if (state.screen === "setup-report") return renderSetupReport(state, style);
   if (state.screen === "update-plan") return renderUpdatePlan(state, style);
   if (state.screen === "update-executing")
     return renderUpdateExecuting(state, style);
@@ -76,6 +80,19 @@ export function renderTui(
     return `${style.title("Lampwright — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
   if (state.screen === "trash-report") return renderTrashReport(state, style);
   return renderReport(state, style);
+}
+
+function renderSetupPlan(
+  state: Extract<TuiState, { screen: "setup-plan" }>,
+  style: TuiPaint,
+): string {
+  return `${[style.title(`Session setup ${state.plan.intent.action} review`), ...state.plan.targets.map((target) => style.info(`${target.name} · ${target.kind} · ${target.state.effectiveWorkspaceState}`)), ...state.plan.blocks.map((block) => style.error(`Blocked: ${block.kind}${"reason" in block ? ` — ${block.reason}` : ""}`)), ...state.plan.warnings.map((warning) => style.warning(`Warning: ${warning.kind}`)), style.muted(state.plan.blocks.length ? "o owner review · esc cancel" : "y confirm · esc cancel")].join("\n")}\n`;
+}
+function renderSetupReport(
+  state: Extract<TuiState, { screen: "setup-report" }>,
+  style: TuiPaint,
+): string {
+  return `${[style.title(`Session setup result: ${state.report.status}`), ...state.report.targetResults.map((result) => `${result.status === "failed" || result.status === "blocked" || result.status === "unverified" ? style.error("!") : style.success("✓")} ${result.target.targetId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`), state.report.rescanError === null ? "" : style.warning(`Rescan: ${state.report.rescanError.message}`), style.muted("enter/esc refresh · q quit")].filter(Boolean).join("\n")}\n`;
 }
 
 function renderTrashReport(
@@ -1841,7 +1858,7 @@ export function renderBrowseLines(
   const view = panes(model);
   const section = currentSection(model);
   const out: string[] = [];
-  const isTrash = state.view === "trash";
+  const isTrash = state.area !== "setup" && state.view === "trash";
   const isDisabled = state.view === "disabled";
 
   const selected = model.selected.size;
@@ -1857,6 +1874,12 @@ export function renderBrowseLines(
     { text: " height", paint: style.muted },
   ] as const;
   const globalControls = [
+    ...(state.area === "setup"
+      ? ([
+          { text: "ctrl-o", paint: style.title },
+          { text: " area · ", paint: style.muted },
+        ] as const)
+      : []),
     { text: "ctrl-t", paint: style.title },
     { text: " view · ", paint: style.muted },
     { text: "esc", paint: style.title },
@@ -1881,8 +1904,12 @@ export function renderBrowseLines(
         { text: " remove · ", paint: style.muted },
         ...updateControls,
       ];
+  if (state.area === "setup")
+    out.push(
+      `${style.title("Lampwright")} ${style.muted("Skills & plugins")} ${style.muted("|")} ${style.selected("Session setup")}`,
+    );
   out.push(
-    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+    `${state.area === "setup" ? "" : `${style.title("Lampwright")} `}${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? "" : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -1935,7 +1962,8 @@ export function renderBrowseLines(
             style.muted,
           ),
   );
-  out.push(fitStyledSegments(paneControls, usable, style.muted));
+  if (state.area !== "setup")
+    out.push(fitStyledSegments(paneControls, usable, style.muted));
   out.push(
     isTrash
       ? fitStyledSegments(
