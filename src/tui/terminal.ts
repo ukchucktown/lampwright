@@ -347,11 +347,11 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
         ? { kind: "noop" }
         : { kind: "update-review" };
     if (value === "disable" || value === "d")
-      return state.view === "inventory"
+      return state.area === "setup" || state.view === "inventory"
         ? { kind: "disable-review" }
         : { kind: "noop" };
     if (value === "enable" || value === "e")
-      return state.view === "disabled"
+      return state.area === "setup" || state.view === "disabled"
         ? { kind: "enable-review" }
         : { kind: "noop" };
     if (value.startsWith("search "))

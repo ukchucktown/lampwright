@@ -1436,20 +1436,27 @@ export class TuiController {
       return;
     }
     if (action.kind === "owner-review") {
+      const owner = state.plan.blocks.find(
+        (block) => block.kind === "owner-gate",
+      )?.owner;
+      const planner = this.dependencies.planSessionSetup;
+      const snapshot = state.browse.setupInventory;
+      if (
+        owner === undefined ||
+        planner === undefined ||
+        snapshot === undefined
+      )
+        return;
       this.stateValue = {
-        screen: "browse",
-        ...state.browse,
-        model: {
-          ...state.browse.model,
-          notice:
-            "Select the complete owner explicitly to open its availability review.",
-        },
+        ...state,
+        plan: planner(snapshot, { ...state.plan.intent, targets: [owner] }),
       };
       return;
     }
     if (
       action.kind === "confirm" &&
       state.plan.blocks.length === 0 &&
+      state.plan.errors.length === 0 &&
       this.dependencies.executeSessionSetup !== undefined
     ) {
       this.setupExecution = null;
