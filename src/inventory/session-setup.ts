@@ -197,6 +197,61 @@ async function scanCodexSessionSetup(
       childTargetIds: [],
     });
   }
+  const childIds = new Map<string, string[]>();
+  for (const installation of inventory.installations) {
+    if (
+      installation.pluginBoundaryId === null ||
+      !pluginTargets.has(installation.pluginBoundaryId)
+    )
+      continue;
+    const id = stableId("setup-plugin-skill", installation.id);
+    const source = addSource(
+      "skill-exposure",
+      installation.scope as SetupScope,
+      `codex:plugin-skill:${installation.id}`,
+      [id],
+      "success",
+      null,
+      installation.location.path,
+    );
+    targets.push({
+      id,
+      kind: "skill-exposure",
+      harnessId: "codex",
+      workspace,
+      name: installation.skill.name,
+      source,
+      owner: {
+        kind: "plugin",
+        pluginBoundaryId: installation.pluginBoundaryId,
+      },
+      definitionScope: installation.scope as SetupScope,
+      state: stateFromPlugin(
+        inventory.plugins.find(
+          (plugin) => plugin.id === installation.pluginBoundaryId,
+        )?.availability.status ?? "unresolved",
+      ),
+      control: unavailablePathControl(
+        installation.location.path,
+        "Plugin-owned Skills have no independent Codex availability policy",
+      ),
+      installationId: installation.id,
+    });
+    childIds.set(installation.pluginBoundaryId, [
+      ...(childIds.get(installation.pluginBoundaryId) ?? []),
+      id,
+    ]);
+  }
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    if (target?.kind === "plugin")
+      targets[index] = {
+        ...target,
+        childTargetIds: [
+          ...(childIds.get(target.pluginBoundaryId) ?? []),
+        ].sort(),
+      };
+  }
 
   for (const document of [userDocument, projectDocument]) {
     for (const [serverKey, value] of entries(
@@ -732,9 +787,7 @@ interface DescriptorSourceResult {
   readonly status: "success" | "invalid" | "incomplete";
   readonly reason: string | null;
 }
-async function readJsoncDescriptor(
-  path: string,
-): Promise<
+async function readJsoncDescriptor(path: string): Promise<
   | {
       readonly kind: "valid";
       readonly value: Record<string, unknown>;
