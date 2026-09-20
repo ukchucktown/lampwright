@@ -68,6 +68,37 @@ describe("Session setup CLI", () => {
     ]);
   });
 
+  it("supports Enable and a read-only dry run", async () => {
+    const snapshot = buildSessionSetupSnapshot();
+    const execute = vi.fn(
+      async (
+        _plan: SessionSetupPlan,
+        _approvals: {
+          readonly grants: readonly import("../src/session-setup/types.js").SetupApproval[];
+        },
+      ): Promise<SessionSetupReport> => {
+        void _plan;
+        void _approvals;
+        return buildSessionSetupReport();
+      },
+    );
+    const enabled = await runCli(
+      ["enable", "setup:setup-target-1", "--harness", "codex", "--yes"],
+      { scanSessionSetup: async () => snapshot, executeSessionSetup: execute },
+    );
+    expect(enabled.exitCode).toBe(0);
+    expect(execute.mock.calls[0]![0].intent.action).toBe("enable");
+    const dryRun = await runCli(
+      ["disable", "setup:setup-target-1", "--harness", "codex", "--dry-run"],
+      { scanSessionSetup: async () => snapshot, executeSessionSetup: execute },
+    );
+    expect(dryRun).toMatchObject({
+      exitCode: 0,
+      output: { kind: "session-setup-plan" },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects mixed selectors and setup use in legacy verbs before scanning", async () => {
     const scanSessionSetup = vi.fn();
     for (const argv of [
@@ -75,11 +106,64 @@ describe("Session setup CLI", () => {
       ["remove", "setup:one"],
       ["update", "setup:one"],
       ["enable", "setup:one", "--harness", "codex", "--force"],
+      ["enable", "setup:one", "--harness", "codex", "--harness", "codex"],
     ]) {
       const result = await runCli(argv, { scanSessionSetup });
       expect(result.exitCode).toBe(2);
     }
     expect(scanSessionSetup).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-harness target before planning or execution", async () => {
+    const baseline = buildSessionSetupSnapshot();
+    const snapshot = {
+      ...baseline,
+      targets: [{ ...baseline.targets[0]!, harnessId: "claude-code" as const }],
+    };
+    const planSessionSetup = vi.fn();
+    const executeSessionSetup = vi.fn();
+    const result = await runCli(
+      ["disable", "setup:setup-target-1", "--harness", "codex", "--yes"],
+      {
+        scanSessionSetup: async () => snapshot,
+        planSessionSetup,
+        executeSessionSetup,
+      },
+    );
+    expect(result).toMatchObject({
+      exitCode: 2,
+      output: { kind: "session-setup-error", code: "invalid-usage" },
+    });
+    expect(planSessionSetup).not.toHaveBeenCalled();
+    expect(executeSessionSetup).not.toHaveBeenCalled();
+  });
+
+  it("keeps missing IDs blocked and maps execution outcomes to stable exits", async () => {
+    const snapshot = buildSessionSetupSnapshot();
+    const missing = await runCli(
+      ["disable", "setup:stale", "--harness", "codex", "--dry-run"],
+      { scanSessionSetup: async () => snapshot },
+    );
+    expect(missing).toMatchObject({
+      exitCode: 3,
+      output: { kind: "session-setup-plan" },
+    });
+    for (const [status, exitCode] of [
+      ["unchanged", 0],
+      ["blocked", 3],
+      ["partial", 1],
+      ["failed", 1],
+    ] as const) {
+      const result = await runCli(
+        ["disable", "setup:setup-target-1", "--harness", "codex", "--yes"],
+        {
+          scanSessionSetup: async () => snapshot,
+          executeSessionSetup: async () =>
+            buildSessionSetupReport({ status } as never),
+        },
+      );
+      expect(result.exitCode).toBe(exitCode);
+    }
   });
 
   it("publishes and parses setup confirmation and error envelopes", async () => {
@@ -105,6 +189,44 @@ describe("Session setup CLI", () => {
       output: { kind: "session-setup-error", code: "operational-error" },
     });
     expect(parseSessionSetupPublicValue(failed.output).kind).toBe(
+      "session-setup-error",
+    );
+    const invalid = await runCli(["disable", "setup:one", "--harness"]);
+    expect(invalid).toMatchObject({
+      exitCode: 2,
+      output: { kind: "session-setup-error", code: "invalid-usage" },
+    });
+    expect(parseSessionSetupPublicValue(invalid.output).kind).toBe(
+      "session-setup-error",
+    );
+  });
+
+  it("refuses production execution with injected setup dependencies", async () => {
+    const result = await runCli(
+      ["disable", "setup:setup-target-1", "--harness", "codex", "--yes"],
+      { scanSessionSetup: async () => buildSessionSetupSnapshot() },
+    );
+    expect(result).toMatchObject({
+      exitCode: 1,
+      output: { kind: "session-setup-error", code: "operational-error" },
+    });
+  });
+
+  it("returns a schema-valid failure when native setup execution fails", async () => {
+    const result = await runCli(
+      ["disable", "setup:setup-target-1", "--harness", "codex", "--yes"],
+      {
+        scanSessionSetup: async () => buildSessionSetupSnapshot(),
+        executeSessionSetup: async () => {
+          throw new Error("native configuration commit failed");
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      exitCode: 1,
+      output: { kind: "session-setup-error", code: "operational-error" },
+    });
+    expect(parseSessionSetupPublicValue(result.output).kind).toBe(
       "session-setup-error",
     );
   });

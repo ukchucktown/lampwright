@@ -191,6 +191,12 @@ export async function runCli(
   try {
     parsed = parseArguments(argv);
   } catch (error: unknown) {
+    if (isSessionSetupInvocation(argv))
+      return sessionSetupError(
+        "invalid-usage",
+        error instanceof Error ? error.message : String(error),
+        2,
+      );
     return failure(
       "invalid-usage",
       error instanceof Error ? error.message : String(error),
@@ -226,21 +232,14 @@ export async function runCli(
     return failure("invalid-usage", "unknown command", 2);
   } catch (error: unknown) {
     const setupInvocation =
-      parsed?.sessionSetup === true ||
-      argv.includes("--session-setup") ||
-      argv.some((value) => value.startsWith("setup:"));
+      parsed?.sessionSetup === true || isSessionSetupInvocation(argv);
     if (setupInvocation)
-      return result(
-        {
-          schemaVersion: 1,
-          kind: "session-setup-error",
-          code:
-            error instanceof PlanningError
-              ? "target-not-found"
-              : "operational-error",
-          message: error instanceof Error ? error.message : String(error),
-        },
-        error instanceof PlanningError ? 3 : parsed === undefined ? 2 : 1,
+      return sessionSetupError(
+        error instanceof PlanningError
+          ? "target-not-found"
+          : "operational-error",
+        error instanceof Error ? error.message : String(error),
+        error instanceof PlanningError ? 3 : 1,
       );
     if (error instanceof AdapterTrustRequiredError)
       return result(
@@ -307,6 +306,7 @@ function parseArguments(argv: readonly string[]): Parsed {
     includePlugins = false,
     sessionSetup = false;
   let harness: SetupHarnessId | undefined;
+  let harnessCount = 0;
   let workspace: string | undefined;
   let command: Parsed["command"] = "help";
   const first = argv[0];
@@ -374,6 +374,7 @@ function parseArguments(argv: readonly string[]): Parsed {
         requested !== "gemini-cli"
       )
         throw new Error("--harness requires codex, claude-code, or gemini-cli");
+      harnessCount += 1;
       harness = requested;
     } else if (value === "--workspace") {
       const requested = argv[++index];
@@ -413,6 +414,7 @@ function parseArguments(argv: readonly string[]): Parsed {
   )
     throw new Error("scan accepts only --json, --adapter, and --trust-adapter");
   const setupSelectors = values.filter((value) => value.startsWith("setup:"));
+  if (harnessCount > 1) throw new Error("--harness may be supplied only once");
   if (sessionSetup && command !== "scan")
     throw new Error("--session-setup is valid only for scan");
   if (
@@ -793,6 +795,21 @@ async function sessionSetup(
       ? missingSessionSetupRef(id)
       : sessionSetupRef(target);
   }) as [SessionSetupTargetRef, ...SessionSetupTargetRef[]];
+  const crossHarness = args.values
+    .map((selector) =>
+      snapshot.targets.find(
+        (target) => target.id === selector.slice("setup:".length),
+      ),
+    )
+    .find(
+      (target) => target !== undefined && target.harnessId !== args.harness,
+    );
+  if (crossHarness !== undefined)
+    return sessionSetupError(
+      "invalid-usage",
+      `setup target ${crossHarness.id} belongs to ${crossHarness.harnessId}, not requested harness ${args.harness}`,
+      2,
+    );
   const planner = dependencies.planSessionSetup ?? planSessionSetup;
   const plan = planner(snapshot, {
     schemaVersion: 1,
@@ -817,6 +834,14 @@ async function sessionSetup(
   const approvals = {
     grants: plan.actions.flatMap((action) => action.approvals),
   };
+  if (
+    dependencies.executeSessionSetup === undefined &&
+    (dependencies.scanSessionSetup !== undefined ||
+      dependencies.planSessionSetup !== undefined)
+  )
+    throw new Error(
+      "executeSessionSetup must be injected with Session setup CLI scan or Planning dependencies",
+    );
   const report =
     dependencies.executeSessionSetup === undefined
       ? await productionExecuteSessionSetup(plan, args)
@@ -909,6 +934,24 @@ function sessionSetupExitCode(report: SessionSetupReport): number {
     : report.status === "blocked"
       ? 3
       : 1;
+}
+
+function isSessionSetupInvocation(argv: readonly string[]): boolean {
+  return (
+    argv.includes("--session-setup") ||
+    argv.some((value) => value.startsWith("setup:"))
+  );
+}
+
+function sessionSetupError(
+  code: string,
+  message: string,
+  exitCode: number,
+): CliResult {
+  return result(
+    { schemaVersion: 1, kind: "session-setup-error", code, message },
+    exitCode,
+  );
 }
 
 function availabilityGrants(
@@ -1789,6 +1832,32 @@ function humanSessionSetupPlan(plan: unknown): string {
   const lines = [
     `Session setup plan: ${targets.length} target(s), ${Array.isArray(plan.actions) ? plan.actions.length : 0} native action(s), ${blocks.length} block(s).`,
   ];
+  for (const target of targets) {
+    const source = isRecord(target.source) ? target.source : null;
+    lines.push(
+      `- Target: ${String(target.name)} (setup:${String(target.id)}; ${String(target.kind)}; harness ${String(target.harnessId)}; source ${source?.sourceId ?? "unknown"}).`,
+    );
+  }
+  const actions = Array.isArray(plan.actions)
+    ? plan.actions.filter(isRecord)
+    : [];
+  for (const action of actions) {
+    const mutations = Array.isArray(action.mutations)
+      ? action.mutations.filter(isRecord)
+      : [];
+    for (const mutation of mutations) {
+      const authority = isRecord(mutation.authority)
+        ? mutation.authority
+        : null;
+      const source =
+        authority !== null && isRecord(authority.source)
+          ? authority.source
+          : null;
+      lines.push(
+        `- Native effect: ${String(mutation.kind)} selector ${String(mutation.selectorId)} sets policy ${String(mutation.policy)}${source === null ? "" : ` in source ${String(source.sourceId)}`}.`,
+      );
+    }
+  }
   for (const warning of warnings) {
     if (warning.kind === "control-scope" && isRecord(warning.scope))
       lines.push(
@@ -1808,7 +1877,7 @@ function humanSessionSetupPlan(plan: unknown): string {
       );
     else if (warning.kind === "owner-alternative")
       lines.push(
-        "- Owner alternative is available; select the owner explicitly for a separate review.",
+        `- Owner alternative: select ${isRecord(warning.owner) ? `setup:${String(warning.owner.targetId)}` : "the owner"} explicitly for a separate review.`,
       );
   }
   for (const target of targets)
