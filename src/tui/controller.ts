@@ -2264,7 +2264,10 @@ export function refreshedSetupHarnessModels(
     ["codex", "claude-code", "gemini-cli"] as const
   ).entries()) {
     const previous =
-      prior.setupHarnessStates?.[view]?.[harness] ?? priorView?.model;
+      prior.setupHarnessStates?.[view]?.[harness] ??
+      (priorView !== undefined && setupHarness(priorView.model) === harness
+        ? priorView.model
+        : undefined);
     result[harness] = preserveBrowseModel(
       previous ?? createBrowseModel(sections, prior.model.viewport),
       sections,

@@ -101,6 +101,47 @@ function mixedStateSnapshot() {
   } as typeof snapshot;
 }
 
+function refreshSnapshots() {
+  const base = twoHarnessSnapshot();
+  const codex = base.targets[0]!;
+  const claude = base.targets[1]!;
+  const disabled = {
+    ...codex,
+    id: "disabled-setup-target",
+    name: "disabled-skill",
+    state: { ...codex.state, effectiveWorkspaceState: "disabled" as const },
+  };
+  const initial = {
+    ...base,
+    targets: [codex, claude, disabled],
+    sources: [
+      {
+        ...base.sources[0]!,
+        targetIds: [codex.id, disabled.id],
+        collateralTargetIds: [codex.id, disabled.id],
+      },
+      base.sources[1]!,
+    ],
+  } as typeof base;
+  return {
+    initial,
+    refreshed: {
+      ...initial,
+      id: "refreshed-setup-snapshot",
+      targets: [claude, disabled],
+      sources: [
+        {
+          ...initial.sources[0]!,
+          targetIds: [disabled.id],
+          collateralTargetIds: [disabled.id],
+        },
+        initial.sources[1]!,
+      ],
+      legacyInventory: buildInventory(),
+    } as typeof initial,
+  };
+}
+
 describe("Session setup terminal area", () => {
   it("opens an explicit unavailable area when the host has no setup provider", async () => {
     const controller = new TuiController({
@@ -664,5 +705,76 @@ describe("Session setup terminal area", () => {
         expect(executeSessionSetup).not.toHaveBeenCalled();
       }
     }
+  });
+
+  it("refreshes every setup view and harness model while preserving only surviving selections", async () => {
+    const { initial, refreshed } = refreshSnapshots();
+    const scanSessionSetup = vi
+      .fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(refreshed);
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup,
+      planSessionSetup: () => buildSessionSetupPlan(),
+      executeSessionSetup: async () => buildSessionSetupReport(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "focus", pane: "sections" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "switch-view", view: "disabled" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "disable-review" });
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForSetupExecution();
+    expect(controller.state.screen).toBe("setup-report");
+    await controller.dispatch({ kind: "select" });
+
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.inventory).toBe(refreshed.legacyInventory);
+    expect(controller.state.setupInventory).toBe(refreshed);
+    expect(controller.state.areaSnapshots).toBeUndefined();
+    expect(controller.state.viewSnapshots?.inventory?.setupInventory).toBe(
+      refreshed,
+    );
+    expect(controller.state.viewSnapshots?.disabled?.setupInventory).toBe(
+      refreshed,
+    );
+    const harnessStates = controller.state.setupHarnessStates;
+    expect(harnessStates).toBeDefined();
+    expect(harnessStates?.inventory?.codex?.selected).toEqual(new Set());
+    expect(harnessStates?.inventory?.["claude-code"]?.selected).toEqual(
+      new Set(["setup:claude-target"]),
+    );
+    expect(harnessStates?.disabled?.codex?.selected).toEqual(
+      new Set(["setup:disabled-setup-target"]),
+    );
+    expect(controller.state.model).toEqual(harnessStates?.disabled?.codex);
+    for (const view of ["inventory", "disabled"] as const)
+      for (const harness of ["codex", "claude-code", "gemini-cli"] as const) {
+        const model = harnessStates?.[view]?.[harness];
+        expect(model).toBeDefined();
+        if (!(
+          (view === "inventory" && harness === "claude-code") ||
+          (view === "disabled" && harness === "codex")
+        ))
+          expect(model?.selected).toEqual(new Set());
+        expect(
+          model?.sections
+            .flatMap((section) => section.entries)
+            .map((entry) => entry.key),
+        ).not.toContain("setup:setup-target-1");
+      }
   });
 });
