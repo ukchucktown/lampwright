@@ -1311,19 +1311,30 @@ export class TuiController {
     if (action.kind === "select") {
       const entry = currentEntry(state.model);
       if (entry?.lifecycleDisabledKey !== undefined) {
-        await this.openView({ ...state, area: "skills" }, "disabled");
+        await this.openArea(state, "skills");
         if (this.stateValue.screen === "browse") {
-          const index = this.stateValue.model.sections
-            .flatMap((section) => section.entries)
-            .findIndex(
-              (candidate) => candidate.key === entry.lifecycleDisabledKey,
-            );
+          await this.openView(this.stateValue, "disabled");
+        }
+        if (this.stateValue.screen === "browse") {
+          const sectionIndex = this.stateValue.model.sections.findIndex(
+            (section) =>
+              section.entries.some(
+                (candidate) => candidate.key === entry.lifecycleDisabledKey,
+              ),
+          );
+          const index =
+            sectionIndex < 0
+              ? -1
+              : this.stateValue.model.sections[sectionIndex]!.entries.findIndex(
+                  (candidate) => candidate.key === entry.lifecycleDisabledKey,
+                );
           if (index >= 0)
             this.stateValue = {
               ...this.stateValue,
               model: {
                 ...this.stateValue.model,
                 focus: "entries",
+                sectionIndex,
                 entryIndex: index,
               },
             };

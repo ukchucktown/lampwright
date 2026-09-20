@@ -2168,6 +2168,14 @@ function entryCell(
 }
 
 function disabledCount(state: TuiBrowseState): number {
+  if (state.area === "setup")
+    return state.view === "disabled"
+      ? (state.model.sections[state.model.sectionIndex]?.entries.filter(
+          (entry) => entry.rowKind !== "heading",
+        ).length ?? 0)
+      : (state.viewSnapshots?.disabled?.model.sections[
+          state.model.sectionIndex
+        ]?.entries.filter((entry) => entry.rowKind !== "heading").length ?? 0);
   if (state.view === "disabled") return disabledRows(state.model.sections);
   const snapshot = state.viewSnapshots?.disabled;
   if (snapshot !== undefined) return disabledRows(snapshot.model.sections);
