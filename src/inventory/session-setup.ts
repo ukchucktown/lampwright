@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { parse as parseToml } from "@iarna/toml";
+import { parse as parseJsonc, parseTree, type ParseError } from "jsonc-parser";
 
 import { CODEX_PLUGIN_ADAPTER_ID } from "../adapter/built-ins.js";
 import {
@@ -26,6 +28,7 @@ import type {
 import { recoveredSourceProfiles } from "../session-setup/profiles.js";
 import { parseSessionSetupSnapshot } from "../session-setup/validation.js";
 import { readAvailabilityDocument } from "./availability-evidence.js";
+import { hasDuplicateKeys, readStableRegularFile } from "./evidence.js";
 import {
   createInventoryScanner,
   defaultInventoryScanEnvironment,
@@ -237,8 +240,18 @@ async function scanCodexSessionSetup(
     (item) =>
       item.adapterId === CODEX_PLUGIN_ADAPTER_ID && pluginTargets.has(item.id),
   )) {
-    const descriptor = await pluginDescriptor(plugin, options.commandRunner);
+    const descriptor = await pluginDescriptor(plugin);
     const owner = { kind: "plugin" as const, pluginBoundaryId: plugin.id };
+    for (const result of descriptor.sources)
+      addSource(
+        result.kind,
+        { kind: "user" },
+        `codex:plugin-descriptor:${plugin.id}:${result.resourceId}:${result.kind}`,
+        [],
+        result.status,
+        result.reason,
+        result.path,
+      );
     for (const [serverKey] of entries(descriptor.mcp)) {
       const id = stableId("setup-plugin-mcp", plugin.id, serverKey);
       const source = addSource(
@@ -654,50 +667,123 @@ function entries(value: unknown): readonly [string, Record<string, unknown>][] {
       })
     : [];
 }
-async function pluginDescriptor(
-  plugin: PluginBoundary,
-  runner: InventoryCommandRunner,
-): Promise<{
+async function pluginDescriptor(plugin: PluginBoundary): Promise<{
   readonly mcp: Record<string, unknown>;
   readonly apps: Record<string, unknown>;
   readonly path: string | null;
+  readonly sources: readonly DescriptorSourceResult[];
 }> {
-  const paths = plugin.resources
-    .filter(
-      (resource) =>
-        resource.kind === "configuration" &&
-        ["mcp-servers", "apps", "plugin-manifest"].includes(resource.id),
-    )
-    .map((resource) => resource.location?.path)
-    .filter((path): path is string => path !== null);
   const combined: {
     mcp: Record<string, unknown>;
     apps: Record<string, unknown>;
   } = { mcp: {}, apps: {} };
   let descriptorPath: string | null = null;
-  for (const path of paths) {
-    const read = await readAvailabilityDocument(
-      path,
-      "json",
-      { kind: "user" },
-      "user",
-      true,
-      runner,
-    );
-    if (read.unsafe || read.text === null) continue;
-    try {
-      const value = record(JSON.parse(read.text));
-      descriptorPath ??= path;
+  const sources: DescriptorSourceResult[] = [];
+  for (const resource of plugin.resources.filter(
+    (item) =>
+      item.kind === "configuration" &&
+      ["mcp-servers", "apps", "plugin-manifest"].includes(item.id),
+  )) {
+    const kinds = [
+      ...(resource.id === "apps" || resource.id === "plugin-manifest"
+        ? (["app-binding"] as const)
+        : []),
+      ...(resource.id === "mcp-servers" || resource.id === "plugin-manifest"
+        ? (["mcp-registration"] as const)
+        : []),
+    ];
+    const path = resource.location?.path ?? null;
+    const read =
+      path === null
+        ? {
+            kind: "incomplete" as const,
+            reason: "the installed Owner declares a descriptor that is missing",
+            value: null,
+          }
+        : await readJsoncDescriptor(path);
+    for (const kind of kinds)
+      sources.push({
+        kind,
+        resourceId: resource.id,
+        path,
+        status: read.kind === "valid" ? "success" : read.kind,
+        reason: read.kind === "valid" ? null : read.reason,
+      });
+    if (read.kind !== "valid" || read.value === null) continue;
+    descriptorPath ??= path;
+    if (resource.id === "mcp-servers") {
       Object.assign(
         combined.mcp,
-        record(value?.mcpServers) ?? record(value?.mcp_servers) ?? {},
+        record(read.value.mcpServers) ??
+          record(read.value.mcp_servers) ??
+          read.value,
       );
-      Object.assign(combined.apps, record(value?.apps) ?? {});
-    } catch {
-      /* an invalid descriptor remains non-actionable */
+    } else {
+      Object.assign(combined.mcp, record(read.value.mcpServers) ?? {});
+      Object.assign(combined.apps, record(read.value.apps) ?? {});
     }
   }
-  return { ...combined, path: descriptorPath };
+  return { ...combined, path: descriptorPath, sources };
+}
+interface DescriptorSourceResult {
+  readonly kind: "mcp-registration" | "app-binding";
+  readonly resourceId: string;
+  readonly path: string | null;
+  readonly status: "success" | "invalid" | "incomplete";
+  readonly reason: string | null;
+}
+async function readJsoncDescriptor(
+  path: string,
+): Promise<
+  | {
+      readonly kind: "valid";
+      readonly value: Record<string, unknown>;
+      readonly reason: null;
+    }
+  | {
+      readonly kind: "invalid" | "incomplete";
+      readonly value: null;
+      readonly reason: string;
+    }
+> {
+  const initial = await lstat(path).catch(() => null);
+  if (initial === null)
+    return {
+      kind: "incomplete",
+      value: null,
+      reason: "the declared descriptor is missing",
+    };
+  if (!initial.isFile() || initial.isSymbolicLink() || initial.nlink !== 1)
+    return {
+      kind: "incomplete",
+      value: null,
+      reason: "the declared descriptor is not a safe regular file",
+    };
+  const stable = await readStableRegularFile(path, initial);
+  if (stable === null)
+    return {
+      kind: "incomplete",
+      value: null,
+      reason: "the declared descriptor changed while read",
+    };
+  const errors: ParseError[] = [];
+  const tree = parseTree(stable.bytes.toString("utf8"), errors, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  });
+  const value = record(parseJsonc(stable.bytes.toString("utf8")));
+  if (
+    tree === undefined ||
+    errors.length > 0 ||
+    hasDuplicateKeys(tree) ||
+    value === null
+  )
+    return {
+      kind: "invalid",
+      value: null,
+      reason: "the declared descriptor is malformed or has duplicate keys",
+    };
+  return { kind: "valid", value, reason: null };
 }
 function completeSelectors(
   targets: readonly SessionSetupTarget[],

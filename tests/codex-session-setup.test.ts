@@ -115,6 +115,22 @@ describe("Codex Session setup Inventory", () => {
     expect(
       snapshot.targets.find((target) => target.kind === "plugin")?.owner,
     ).toEqual(expect.objectContaining({ kind: "plugin" }));
+    expect(
+      snapshot.sources.filter((source) =>
+        source.source.sourceId.includes("plugin-descriptor"),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "app-binding",
+          status: "success",
+          reason: null,
+          source: expect.objectContaining({
+            path: join(pluginRoot, ".app.json"),
+          }),
+        }),
+      ]),
+    );
   });
 });
 
