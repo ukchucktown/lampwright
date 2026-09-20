@@ -1260,7 +1260,34 @@ export class TuiController {
     }
     const command = browseCommand(action);
     if (command !== null) {
-      this.stateValue = { ...state, model: reduceBrowse(state.model, command) };
+      const next = reduceBrowse(state.model, command);
+      const previousHarness = setupHarness(state.model);
+      const nextHarness = setupHarness(next);
+      if (
+        previousHarness !== null &&
+        nextHarness !== null &&
+        previousHarness !== nextHarness
+      ) {
+        const view = state.view === "disabled" ? "disabled" : "inventory";
+        const setupHarnessStates = {
+          ...(state.setupHarnessStates ?? {}),
+          [view]: {
+            ...(state.setupHarnessStates?.[view] ?? {}),
+            [previousHarness]: state.model,
+          },
+        };
+        const restored = setupHarnessStates[view]?.[nextHarness];
+        this.stateValue = {
+          ...state,
+          model:
+            restored === undefined
+              ? next
+              : { ...restored, sectionIndex: next.sectionIndex },
+          setupHarnessStates,
+        };
+        return;
+      }
+      this.stateValue = { ...state, model: next };
       return;
     }
     if (
@@ -1279,6 +1306,16 @@ export class TuiController {
     const targets = snapshot.targets.filter((target) =>
       ids.includes(target.id),
     );
+    if (new Set(targets.map((target) => target.harnessId)).size > 1) {
+      this.stateValue = {
+        ...state,
+        model: {
+          ...state.model,
+          notice: "Setup actions require targets from one harness.",
+        },
+      };
+      return;
+    }
     if (!targets.length) {
       this.stateValue = {
         ...state,
@@ -1596,6 +1633,9 @@ function browseSnapshot(state: TuiBrowseState): TuiBrowseSnapshot {
     ...(state.viewSnapshots === undefined
       ? {}
       : { viewSnapshots: state.viewSnapshots }),
+    ...(state.setupHarnessStates === undefined
+      ? {}
+      : { setupHarnessStates: state.setupHarnessStates }),
   };
 }
 
@@ -1612,6 +1652,9 @@ function viewSnapshot(state: TuiBrowseState): TuiViewSnapshot {
     ...(state.disabledEntries === undefined
       ? {}
       : { disabledEntries: state.disabledEntries }),
+    ...(state.setupHarnessStates === undefined
+      ? {}
+      : { setupHarnessStates: state.setupHarnessStates }),
   };
 }
 
@@ -2029,4 +2072,17 @@ function updateTargetLabel(inventory: Inventory, target: UpdateTarget): string {
 function movedCursor(current: number, length: number, delta: number): number {
   if (length === 0) return 0;
   return (current + delta + length) % length;
+}
+
+function setupHarness(
+  model: TuiBrowseState["model"],
+): import("../session-setup/types.js").SetupHarnessId | null {
+  const key = model.sections[model.sectionIndex]?.key;
+  return key === "setup:codex"
+    ? "codex"
+    : key === "setup:claude-code"
+      ? "claude-code"
+      : key === "setup:gemini-cli"
+        ? "gemini-cli"
+        : null;
 }

@@ -35,6 +35,7 @@ import type {
   SessionSetupPlan,
   SessionSetupReport,
   SessionSetupSnapshot,
+  SetupHarnessId,
 } from "../session-setup/types.js";
 
 export interface TuiDependencies {
@@ -213,6 +214,12 @@ export interface TuiViewSnapshot {
   readonly view?: TuiBrowseView;
   readonly operations?: ReadonlyMap<string, QuarantineOperation>;
   readonly disabledEntries?: readonly DisabledEntry[];
+  readonly setupHarnessStates?: Partial<
+    Record<
+      "inventory" | "disabled",
+      Partial<Record<SetupHarnessId, TuiBrowseModel>>
+    >
+  >;
 }
 
 export interface TuiBrowseSnapshot extends TuiViewSnapshot {
