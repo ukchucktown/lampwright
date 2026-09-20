@@ -278,7 +278,10 @@ async function scanCodexSessionSetup(
         source,
         owner: { kind: "standalone" },
         definitionScope: document.scope,
-        state: stateFromEnabled(objectAt(value, ["enabled"])),
+        state: stateFromEnabled(
+          objectAt(value, ["enabled"]),
+          document.scope.kind === "workspace" && request.workspaceTrusted !== true,
+        ),
         control: mcpControl(
           serverKey,
           source,
@@ -699,7 +702,10 @@ function unavailablePathControl(
     },
   };
 }
-function stateFromEnabled(value: unknown): SetupConfiguredState {
+function stateFromEnabled(
+  value: unknown,
+  effectiveUnresolved = false,
+): SetupConfiguredState {
   const policy =
     value === false
       ? "disabled"
@@ -708,7 +714,7 @@ function stateFromEnabled(value: unknown): SetupConfiguredState {
         : "unresolved";
   return {
     policy,
-    effectiveWorkspaceState: policy,
+    effectiveWorkspaceState: effectiveUnresolved ? "unresolved" : policy,
     accountState: "unknown",
     liveSessionState: "unknown",
   };
