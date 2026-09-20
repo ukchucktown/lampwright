@@ -4,7 +4,7 @@ This document defines the native profiles that the [Session setup plan](./sessio
 
 ## Evidence and qualification
 
-The recovered baselines are Codex `0.154.0`, Claude Code `2.1.270`, and Gemini CLI `0.59.0`. The old standalone Codex work also references `0.46.0`. The new increment does not require that older profile. Existing Skill and complete-Plugin controls remain documented in [Native availability controls](./availability-controls.md).
+The recovered baselines are Codex `0.154.0`, Claude Code `2.1.270`, and Gemini CLI `0.59.0`. The old standalone Codex work also references `0.46.0`. The new increment does not require that older profile. Existing Skill and complete-Plugin controls remain documented in [Native availability controls](./availability-controls.md). The qualified Codex profile is a CLI profile. Compatible desktop behavior remains a documented gap until separate desktop evidence qualifies it.
 
 Every new profile records the harness/client surface, exact source version or schema signature, precedence, trust, definition scope, control scope, native selector, effects, activation boundary, and isolated fixture coverage. A CLI version alone does not prove the desktop runtime's capabilities. An unknown runtime or unsupported document shape keeps affected operations unavailable. Readable declarations may remain inspectable.
 

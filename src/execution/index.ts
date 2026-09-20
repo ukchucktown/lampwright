@@ -2,6 +2,8 @@ export { createExecutionModule } from "./module.js";
 export { systemExecutionProcessRunner } from "./process.js";
 export {
   createSessionSetupConfigurationWriter,
+  createCodexSessionSetupConfigurationEditor,
+  createCodexSessionSetupConfigurationWriter,
   type SessionSetupConfigurationEditor,
 } from "./availability-documents.js";
 export {

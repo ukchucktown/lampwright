@@ -6,14 +6,9 @@ import { parse as parseToml } from "@iarna/toml";
 import { parse as parseJsonc, parseTree, type ParseError } from "jsonc-parser";
 
 import { CODEX_PLUGIN_ADAPTER_ID } from "../adapter/built-ins.js";
-import {
-  createSessionSetupConfigurationWriter,
-  type SessionSetupConfigurationEditor,
-} from "../execution/availability-documents.js";
 import { stringifyModel } from "../model/json.js";
 import type { PluginBoundary } from "../model/types.js";
 import type {
-  SessionSetupConfigurationRequest,
   SessionSetupScanRequest,
   SessionSetupScanner,
   SessionSetupSnapshot,
@@ -280,7 +275,8 @@ async function scanCodexSessionSetup(
         definitionScope: document.scope,
         state: stateFromEnabled(
           objectAt(value, ["enabled"]),
-          document.scope.kind === "workspace" && request.workspaceTrusted !== true,
+          document.scope.kind === "workspace" &&
+            request.workspaceTrusted !== true,
         ),
         control: mcpControl(
           serverKey,
@@ -943,98 +939,3 @@ function completeSelectors(
 }
 
 /** A checked TOML editor for only the four Codex availability selectors. */
-export function createCodexSessionSetupConfigurationEditor(): SessionSetupConfigurationEditor {
-  return { edit: (text, request) => editCodexToml(text, request) };
-}
-export const createCodexSessionSetupConfigurationWriter = () =>
-  createSessionSetupConfigurationWriter(
-    createCodexSessionSetupConfigurationEditor(),
-  );
-function editCodexToml(
-  text: string,
-  request: SessionSetupConfigurationRequest,
-): string {
-  parseToml(text);
-  let updated = text;
-  for (const mutation of request.mutations) {
-    const selector = request.selectors.find(
-      (item) => item.id === mutation.selectorId,
-    );
-    if (!selector)
-      throw new Error(
-        "Codex mutation selector is absent from its checked request",
-      );
-    const path =
-      selector.kind === "skill-path"
-        ? ["skills", "config"]
-        : selector.kind === "plugin-id"
-          ? ["plugins", selector.pluginId]
-          : selector.kind === "mcp-server-key"
-            ? selector.policyOwner.kind === "plugin"
-              ? [
-                  "plugins",
-                  selector.policyOwner.pluginId,
-                  "mcp_servers",
-                  selector.serverKey,
-                ]
-              : ["mcp_servers", selector.serverKey]
-            : ["apps", selector.connectorId];
-    updated = setTomlEnabled(
-      updated,
-      path,
-      mutation.policy === "enabled",
-      selector.kind === "skill-path" ? selector.path : null,
-    );
-  }
-  parseToml(updated);
-  return updated;
-}
-function setTomlEnabled(
-  text: string,
-  path: readonly string[],
-  enabled: boolean,
-  skillPath: string | null,
-): string {
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const lines = text.split(/\r?\n/u);
-  const header = `[${path.map((part, index) => (index === 0 ? part : JSON.stringify(part))).join(".")}]`;
-  let start = lines.findIndex((line) => line.trim() === header);
-  if (skillPath !== null) {
-    const existing = lines.findIndex(
-      (line, index) =>
-        line.trim() === "[[skills.config]]" &&
-        lines
-          .slice(index + 1)
-          .some(
-            (candidate) =>
-              candidate.trim() === `path = ${JSON.stringify(skillPath)}`,
-          ),
-    );
-    start = existing;
-  }
-  if (start < 0) {
-    const suffix = text.length === 0 || text.endsWith("\n") ? "" : eol;
-    const table =
-      skillPath === null
-        ? `${header}${eol}`
-        : `[[skills.config]]${eol}path = ${JSON.stringify(skillPath)}${eol}`;
-    return `${text}${suffix}${table}enabled = ${enabled}${eol}`;
-  }
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1)
-    if (/^\s*\[/u.test(lines[index]!)) {
-      end = index;
-      break;
-    }
-  const matches: number[] = [];
-  for (let index = start + 1; index < end; index += 1)
-    if (/^\s*enabled\s*=/u.test(lines[index]!)) matches.push(index);
-  if (matches.length > 1) throw new Error("Codex enabled setting is ambiguous");
-  if (matches.length === 1)
-    lines[matches[0]!] = lines[matches[0]!]!.replace(
-      /^(\s*enabled\s*=\s*)(true|false)(\s*(?:#.*)?)$/u,
-      `$1${enabled}$3`,
-    );
-  else lines.splice(start + 1, 0, `enabled = ${enabled}`);
-  return lines.join(eol);
-}

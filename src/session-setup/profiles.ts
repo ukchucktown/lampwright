@@ -22,6 +22,9 @@ const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
       "app",
       "shared-connector",
       "owner-gate",
+      "trusted-workspace-precedence",
+      "native-enable-disable",
+      "checked-writer-preservation-race",
     ],
     supportedTargetKinds: [
       "skill-exposure",

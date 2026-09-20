@@ -7,8 +7,6 @@ export { InventoryScanError } from "./types.js";
 export {
   createSessionSetupScanner,
   scanSessionSetup,
-  createCodexSessionSetupConfigurationEditor,
-  createCodexSessionSetupConfigurationWriter,
 } from "./session-setup.js";
 export type {
   DiscoveryRoot,
