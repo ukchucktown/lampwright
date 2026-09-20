@@ -16,6 +16,7 @@ import {
 import { createSetupSections } from "../src/tui/setup.js";
 import {
   buildInventory,
+  buildSessionSetupIntent,
   buildInstallation,
   buildSessionSetupPlan,
   buildSessionSetupReport,
@@ -541,5 +542,127 @@ describe("Session setup terminal area", () => {
     expect(renderTui(controller.state)).toContain("unsupported-control");
     await controller.dispatch({ kind: "confirm" });
     expect(executeSessionSetup).not.toHaveBeenCalled();
+  });
+
+  it("replans an owner gate for exactly its owner and cancels to the saved browse model", async () => {
+    const owner = {
+      kind: "skill-exposure" as const,
+      targetId: "owner-target",
+      installationId: "owner-installation",
+    };
+    const ownerTarget = buildSessionSetupTarget({
+      id: owner.targetId,
+      installationId: owner.installationId,
+      name: "Owner Skill",
+    });
+    const ownerGate = {
+      ...buildSessionSetupPlan({
+        intent: buildSessionSetupIntent({ action: "enable" }),
+        actions: [],
+        blocks: [],
+        verifications: [],
+      }),
+      targets: [buildSessionSetupTarget(), ownerTarget],
+      blocks: [
+        {
+          kind: "owner-gate" as const,
+          target: buildSessionSetupIntent().targets[0]!,
+          owner,
+        },
+      ],
+    };
+    const ownerReview = {
+      ...buildSessionSetupPlan({ actions: [], blocks: [], verifications: [] }),
+      intent: buildSessionSetupIntent({
+        action: "enable",
+        targets: [owner],
+      }),
+      targets: [ownerTarget],
+    };
+    const planner = vi
+      .fn()
+      .mockReturnValueOnce(ownerGate)
+      .mockReturnValueOnce(ownerReview);
+    const executeSessionSetup = vi.fn();
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => buildSessionSetupSnapshot(),
+      planSessionSetup: planner,
+      executeSessionSetup,
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    if (controller.state.screen !== "browse") throw new Error();
+    const browseModel = controller.state.model;
+    await controller.dispatch({ kind: "enable-review" });
+    expect(renderTui(controller.state)).toContain(
+      "o owner review · esc cancel",
+    );
+    await controller.dispatch({ kind: "owner-review" });
+    expect(controller.state.screen).toBe("setup-plan");
+    expect(planner).toHaveBeenCalledTimes(2);
+    expect(planner.mock.calls[1]![1]).toMatchObject({
+      action: "enable",
+      harnessId: "codex",
+      targets: [owner],
+    });
+    expect(executeSessionSetup).not.toHaveBeenCalled();
+    await controller.dispatch({ kind: "cancel" });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.model).toEqual(browseModel);
+  });
+
+  it("only confirms unblocked setup plans and renders the matching footer", async () => {
+    const blocked = buildSessionSetupPlan({
+      actions: [],
+      blocks: [
+        {
+          kind: "unsupported-control",
+          target: buildSessionSetupIntent().targets[0]!,
+          reason: "fixture block",
+        },
+      ],
+      verifications: [],
+    });
+    const plannerError = buildSessionSetupPlan({
+      actions: [],
+      errors: [{ kind: "planner", reason: "fixture error" }],
+      verifications: [],
+    });
+    const unblocked = buildSessionSetupPlan();
+    for (const item of [
+      { plan: blocked, footer: "esc cancel", executable: false },
+      { plan: plannerError, footer: "esc cancel", executable: false },
+      { plan: unblocked, footer: "y confirm · esc cancel", executable: true },
+    ]) {
+      const executeSessionSetup = vi.fn(async () => buildSessionSetupReport());
+      const controller = new TuiController({
+        scan: async () => buildInventory(),
+        plan,
+        execute: vi.fn(),
+        scanSessionSetup: async () => buildSessionSetupSnapshot(),
+        planSessionSetup: () => item.plan,
+        executeSessionSetup,
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "switch-area", area: "setup" });
+      await controller.dispatch({ kind: "focus", pane: "entries" });
+      await controller.dispatch({ kind: "move", delta: 1 });
+      await controller.dispatch({ kind: "disable-review" });
+      expect(renderTui(controller.state)).toContain(item.footer);
+      await controller.dispatch({ kind: "confirm" });
+      if (item.executable) {
+        expect(controller.state.screen).toBe("setup-executing");
+        await controller.waitForSetupExecution();
+        expect(executeSessionSetup).toHaveBeenCalledOnce();
+      } else {
+        expect(controller.state.screen).toBe("setup-plan");
+        expect(executeSessionSetup).not.toHaveBeenCalled();
+      }
+    }
   });
 });
