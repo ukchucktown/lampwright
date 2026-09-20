@@ -1933,7 +1933,13 @@ export function renderBrowseLines(
       : model.focus === "detail"
         ? fitStyledSegments(
             state.area === "setup"
-              ? setupControls
+              ? [
+                  { text: "↑↓/wheel", paint: style.title },
+                  { text: " scroll · ", paint: style.muted },
+                  { text: "PgUp/PgDn", paint: style.title },
+                  { text: " page · ", paint: style.muted },
+                  ...setupControls,
+                ]
               : [
                   { text: "↑↓/wheel", paint: style.title },
                   { text: " scroll · ", paint: style.muted },
@@ -1944,17 +1950,19 @@ export function renderBrowseLines(
             style.muted,
           )
         : fitPrioritizedStyledSegments(
-            [
-              ...navigationControls,
-              ...(isDisabled
-                ? []
-                : [
-                    { text: " · enter", paint: style.title },
-                    { text: " remove", paint: style.muted },
-                  ]),
-              { text: " · u", paint: style.title },
-              { text: " update", paint: style.muted },
-            ],
+            state.area === "setup"
+              ? setupControls
+              : [
+                  ...navigationControls,
+                  ...(isDisabled
+                    ? []
+                    : [
+                        { text: " · enter", paint: style.title },
+                        { text: " remove", paint: style.muted },
+                      ]),
+                  { text: " · u", paint: style.title },
+                  { text: " update", paint: style.muted },
+                ],
             navigationControls,
             lifecycleControls,
             updateControls,
@@ -2174,6 +2182,7 @@ function entryCell(
   const nameWidth = Math.max(6, Math.min(44, width - 22));
   const head = `${marker} ${fit(displayName, nameWidth)} `;
   const tail = fit(note, Math.max(0, width - nameWidth - 5));
+  if (entry.rowKind === "heading") return style.title(fit(head + tail, width));
   if (focused) return style.focus(fit(head + tail, width));
   const styledHead = model.selected.has(entry.key)
     ? style.selected(fit(head, nameWidth + 5))
