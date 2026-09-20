@@ -63,6 +63,7 @@ for (const required of [
   "dist/availability/types.d.ts",
   "dist/disabled-storage/types.d.ts",
   "dist/update/index.d.ts",
+  "dist/session-setup/index.d.ts",
   "dist/tui/types.d.ts",
   "dist/testing/index.d.ts",
   "dist/testing/index.js",
@@ -79,6 +80,7 @@ for (const required of [
   "schemas/adapter-v1.schema.json",
   "schemas/adapter-v2.schema.json",
   "schemas/cli-v1.schema.json",
+  "schemas/session-setup-v1.schema.json",
 ]) {
   if (!files.has(required))
     throw new Error(`required package file missing: ${required}`);

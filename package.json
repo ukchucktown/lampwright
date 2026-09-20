@@ -32,7 +32,8 @@
     },
     "./adapter-v1.schema.json": "./schemas/adapter-v1.schema.json",
     "./adapter-v2.schema.json": "./schemas/adapter-v2.schema.json",
-    "./cli-v1.schema.json": "./schemas/cli-v1.schema.json"
+    "./cli-v1.schema.json": "./schemas/cli-v1.schema.json",
+    "./session-setup-v1.schema.json": "./schemas/session-setup-v1.schema.json"
   },
   "files": [
     "CONTEXT.md",
@@ -49,6 +50,7 @@
     "build": "tsc --project tsconfig.build.json",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"schemas/**/*.json\" \".github/**/*.yml\" \"*.{json,js}\"",
+    "generate:session-setup-schema": "npm run build && node scripts/generate-session-setup-schema.mjs",
     "lint": "eslint . --max-warnings 0",
     "pack:check": "npm run build && node scripts/verify-package.mjs",
     "prepack": "npm run build",

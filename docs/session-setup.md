@@ -166,3 +166,38 @@ The retired work ends at [229f8cd](https://github.com/ukchucktown/lampwright/com
 | The unmerged permanent-deletion ADR and operator plan                  | Retired. They grant no authority under this plan.                                                                                                                                 |
 
 The source-profile contract and qualification requirements are in [Session setup controls](./session-setup-controls.md). [ADR 0015](./adr/0015-scope-session-setup-to-native-availability.md) reconciles the legacy boundaries.
+
+Issue #149 publishes `SessionSetupSnapshot` (also exported as
+`SessionSetupInventory`), the four exact `SessionSetupTarget` variants,
+`SessionSetupIntent`, `SessionSetupPlan`, `SessionSetupReport`, and
+`SessionSetupSourceProfile`. The matching parse functions reject unknown fields
+and unsafe cross-record references, then return deeply frozen values. The package
+also includes `session-setup-v1.schema.json`. The recovered Codex 0.154.0, Claude
+Code 2.1.270, and Gemini CLI 0.59.0 profiles are explicitly `fixture-only`. They
+do not claim production discovery or desktop compatibility.
+
+The setup public value is a direct discriminated union. A snapshot carries the
+parsed legacy Inventory, SHA-256 semantic fingerprint, sources, profiles,
+dependencies, typed layers, selectors, and operation authority. Plans can carry
+only checked configuration-policy or structured native-command mutations. They
+cannot represent deletion, credential changes, owner installation, suspension,
+or fallback. The schema generator builds the published JSON Schema from the Zod
+validators. The contract test requires byte-for-value equality with that schema.
+
+The bounded reuse manifest for commit `229f8cd` records deferred guidance.
+Issue #149 implements no recovered inventory or execution code. Later issues
+may review source/owner identity evidence, configuration parsing lessons,
+isolated fixtures, and the writer seam. Issue #149 excludes the abandoned MCP
+lifecycle schema, permanent registration deletion, credential effects, owner
+removal, and fallback orchestration.
+
+| Recovered file at `229f8cd`                           | Status after this increment                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `src/inventory/codex-mcp.ts`                          | Deferred guidance: source and declaration parsing evidence.                                |
+| `src/inventory/claude-gemini-mcp.ts`                  | Deferred guidance: bounded local-source and layer evidence.                                |
+| `src/inventory/package-mcp.ts`                        | Deferred guidance: installed-owner containment evidence.                                   |
+| `src/mcp/identity.ts`                                 | Deferred guidance: exact declaration identity rules.                                       |
+| `src/mcp/redaction.ts`                                | Deferred guidance: public-value secret redaction rules.                                    |
+| `src/execution/*mcp-configuration.ts`                 | Deferred guidance: the comment-preserving configuration-writer seam.                       |
+| `src/planning/mcp.ts` and `src/execution/mcp.ts`      | No code reuse: their delete, credential, fallback, and owner-removal workflow is excluded. |
+| `src/mcp/schemas.ts` and `schemas/mcp-v1.schema.json` | No reuse: the retired permanent-delete schema is not published.                            |

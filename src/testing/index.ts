@@ -19,3 +19,10 @@ export type {
   PluginBoundaryFixtureOverrides,
   RemovalPlanFixtureOverrides,
 } from "./model-builders.js";
+export {
+  buildSessionSetupIntent,
+  buildSessionSetupPlan,
+  buildSessionSetupReport,
+  buildSessionSetupSnapshot,
+  buildSessionSetupTarget,
+} from "./session-setup-builders.js";
