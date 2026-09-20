@@ -1,7 +1,7 @@
 import type { SessionSetupSourceProfile } from "./types.js";
 import { parseSessionSetupSourceProfile } from "./validation.js";
 
-/** Qualified local terminal baselines plus fixture-only pending profiles. */
+/** Qualified local terminal baselines. */
 const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
   {
     id: "codex-0.154.0",
@@ -78,13 +78,23 @@ const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
     clientSurface: "cli",
     sourceVersion: "0.59.0",
     sourceSignature: "settings.json-native-availability",
-    qualification: "fixture-only",
+    qualification: "qualified",
     definitionScopes: ["user", "workspace", "agent"],
     precedence: ["trusted-workspace", "user"],
     trust: "unknown",
     offlineProbe: "metadata-only",
     activation: "new-session",
-    fixtureCoverage: ["skill", "plugin", "mcp", "unavailable-account-source"],
+    fixtureCoverage: [
+      "skill-disabled-name-union",
+      "trusted-workspace-applicability",
+      "extension-workspace-override",
+      "extension-mcp",
+      "mcp-user-wide-selector",
+      "owner-gate",
+      "native-enable-disable",
+      "unavailable-account-source",
+      "checked-writer-preservation-race",
+    ],
     supportedTargetKinds: ["skill-exposure", "plugin", "mcp-registration"],
     controlScopeKinds: ["user", "workspace"],
     selectorEffects: [

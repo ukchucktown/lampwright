@@ -393,17 +393,21 @@ function verify(
   actionResults: readonly SetupActionResult[],
 ): SetupVerificationResult[] {
   return plan.verifications.map((verification) => {
-    const action = plan.actions.find((candidate) =>
+    const actions = plan.actions.filter((candidate) =>
       candidate.targets.some(
         (target) => target.targetId === verification.target.targetId,
       ),
     );
-    const result = action
-      ? actionResults.find((candidate) => candidate.actionId === action.id)
-      : undefined;
+    const results = actions.map((action) =>
+      actionResults.find((candidate) => candidate.actionId === action.id),
+    );
     if (
-      !result ||
-      (result.status !== "succeeded" && result.status !== "unchanged")
+      results.length === 0 ||
+      results.some(
+        (result) =>
+          !result ||
+          (result.status !== "succeeded" && result.status !== "unchanged"),
+      )
     )
       return { verificationId: verification.id, status: "skipped" };
     const target = snapshot.targets.find(
@@ -447,21 +451,22 @@ function createTargetResults(
         "plan-blocked",
         "the setup target is blocked",
       );
-    const action = plan.actions.find((candidate) =>
+    const actions = plan.actions.filter((candidate) =>
       candidate.targets.some((item) => item.targetId === target.targetId),
     );
-    const result = action
-      ? actionResults.find((candidate) => candidate.actionId === action.id)
-      : undefined;
-    if (!result)
+    const results = actions.map((action) =>
+      actionResults.find((candidate) => candidate.actionId === action.id),
+    );
+    if (results.length === 0 || results.some((result) => !result))
       return blockedTarget(
         target,
         "action-missing",
         "the setup target has no executable action",
       );
-    if (result.status === "failed")
-      return { target, status: "failed", error: result.error };
-    if (result.status === "blocked")
+    const failedResult = results.find((result) => result?.status === "failed");
+    if (failedResult?.status === "failed")
+      return { target, status: "failed", error: failedResult.error };
+    if (results.some((result) => result?.status === "blocked"))
       return blockedTarget(
         target,
         "action-blocked",
@@ -478,12 +483,11 @@ function createTargetResults(
       return { target, status: "unverified", error: failed.error };
     return {
       target,
-      status:
-        result.status === "unchanged"
-          ? "unchanged"
-          : plan.intent.action === "enable"
-            ? "enabled"
-            : "disabled",
+      status: results.every((result) => result?.status === "unchanged")
+        ? "unchanged"
+        : plan.intent.action === "enable"
+          ? "enabled"
+          : "disabled",
     };
   });
 }
@@ -502,15 +506,19 @@ function unverifiedReport(
         "plan-blocked",
         "the setup target is blocked",
       );
-    const action = plan.actions.find((candidate) =>
+    const actions = plan.actions.filter((candidate) =>
       candidate.targets.some((item) => item.targetId === target.targetId),
     );
-    const result = action
-      ? actionResults.find((candidate) => candidate.actionId === action.id)
-      : undefined;
-    if (result?.status === "failed")
-      return { target, status: "failed", error: result.error };
-    if (!result || result.status === "blocked")
+    const results = actions.map((action) =>
+      actionResults.find((candidate) => candidate.actionId === action.id),
+    );
+    const failedResult = results.find((result) => result?.status === "failed");
+    if (failedResult?.status === "failed")
+      return { target, status: "failed", error: failedResult.error };
+    if (
+      results.length === 0 ||
+      results.some((result) => !result || result.status === "blocked")
+    )
       return blockedTarget(
         target,
         "action-blocked",

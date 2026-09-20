@@ -126,6 +126,11 @@ export type SetupOperationAvailability =
       readonly kind: "available";
       readonly controlScope: SetupScope;
       readonly authority: SetupNativeMutationAuthority;
+      /** Additional native steps required for the same requested policy. */
+      readonly additionalControls?: readonly {
+        readonly controlScope: SetupScope;
+        readonly authority: SetupNativeMutationAuthority;
+      }[];
     }
   | { readonly kind: "unavailable"; readonly reason: string };
 export interface SetupNativeControl {

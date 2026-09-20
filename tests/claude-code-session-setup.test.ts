@@ -346,10 +346,11 @@ describe("Claude Code Session setup adapter", () => {
     );
 
     const all = await fixture.scanAll();
-    expect(all.harnesses).toEqual(["codex", "claude-code"]);
+    expect(all.harnesses).toEqual(["codex", "claude-code", "gemini-cli"]);
     expect(all.profiles.map((candidate) => candidate.harnessId)).toEqual([
       "codex",
       "claude-code",
+      "gemini-cli",
     ]);
   });
 });

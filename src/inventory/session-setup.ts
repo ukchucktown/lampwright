@@ -40,6 +40,7 @@ import type {
 } from "./types.js";
 import type { CodexInstalledOwnerStatus } from "./codex-plugins.js";
 import { scanClaudeCodeSessionSetup } from "./claude-session-setup.js";
+import { scanGeminiCliSessionSetup } from "./gemini-session-setup.js";
 
 const codexProfile = recoveredSourceProfiles.find(
   (profile) => profile.id === "codex-0.154.0",
@@ -85,32 +86,36 @@ async function scanSupportedSessionSetup(
   if (request.harnessId === "claude-code")
     return scanClaudeCodeSessionSetup(request, options);
   if (request.harnessId === "gemini-cli")
-    throw new Error(
-      "the Gemini CLI Session setup profile is not yet qualified",
-    );
+    return scanGeminiCliSessionSetup(request, options);
   const codex = await scanCodexSessionSetup(request, options);
   const claude = await scanClaudeCodeSessionSetup(
     request,
     options,
     codex.legacyInventory,
   );
-  return mergeSessionSetupSnapshots(codex, claude);
+  const gemini = await scanGeminiCliSessionSetup(
+    request,
+    options,
+    codex.legacyInventory,
+  );
+  return mergeSessionSetupSnapshots(codex, claude, gemini);
 }
 
 function mergeSessionSetupSnapshots(
   codex: SessionSetupSnapshot,
-  claude: SessionSetupSnapshot,
+  ...others: readonly SessionSetupSnapshot[]
 ): SessionSetupSnapshot {
+  const snapshots = [codex, ...others];
   const snapshotBase = {
     schemaVersion: 1 as const,
     kind: "session-setup-snapshot" as const,
     scannedAt: codex.scannedAt,
     workspace: codex.workspace,
-    harnesses: ["codex" as const, "claude-code" as const],
-    targets: [...codex.targets, ...claude.targets],
-    sources: [...codex.sources, ...claude.sources],
-    profiles: [...codex.profiles, ...claude.profiles],
-    dependencies: [...codex.dependencies, ...claude.dependencies],
+    harnesses: snapshots.flatMap((snapshot) => snapshot.harnesses),
+    targets: snapshots.flatMap((snapshot) => snapshot.targets),
+    sources: snapshots.flatMap((snapshot) => snapshot.sources),
+    profiles: snapshots.flatMap((snapshot) => snapshot.profiles),
+    dependencies: snapshots.flatMap((snapshot) => snapshot.dependencies),
     legacyInventory: codex.legacyInventory,
   };
   const fingerprint = createHash("sha256")
@@ -1178,6 +1183,7 @@ export async function pluginDescriptor(plugin: PluginBoundary): Promise<{
         item.id === "plugin-manifest" ||
         item.id === "codex-plugin-overlay" ||
         item.id === "inline-mcp-servers" ||
+        item.id === "manifest:mcpServers" ||
         item.id.startsWith("manifest-mcp-servers") ||
         item.id.startsWith("manifest-apps")),
   )) {
@@ -1192,6 +1198,7 @@ export async function pluginDescriptor(plugin: PluginBoundary): Promise<{
       resource.id === "plugin-manifest" ||
       resource.id === "codex-plugin-overlay" ||
       resource.id === "inline-mcp-servers" ||
+      resource.id === "manifest:mcpServers" ||
       resource.id.startsWith("manifest-mcp-servers")
         ? (["mcp-registration"] as const)
         : []),
@@ -1207,6 +1214,7 @@ export async function pluginDescriptor(plugin: PluginBoundary): Promise<{
         : await readJsoncDescriptor(path);
     const mcpValue =
       resource.id === "mcp-servers" ||
+      resource.id === "manifest:mcpServers" ||
       resource.id.startsWith("manifest-mcp-servers")
         ? (record(read.value?.mcpServers) ??
           record(read.value?.mcp_servers) ??

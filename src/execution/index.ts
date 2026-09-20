@@ -6,6 +6,8 @@ export {
   createBuiltInSessionSetupConfigurationWriter,
   createClaudeCodeSessionSetupConfigurationEditor,
   createClaudeCodeSessionSetupConfigurationWriter,
+  createGeminiCliSessionSetupConfigurationEditor,
+  createGeminiCliSessionSetupConfigurationWriter,
   createCodexSessionSetupConfigurationEditor,
   createCodexSessionSetupConfigurationWriter,
   type SessionSetupConfigurationEditor,
