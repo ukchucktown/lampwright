@@ -290,6 +290,67 @@ describe("Codex Session setup Inventory", () => {
     ).toBe(true);
   });
 
+  it("keeps a missing installed-owner descriptor non-actionable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const pluginRoot = join(
+      codex,
+      "plugins",
+      "cache",
+      "market",
+      "missing",
+      "1.0.0",
+    );
+    await writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), {
+      name: "missing",
+      version: "1.0.0",
+      apps: "./absent.json",
+    });
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            installed: [
+              {
+                pluginId: "missing@market",
+                name: "missing",
+                marketplaceName: "market",
+                version: "1.0.0",
+                installed: true,
+                enabled: true,
+                source: { source: "git", url: "https://example.test/missing" },
+                installPolicy: "AVAILABLE",
+                authPolicy: "ON_USE",
+              },
+            ],
+            available: [],
+          }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    expect(snapshot.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "mcp-registration", status: "invalid" }),
+      ]),
+    );
+    expect(
+      snapshot.targets.filter((target) => target.kind === "app-binding"),
+    ).toEqual([]);
+  });
+
   it("prefers a trusted workspace MCP policy and executes both native directions", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
