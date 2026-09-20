@@ -293,6 +293,52 @@ describe("Codex Session setup Inventory", () => {
     );
   });
 
+  it("rejects unsupported Codex policy shapes without rewriting credentials", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const config = join(codex, "config.toml");
+    const shapes = [
+      "mcp_servers = true",
+      "[mcp_servers]\nserver = true",
+      '[mcp_servers.server]\nenabled = "yes"',
+      "[plugins.owner]\nmcp_servers = true",
+      "[plugins.owner.mcp_servers]\nserver = true",
+      '[plugins.owner.mcp_servers.server]\nenabled = "yes"',
+      '[apps.connector]\nenabled = "yes"',
+    ];
+    for (const shape of shapes) {
+      const original = `${shape}\ncredential = "SECRET_SENTINEL"\n`;
+      await write(config, original);
+      const scanner = createSessionSetupScanner({
+        now: () => new Date("2026-09-20T00:00:00.000Z"),
+        environment: {
+          homeDirectory: home,
+          workspaceDirectory: workspace,
+          agentHomeDirectories: { codex },
+        },
+        commandRunner: {
+          run: async () => ({
+            exitCode: 0,
+            stdout: JSON.stringify({ installed: [], available: [] }),
+          }),
+        },
+      });
+      const snapshot = await scanner.scanSessionSetup({
+        workspace: { path: workspace },
+      });
+        expect(snapshot.sources).toContainEqual(
+          expect.objectContaining({
+            source: expect.objectContaining({ path: config }),
+            status: "invalid",
+          }),
+        );
+      expect(await readFile(config, "utf8")).toBe(original);
+    }
+  });
+
   it("does not turn cache-only Plugin material into setup targets", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
