@@ -189,8 +189,12 @@ function setCodexTomlEnabled(
   return lines.join(eol);
 }
 function tomlPathValue(line: string): string | null {
-  const match = line.match(/^\s*path\s*=\s*(['"])(.*?)\1(?:\s*#.*)?\s*$/u);
-  return match?.[2] ?? null;
+  try {
+    const value = parseToml(line);
+    return typeof value.path === "string" ? value.path : null;
+  } catch {
+    return null;
+  }
 }
 
 function sameTomlTablePath(line: string, path: readonly string[]): boolean {

@@ -402,7 +402,9 @@ async function scanCodexSessionSetup(
           serverKey,
           configurationSources.get(pathKey(authorityDocument.path)) ?? source,
           authorityDocument,
-          !projectContributes || projectApplies === true,
+          declarationDocument.scope.kind === "workspace"
+            ? projectApplies === true
+            : !projectContributes || projectApplies === true,
           configurationDocuments.map((item) =>
             layer(configurationSources.get(pathKey(item.path)) ?? source, item),
           ),
@@ -704,6 +706,19 @@ function validCodexPolicyShapes(value: Record<string, unknown>): boolean {
       if (policy === null) return false;
       if (policy.enabled !== undefined && typeof policy.enabled !== "boolean")
         return false;
+      if (key === "plugins" && policy.mcp_servers !== undefined) {
+        const servers = record(policy.mcp_servers);
+        if (servers === null) return false;
+        for (const server of Object.values(servers)) {
+          const declaration = record(server);
+          if (
+            declaration === null ||
+            (declaration.enabled !== undefined &&
+              typeof declaration.enabled !== "boolean")
+          )
+            return false;
+        }
+      }
     }
   }
   return true;
