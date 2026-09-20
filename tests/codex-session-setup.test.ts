@@ -455,6 +455,7 @@ describe("Codex Session setup Inventory", () => {
         name: "referenced",
         version: "1.0.0",
         apps: "./apps.json",
+        mcpServers: "./servers.json",
       },
     );
     await writeJson(join(plugin("referenced"), "apps.json"), {
@@ -464,7 +465,14 @@ describe("Codex Session setup Inventory", () => {
         requiredTwo: { id: "required-two", required: true },
       },
     });
-    await writeJson(join(plugin("referenced"), ".mcp.json"), {
+    await writeJson(join(plugin("referenced"), "servers.json"), {
+      same: { command: "default" },
+    });
+    await writeJson(join(plugin("default"), ".codex-plugin", "plugin.json"), {
+      name: "default",
+      version: "1.0.0",
+    });
+    await writeJson(join(plugin("default"), ".mcp.json"), {
       same: { command: "default" },
     });
     await writeJson(join(plugin("overlay"), "plugin.json"), {
@@ -483,17 +491,19 @@ describe("Codex Session setup Inventory", () => {
       join(codex, "config.toml"),
       '[plugins."overlay@market"]\nenabled = false\n',
     );
-    const entries = ["inline", "referenced", "overlay"].map((name) => ({
-      pluginId: `${name}@market`,
-      name,
-      marketplaceName: "market",
-      version: "1.0.0",
-      installed: true,
-      enabled: name !== "overlay",
-      source: { source: "git", url: `https://example.test/${name}` },
-      installPolicy: "AVAILABLE",
-      authPolicy: "ON_USE",
-    }));
+    const entries = ["default", "inline", "referenced", "overlay"].map(
+      (name) => ({
+        pluginId: `${name}@market`,
+        name,
+        marketplaceName: "market",
+        version: "1.0.0",
+        installed: true,
+        enabled: name !== "overlay",
+        source: { source: "git", url: `https://example.test/${name}` },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_USE",
+      }),
+    );
     const scanner = createSessionSetupScanner({
       now: () => new Date("2026-09-20T00:00:00.000Z"),
       environment: {
@@ -529,7 +539,7 @@ describe("Codex Session setup Inventory", () => {
           target.kind === "plugin" && target.pluginId === "overlay@market",
       )?.state.effectiveWorkspaceState,
     ).toBe("disabled");
-    expect(mcps.filter((target) => target.name === "same")).toHaveLength(3);
+    expect(mcps.filter((target) => target.name === "same")).toHaveLength(4);
     expect(
       new Set(
         mcps
@@ -540,7 +550,7 @@ describe("Codex Session setup Inventory", () => {
               : null,
           ),
       ).size,
-    ).toBe(3);
+    ).toBe(4);
     expect(
       mcps.find(
         (target) =>
@@ -632,6 +642,72 @@ describe("Codex Session setup Inventory", () => {
     expect(
       snapshot.targets.filter((target) => target.kind === "app-binding"),
     ).toEqual([]);
+  });
+
+  it("rejects invalid app-only declarations without suppressing an independent MCP-only owner", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const plugin = (name: string) =>
+      join(codex, "plugins", "cache", "market", name, "1.0.0");
+    await writeJson(join(plugin("apps"), ".codex-plugin", "plugin.json"), {
+      name: "apps",
+      version: "1.0.0",
+      apps: "./apps.json",
+    });
+    await writeJson(join(plugin("apps"), "apps.json"), {
+      apps: { unsafe: { id: "connector", extra: true } },
+    });
+    await writeJson(join(plugin("mcp"), ".codex-plugin", "plugin.json"), {
+      name: "mcp",
+      version: "1.0.0",
+      mcpServers: "./servers.json",
+    });
+    await writeJson(join(plugin("mcp"), "servers.json"), {
+      only: { command: "server" },
+    });
+    const entries = ["apps", "mcp"].map((name) => ({
+      pluginId: `${name}@market`,
+      name,
+      marketplaceName: "market",
+      version: "1.0.0",
+      installed: true,
+      enabled: true,
+      source: { source: "git", url: `https://example.test/${name}` },
+      installPolicy: "AVAILABLE",
+      authPolicy: "ON_USE",
+    }));
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ installed: entries, available: [] }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    expect(
+      snapshot.targets.filter((target) => target.kind === "app-binding"),
+    ).toEqual([]);
+    expect(
+      snapshot.targets.filter(
+        (target) =>
+          target.kind === "mcp-registration" && target.name === "only",
+      ),
+    ).toHaveLength(1);
+    expect(snapshot.sources).toContainEqual(
+      expect.objectContaining({ kind: "app-binding", status: "invalid" }),
+    );
   });
 
   it("prefers a trusted workspace MCP policy and executes both native directions", async () => {

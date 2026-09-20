@@ -945,7 +945,8 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
           }
         : await readJsoncDescriptor(path);
     const mcpValue =
-      resource.id === "mcp-servers"
+      resource.id === "mcp-servers" ||
+      resource.id.startsWith("manifest-mcp-servers")
         ? (record(read.value?.mcpServers) ??
           record(read.value?.mcp_servers) ??
           read.value)
@@ -960,7 +961,7 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
       kinds.includes("app-binding") &&
       read.kind === "valid" &&
       appValue !== null &&
-      !validDescriptorEntries(appValue);
+      !validAppEntries(appValue);
     for (const kind of kinds)
       sources.push({
         kind,
@@ -981,25 +982,14 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
               ? null
               : read.reason,
       });
-    if (
-      read.kind !== "valid" ||
-      read.value === null ||
-      invalidMcp ||
-      invalidApp
-    )
-      continue;
-    if (kinds.includes("mcp-registration")) mcpPath ??= path;
-    if (kinds.includes("app-binding")) appPath ??= path;
-    if (resource.id === "mcp-servers") {
-      Object.assign(
-        combined.mcp,
-        record(read.value.mcpServers) ??
-          record(read.value.mcp_servers) ??
-          read.value,
-      );
-    } else {
-      Object.assign(combined.mcp, record(read.value.mcpServers) ?? {});
-      Object.assign(combined.apps, record(read.value.apps) ?? {});
+    if (read.kind !== "valid" || read.value === null) continue;
+    if (kinds.includes("mcp-registration") && !invalidMcp) {
+      mcpPath ??= path;
+      Object.assign(combined.mcp, mcpValue ?? {});
+    }
+    if (kinds.includes("app-binding") && !invalidApp) {
+      appPath ??= path;
+      Object.assign(combined.apps, appValue ?? {});
     }
   }
   return { ...combined, mcpPath, appPath, sources };
@@ -1010,6 +1000,25 @@ function validDescriptorEntries(
   const map = record(value);
   return (
     map !== null && Object.values(map).every((entry) => record(entry) !== null)
+  );
+}
+function validAppEntries(value: unknown): value is Record<string, unknown> {
+  const map = record(value);
+  return (
+    map !== null &&
+    Object.entries(map).every(([alias, entry]) => {
+      const app = record(entry);
+      return (
+        alias.trim().length > 0 &&
+        app !== null &&
+        Object.keys(app).every(
+          (key) => key === "id" || key === "required" || key === "category",
+        ) &&
+        stringAt(app, ["id"]) !== null &&
+        (app.required === undefined || typeof app.required === "boolean") &&
+        (app.category === undefined || typeof app.category === "string")
+      );
+    })
   );
 }
 interface DescriptorSourceResult {
