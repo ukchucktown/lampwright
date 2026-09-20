@@ -1142,6 +1142,7 @@ export class TuiController {
       return;
     }
     if (area === "setup") {
+      let unavailableNotice: string | null = null;
       let setupInventory:
         import("../session-setup/types.js").SessionSetupSnapshot | undefined;
       try {
@@ -1150,36 +1151,31 @@ export class TuiController {
             ? undefined
             : await this.dependencies.scanSessionSetup();
       } catch {
-        this.stateValue = {
-          ...state,
-          model: {
-            ...state.model,
-            notice:
-              "Session setup sources are unavailable; no setup state was changed.",
-          },
-        };
-        return;
+        unavailableNotice =
+          "Session setup sources are unavailable; no setup state was changed.";
       }
-      if (setupInventory === undefined) {
-        this.stateValue = {
-          ...state,
-          model: {
-            ...state.model,
-            notice: "Session setup is unavailable in this host.",
-          },
-        };
-        return;
-      }
+      if (setupInventory === undefined)
+        setupInventory = unavailableSetupSnapshot(
+          state.inventory,
+          this.dependencies.workspace?.path ?? process.cwd(),
+        );
       this.stateValue = {
         screen: "browse",
         inventory: state.inventory,
         setupInventory,
         area: "setup",
         view: "inventory",
-        model: createBrowseModel(
-          createSetupSections(setupInventory, "inventory"),
-          state.model.viewport,
-        ),
+        model: {
+          ...createBrowseModel(
+            createSetupSections(setupInventory, "inventory"),
+            state.model.viewport,
+          ),
+          notice:
+            unavailableNotice ??
+            (this.dependencies.scanSessionSetup === undefined
+              ? "Session setup is unavailable in this host."
+              : null),
+        },
         areaSnapshots: saved,
       };
       return;
@@ -2101,4 +2097,37 @@ function setupHarness(
       : key === "setup:gemini-cli"
         ? "gemini-cli"
         : null;
+}
+
+function unavailableSetupSnapshot(
+  inventory: Inventory,
+  workspacePath: string,
+): import("../session-setup/types.js").SessionSetupSnapshot {
+  const sources = (["codex", "claude-code", "gemini-cli"] as const).map(
+    (harnessId) => ({
+      source: { sourceId: `unavailable:${harnessId}`, path: null },
+      profileId: "unavailable",
+      harnessId,
+      kind: "skill-exposure" as const,
+      scope: { kind: "user" as const },
+      status: "unavailable" as const,
+      reason: "No setup provider is available in this host.",
+      targetIds: [],
+      collateralTargetIds: [],
+    }),
+  );
+  return {
+    schemaVersion: 1,
+    kind: "session-setup-snapshot",
+    id: "unavailable-setup",
+    scannedAt: new Date(0).toISOString(),
+    workspace: { path: workspacePath },
+    harnesses: ["codex", "claude-code", "gemini-cli"],
+    targets: [],
+    sources,
+    profiles: [],
+    dependencies: [],
+    legacyInventory: inventory,
+    semanticFingerprint: { algorithm: "sha256", digest: "0".repeat(64) },
+  };
 }

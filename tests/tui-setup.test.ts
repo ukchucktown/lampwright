@@ -10,6 +10,20 @@ import {
 } from "../src/testing/index.js";
 
 describe("Session setup terminal area", () => {
+  it("opens an explicit unavailable area when the host has no setup provider", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    expect(controller.state.screen).toBe("browse");
+    expect(renderTui(controller.state)).toContain("Claude Code");
+    expect(renderTui(controller.state)).toContain(
+      "Session setup is unavailable",
+    );
+  });
   it("keeps setup browse state separate, reviews native disable, and refreshes its report", async () => {
     const snapshot = buildSessionSetupSnapshot();
     const execute = vi.fn(async () => buildSessionSetupReport());
