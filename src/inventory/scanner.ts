@@ -282,6 +282,7 @@ async function scanWithOptions(
     options.environment,
     options.commandRunner,
   );
+  options.onCodexInstalledOwnerStatus?.(codex.installedOwnerStatus);
   const gemini = await scanGeminiCli(
     options.environment,
     options.commandRunner,

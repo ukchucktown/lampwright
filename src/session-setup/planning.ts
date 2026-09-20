@@ -343,6 +343,12 @@ function addSourceBlocks(
   const sourceIds = new Set([target.source.sourceId]);
   if (availability.kind === "available")
     sourceIds.add(availability.authority.source.sourceId);
+  // A contributing layer is evidence for the selected native policy even when
+  // the chosen mutation is written to another layer.  An unresolved workspace
+  // layer must therefore fail closed; an explicitly untrusted layer does not
+  // apply and can safely be ignored for a user-scoped action.
+  for (const layer of target.control.layers)
+    if (layer.applies !== false) sourceIds.add(layer.source.sourceId);
   for (const sourceId of sourceIds) {
     const source = snapshot.sources.find(
       (candidate) => candidate.source.sourceId === sourceId,
@@ -391,6 +397,27 @@ function addSelectorBlocks(
       target: ref,
       reason: `Skill name '${target.name}' is ambiguous in the selected harness`,
     });
+  if (
+    target.kind === "mcp-registration" &&
+    target.control.selector.authority === "exact-target" &&
+    snapshot.targets.some(
+      (candidate) =>
+        candidate.kind === "mcp-registration" &&
+        candidate.id !== target.id &&
+        candidate.control.selector.kind === "mcp-server-key" &&
+        target.control.selector.kind === "mcp-server-key" &&
+        candidate.control.selector.policyOwner.kind === "plugin" &&
+        target.control.selector.policyOwner.kind === "plugin" &&
+        candidate.control.selector.policyOwner.pluginId ===
+          target.control.selector.policyOwner.pluginId &&
+        candidate.serverKey === target.serverKey,
+    )
+  )
+    blocks.push({
+      kind: "selector-collision",
+      target: ref,
+      reason: `MCP selector '${target.serverKey}' has multiple declarations`,
+    });
   if (target.control.selector.authority !== "shared-connector") return;
   const governed = [...target.control.selector.governedTargetIds].sort();
   const known = snapshot.targets
@@ -425,13 +452,18 @@ function addConfigurationBlocks(
   const layer = target.control.layers.find(
     (candidate) =>
       candidate.source.sourceId === authority.layerSourceId &&
-      candidate.canonicalPath === authority.layerCanonicalPath,
+      (candidate.canonicalPath ?? candidate.source.path) ===
+        authority.layerCanonicalPath,
   );
-  if (!layer || layer.canonicalPath === null) {
+  if (
+    !layer ||
+    (layer.exists && layer.canonicalPath === null) ||
+    (!layer.exists && layer.source.path === null)
+  ) {
     blocks.push({
       kind: "unresolved",
       target: ref,
-      reason: "configuration authority has no canonical writable layer",
+      reason: "configuration authority has no safe writable layer",
     });
     return;
   }
@@ -615,7 +647,7 @@ function cyclicTargets(
 
 function mutationGroupKey(mutation: SetupMutation): string {
   return mutation.kind === "configuration"
-    ? `configuration:${mutation.authority.layerCanonicalPath ?? "missing"}`
+    ? `configuration:${mutation.authority.layerCanonicalPath}`
     : `native-command:${stringifyModel(mutation.authority, 0)}`;
 }
 

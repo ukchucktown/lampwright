@@ -70,6 +70,9 @@ export type SetupNativeSelector =
       readonly kind: "mcp-server-key";
       readonly id: string;
       readonly serverKey: string;
+      readonly policyOwner:
+        | { readonly kind: "standalone" }
+        | { readonly kind: "plugin"; readonly pluginId: string };
       readonly authority: "exact-target";
       readonly governedTargetIds: readonly [string];
     }
@@ -239,6 +242,19 @@ export interface SessionSetupSnapshot {
   readonly semanticFingerprint: Sha256Digest;
 }
 export type SessionSetupInventory = SessionSetupSnapshot;
+/** A bounded Inventory request for native Session setup evidence. */
+export interface SessionSetupScanRequest {
+  readonly roots?: readonly import("../inventory/types.js").DiscoveryRoot[];
+  /** The workspace whose native precedence is evaluated. */
+  readonly workspace?: SetupWorkspace;
+  /** Present for callers that share a multi-harness scan surface. */
+  readonly harnessId?: SetupHarnessId;
+}
+export interface SessionSetupScanner {
+  scanSessionSetup(
+    request?: SessionSetupScanRequest,
+  ): Promise<SessionSetupSnapshot>;
+}
 export interface SessionSetupIntent {
   readonly schemaVersion: 1;
   readonly kind: "session-setup-intent";

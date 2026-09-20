@@ -78,6 +78,141 @@ export function createSessionSetupConfigurationWriter(
   };
 }
 
+/** Checked native TOML edits for the qualified Codex Session setup profile. */
+export function createCodexSessionSetupConfigurationEditor(): SessionSetupConfigurationEditor {
+  return { edit: (text, request) => editCodexToml(text, request) };
+}
+
+export const createCodexSessionSetupConfigurationWriter = () =>
+  createSessionSetupConfigurationWriter(
+    createCodexSessionSetupConfigurationEditor(),
+  );
+
+function editCodexToml(
+  text: string,
+  request: SessionSetupConfigurationRequest,
+): string {
+  parseToml(text);
+  let updated = text;
+  for (const mutation of request.mutations) {
+    const selector = request.selectors.find(
+      (item) => item.id === mutation.selectorId,
+    );
+    if (!selector)
+      throw new Error(
+        "Codex mutation selector is absent from its checked request",
+      );
+    const path =
+      selector.kind === "skill-path"
+        ? ["skills", "config"]
+        : selector.kind === "plugin-id"
+          ? ["plugins", selector.pluginId]
+          : selector.kind === "mcp-server-key"
+            ? selector.policyOwner.kind === "plugin"
+              ? [
+                  "plugins",
+                  selector.policyOwner.pluginId,
+                  "mcp_servers",
+                  selector.serverKey,
+                ]
+              : ["mcp_servers", selector.serverKey]
+            : ["apps", selector.connectorId];
+    updated = setCodexTomlEnabled(
+      updated,
+      path,
+      mutation.policy === "enabled",
+      selector.kind === "skill-path" ? selector.path : null,
+    );
+  }
+  parseToml(updated);
+  return updated;
+}
+
+function setCodexTomlEnabled(
+  text: string,
+  path: readonly string[],
+  enabled: boolean,
+  skillPath: string | null,
+): string {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/u);
+  const header = `[${path
+    .map((part) =>
+      /^[A-Za-z0-9_-]+$/u.test(part) ? part : JSON.stringify(part),
+    )
+    .join(".")}]`;
+  let start = lines.findIndex((line) => sameTomlTablePath(line, path));
+  if (skillPath !== null) {
+    const candidates: number[] = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index]!.trim() !== "[[skills.config]]") continue;
+      let end = lines.length;
+      for (let next = index + 1; next < lines.length; next += 1)
+        if (/^\s*\[/u.test(lines[next]!)) {
+          end = next;
+          break;
+        }
+      if (
+        lines
+          .slice(index + 1, end)
+          .some((candidate) => tomlPathValue(candidate) === skillPath)
+      )
+        candidates.push(index);
+    }
+    if (candidates.length > 1) throw new Error("Codex Skill path is ambiguous");
+    start = candidates[0] ?? -1;
+  }
+  if (start < 0) {
+    const suffix = text.length === 0 || text.endsWith("\n") ? "" : eol;
+    const table =
+      skillPath === null
+        ? `${header}${eol}`
+        : `[[skills.config]]${eol}path = ${JSON.stringify(skillPath)}${eol}`;
+    return `${text}${suffix}${table}enabled = ${enabled}${eol}`;
+  }
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1)
+    if (/^\s*\[/u.test(lines[index]!)) {
+      end = index;
+      break;
+    }
+  const matches: number[] = [];
+  for (let index = start + 1; index < end; index += 1)
+    if (/^\s*enabled\s*=/u.test(lines[index]!)) matches.push(index);
+  if (matches.length > 1) throw new Error("Codex enabled setting is ambiguous");
+  if (matches.length === 1)
+    lines[matches[0]!] = lines[matches[0]!]!.replace(
+      /^(\s*enabled\s*=\s*)(true|false)(\s*(?:#.*)?)$/u,
+      `$1${enabled}$3`,
+    );
+  else lines.splice(start + 1, 0, `enabled = ${enabled}`);
+  return lines.join(eol);
+}
+function tomlPathValue(line: string): string | null {
+  try {
+    const value = parseToml(line);
+    return typeof value.path === "string" ? value.path : null;
+  } catch {
+    return null;
+  }
+}
+
+function sameTomlTablePath(line: string, path: readonly string[]): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("[") || trimmed.startsWith("[[")) return false;
+  try {
+    const parsed = parseToml(`${trimmed}\nvalue = true\n`);
+    let current: unknown = parsed;
+    for (const part of path) {
+      if (typeof current !== "object" || current === null) return false;
+      current = (current as Record<string, unknown>)[part];
+    }
+    return typeof current === "object" && current !== null;
+  } catch {
+    return false;
+  }
+}
+
 export async function prepareAvailabilityMutation(
   mutation: NativeConfigurationMutation,
 ): Promise<Buffer> {

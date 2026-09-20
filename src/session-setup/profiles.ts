@@ -1,7 +1,7 @@
 import type { SessionSetupSourceProfile } from "./types.js";
 import { parseSessionSetupSourceProfile } from "./validation.js";
 
-/** Recovered offline baselines. Fixture-only means no production discovery claim. */
+/** Recovered offline baselines. Codex has qualified local-only evidence. */
 const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
   {
     id: "codex-0.154.0",
@@ -9,7 +9,7 @@ const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
     clientSurface: "cli",
     sourceVersion: "0.154.0",
     sourceSignature: "config.toml-native-availability",
-    qualification: "fixture-only",
+    qualification: "qualified",
     definitionScopes: ["user", "workspace", "agent"],
     precedence: ["trusted-workspace", "user"],
     trust: "unknown",
@@ -22,6 +22,9 @@ const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
       "app",
       "shared-connector",
       "owner-gate",
+      "trusted-workspace-precedence",
+      "native-enable-disable",
+      "checked-writer-preservation-race",
     ],
     supportedTargetKinds: [
       "skill-exposure",

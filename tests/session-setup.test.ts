@@ -161,6 +161,7 @@ function completeFixture(): {
         kind: "mcp-server-key",
         id: "mcp-selector",
         serverKey: "same-name",
+        policyOwner: { kind: "plugin", pluginId: "example-plugin" },
         authority: "exact-target",
         governedTargetIds: ["mcp-target"],
       },
@@ -356,6 +357,43 @@ describe("session setup contracts", () => {
           { ...plan.actions[0], id: "duplicate-selector-action" },
         ],
       }),
+    ).toThrow(SessionSetupValidationError);
+  });
+
+  it("rejects MCP selector owners that disagree with their declaration owner", () => {
+    const { snapshot, mcp } = completeFixture();
+    const standalone = {
+      ...mcp,
+      owner: { kind: "standalone" as const },
+      control: {
+        ...mcp.control,
+        selector: {
+          ...mcp.control.selector,
+          policyOwner: { kind: "plugin" as const, pluginId: "example-plugin" },
+        },
+      },
+    };
+    expect(() =>
+      replaceTargets(snapshot, [
+        ...snapshot.targets.filter((target) => target.id !== mcp.id),
+        standalone,
+      ]),
+    ).toThrow(SessionSetupValidationError);
+    const mismatchedPlugin = {
+      ...mcp,
+      control: {
+        ...mcp.control,
+        selector: {
+          ...mcp.control.selector,
+          policyOwner: { kind: "plugin" as const, pluginId: "another-plugin" },
+        },
+      },
+    };
+    expect(() =>
+      replaceTargets(snapshot, [
+        ...snapshot.targets.filter((target) => target.id !== mcp.id),
+        mismatchedPlugin,
+      ]),
     ).toThrow(SessionSetupValidationError);
   });
 
@@ -707,6 +745,73 @@ function grantsFor(plan: ReturnType<typeof planSessionSetup>) {
 }
 
 describe("session setup planning and execution", () => {
+  it("keeps distinct missing configuration documents in separate actions", () => {
+    const fixture = completeFixture();
+    const withMissingDocument = <T extends SessionSetupTarget>(
+      target: T,
+    ): T => {
+      const source = target.control.layers[0]!.source;
+      const layer = {
+        ...target.control.layers[0]!,
+        exists: false,
+        canonicalPath: null,
+        expectedPreimage: null,
+        integrity: "missing" as const,
+        protection: {
+          git: { kind: "outside-worktree" as const },
+          system: { kind: "none" as const },
+          filesystem: { kind: "writable" as const },
+        },
+      };
+      const operation = {
+        kind: "available" as const,
+        controlScope: { kind: "user" as const },
+        authority: {
+          kind: "configuration" as const,
+          source,
+          layerSourceId: source.sourceId,
+          layerCanonicalPath: source.path,
+        },
+      };
+      return {
+        ...target,
+        control: {
+          ...target.control,
+          layers: [layer],
+          availability: { enable: operation, disable: operation },
+        },
+      };
+    };
+    const plugin = withMissingDocument(fixture.plugin);
+    const skill = withMissingDocument(fixture.skill);
+    const snapshot = replaceTargets(fixture.snapshot, [
+      plugin,
+      skill,
+      fixture.mcp,
+      fixture.firstApp,
+      fixture.secondApp,
+    ]);
+
+    const plan = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [targetRef(plugin), targetRef(skill)]),
+    );
+
+    expect(plan.blocks).toEqual([]);
+    expect(plan.actions).toHaveLength(2);
+    expect(
+      plan.actions.map(
+        (action) =>
+          (
+            action.mutations[0] as Extract<
+              SetupMutation,
+              { kind: "configuration" }
+            >
+          ).authority.layerCanonicalPath,
+      ),
+    ).toEqual([plugin.source.path, skill.source.path].sort());
+  });
+
   it("plans one selected exposure with complete native scope and activation disclosure", () => {
     const snapshot = buildSessionSetupSnapshot();
     const target = snapshot.targets[0]!;
@@ -1511,6 +1616,19 @@ describe("session setup planning and execution", () => {
     });
     await safeMissing.commit(missing);
     expect(await readFile(missingPath, "utf8")).toBe('{"created":true}\n');
+
+    const occupiedPath = join(root, "occupied.json");
+    const occupied = await safeMissing.prepare({
+      path: occupiedPath,
+      format: "json",
+      exists: false,
+      expectedPreimage: null,
+      selectors: request.selectors,
+      mutations: [mutation],
+    });
+    await writeFile(occupiedPath, '{"external":true}\n');
+    await expect(safeMissing.commit(occupied)).rejects.toThrow("EEXIST");
+    expect(await readFile(occupiedPath, "utf8")).toBe('{"external":true}\n');
 
     if (process.platform !== "win32") {
       const symbolic = join(root, "symbolic.json");
