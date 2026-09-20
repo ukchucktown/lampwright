@@ -27,6 +27,8 @@ import {
   availabilityReportScrollMetrics,
   planScrollMetrics,
   reportScrollMetrics,
+  setupPlanScrollMetrics,
+  setupReportScrollMetrics,
   trashReportScrollMetrics,
   trashReviewScrollMetrics,
   updatePlanScrollMetrics,
@@ -1436,14 +1438,25 @@ export class TuiController {
       return;
     }
     if (action.kind === "toggle-details") {
-      this.stateValue = { ...state, technicalDetails: !state.technicalDetails };
+      this.stateValue = {
+        ...state,
+        technicalDetails: !state.technicalDetails,
+        scrollOffset: 0,
+      };
       return;
     }
     if (action.kind === "move" || action.kind === "page") {
-      const delta = action.kind === "page" ? action.delta * 8 : action.delta;
+      const metrics = setupPlanScrollMetrics(state);
+      const delta =
+        action.kind === "page"
+          ? action.delta * Math.max(1, metrics.pageRows)
+          : action.delta;
       this.stateValue = {
         ...state,
-        scrollOffset: Math.max(0, state.scrollOffset + delta),
+        scrollOffset: Math.min(
+          metrics.maximumOffset,
+          Math.max(0, state.scrollOffset + delta),
+        ),
       };
       return;
     }
@@ -1485,12 +1498,18 @@ export class TuiController {
     action: TuiAction,
   ): Promise<void> {
     if (action.kind === "move" || action.kind === "page") {
+      const metrics = setupReportScrollMetrics(state);
       this.stateValue = {
         ...state,
         scrollOffset: Math.max(
           0,
-          state.scrollOffset +
-            (action.kind === "page" ? action.delta * 8 : action.delta),
+          Math.min(
+            metrics.maximumOffset,
+            state.scrollOffset +
+              (action.kind === "page"
+                ? action.delta * Math.max(1, metrics.pageRows)
+                : action.delta),
+          ),
         ),
       };
       return;
@@ -1877,8 +1896,26 @@ function resizeState(
   }
   if (state.screen === "availability-executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
-  if (state.screen === "setup-plan" || state.screen === "setup-report")
-    return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "setup-plan") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        setupPlanScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
+  if (state.screen === "setup-report") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        resized.scrollOffset,
+        setupReportScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
   if (state.screen === "setup-executing")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "update-report") {
