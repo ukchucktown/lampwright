@@ -458,6 +458,7 @@ export type TuiAction =
   | { readonly kind: "viewport"; readonly viewport: TuiViewport }
   | { readonly kind: "toggle-select" }
   | { readonly kind: "clear-selection" }
+  | { readonly kind: "select-all" }
   | { readonly kind: "open-search"; readonly value?: string }
   | { readonly kind: "stage-all-search" }
   | { readonly kind: "apply-search" }

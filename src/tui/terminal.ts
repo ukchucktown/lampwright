@@ -170,18 +170,13 @@ export function mouseAction(
     return { kind: "point-search-result", index };
   }
   if (state.screen !== "browse") return { kind: "noop" };
-  if (
-    state.area === "setup" &&
-    report.pressed &&
-    report.row === 1 &&
-    (report.button & 3) === 0
-  ) {
+  if (report.pressed && report.row === 1 && (report.button & 3) === 0) {
     if (report.column >= 12 && report.column <= 27)
       return { kind: "switch-area", area: "skills" };
     if (report.column >= 31 && report.column <= 43)
       return { kind: "switch-area", area: "setup" };
   }
-  if (report.pressed && report.row === 1 && (report.button & 3) === 0) {
+  if (report.pressed && report.row === 2 && (report.button & 3) === 0) {
     const tabs = browseTabHitboxes(state);
     if (inColumns(report.column, tabs.inventory))
       return { kind: "switch-view", view: "inventory" };
@@ -682,7 +677,7 @@ export function parseRawTuiAction(
         : { kind: "toggle-select" };
     if (key.ctrl && key.name === "a")
       return state.area === "setup"
-        ? { kind: "toggle-select" }
+        ? { kind: "select-all" }
         : { kind: "clear-selection" };
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };

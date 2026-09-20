@@ -468,6 +468,14 @@ export class TuiController {
       return;
     }
 
+    if (action.kind === "select-all") {
+      const section = state.model.sections[state.model.sectionIndex];
+      const selected = new Set(state.model.selected);
+      for (const entry of section?.entries ?? [])
+        if (entry.selectable) selected.add(entry.key);
+      this.stateValue = { ...state, model: { ...state.model, selected } };
+      return;
+    }
     const command = browseCommand(action);
     if (command !== null) {
       const model = reduceBrowse(state.model, command);
@@ -1222,11 +1230,16 @@ export class TuiController {
       return;
     }
     if (action.kind === "open-search" || action.kind === "append-query") {
-      let model = createSearchModel(state.model);
+      const focused = state.model.sections[state.model.sectionIndex];
+      const searchBrowse =
+        focused === undefined
+          ? state.model
+          : { ...state.model, sections: [focused] };
+      let model = createSearchModel(searchBrowse);
       const value =
         action.kind === "append-query" ? action.value : (action.value ?? "");
       if (value)
-        model = reduceSearch(model, state.model.sections, {
+        model = reduceSearch(model, searchBrowse.sections, {
           kind: "type",
           value,
         });
@@ -1235,6 +1248,14 @@ export class TuiController {
         browse: browseSnapshot(state),
         model,
       };
+      return;
+    }
+    if (action.kind === "select-all") {
+      const section = state.model.sections[state.model.sectionIndex];
+      const selected = new Set(state.model.selected);
+      for (const entry of section?.entries ?? [])
+        if (entry.selectable) selected.add(entry.key);
+      this.stateValue = { ...state, model: { ...state.model, selected } };
       return;
     }
     const command = browseCommand(action);
@@ -1882,6 +1903,8 @@ function browseCommand(action: TuiAction): TuiBrowseCommand | null {
       return { kind: "toggle-select" };
     case "clear-selection":
       return { kind: "clear-selection" };
+    case "select-all":
+      return null;
     default:
       return null;
   }

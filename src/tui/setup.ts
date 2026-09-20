@@ -70,11 +70,11 @@ function typedEntries(
 }
 function heading(kind: SessionSetupTarget["kind"]): string {
   return kind === "skill-exposure"
-    ? "Skill exposures"
+    ? "Skills"
     : kind === "mcp-registration"
-      ? "MCP registrations"
+      ? "MCP servers"
       : kind === "app-binding"
-        ? "App bindings"
+        ? "Apps"
         : "Plugins";
 }
 function entry(target: SessionSetupTarget, duplicate = false): TuiEntry {

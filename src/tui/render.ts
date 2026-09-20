@@ -1829,7 +1829,7 @@ export function browseTabHitboxes(state: TuiBrowseState): {
   readonly disabled: readonly [number, number];
   readonly trash: readonly [number, number];
 } {
-  const inventoryStart = "Lampwright ".length + 1;
+  const inventoryStart = 1;
   const inventoryEnd = inventoryStart + "Inventory".length - 1;
   const disabledStart = inventoryEnd + 4;
   const disabledEnd =
@@ -1862,24 +1862,14 @@ export function renderBrowseLines(
   const isDisabled = state.view === "disabled";
 
   const selected = model.selected.size;
+  const setupHarness =
+    state.area === "setup"
+      ? (model.sections[model.sectionIndex]?.label ?? "Setup")
+      : null;
   const trashCount = state.operations?.size ?? 0;
-  const paneControls = [
-    { text: "click", paint: style.title },
-    { text: " focus · ", paint: style.muted },
-    { text: "tab/shift+tab", paint: style.title },
-    { text: " pane · ", paint: style.muted },
-    { text: "shift+←→", paint: style.title },
-    { text: " width · ", paint: style.muted },
-    { text: "shift+↑↓", paint: style.title },
-    { text: " height", paint: style.muted },
-  ] as const;
   const globalControls = [
-    ...(state.area === "setup"
-      ? ([
-          { text: "ctrl-o", paint: style.title },
-          { text: " area · ", paint: style.muted },
-        ] as const)
-      : []),
+    { text: "ctrl-o", paint: style.title },
+    { text: " area · ", paint: style.muted },
     { text: "ctrl-t", paint: style.title },
     { text: " view · ", paint: style.muted },
     { text: "esc", paint: style.title },
@@ -1904,12 +1894,11 @@ export function renderBrowseLines(
         { text: " remove · ", paint: style.muted },
         ...updateControls,
       ];
-  if (state.area === "setup")
-    out.push(
-      `${style.title("Lampwright")} ${style.muted("Skills & plugins")} ${style.muted("|")} ${style.selected("Session setup")}`,
-    );
   out.push(
-    `${state.area === "setup" ? "" : `${style.title("Lampwright")} `}${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? "" : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`}  ${
+    `${style.title("Lampwright")} ${state.area === "setup" ? style.muted("Skills & plugins") : style.selected("Skills & plugins")} ${style.muted("|")} ${state.area === "setup" ? style.selected("Session setup") : style.muted("Session setup")}`,
+  );
+  out.push(
+    `${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? ` · ${setupHarness}` : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -1962,8 +1951,6 @@ export function renderBrowseLines(
             style.muted,
           ),
   );
-  if (state.area !== "setup")
-    out.push(fitStyledSegments(paneControls, usable, style.muted));
   out.push(
     isTrash
       ? fitStyledSegments(
