@@ -41,14 +41,22 @@ function typedEntries(
   const names = new Map<string, number>();
   for (const target of targets)
     names.set(target.name, (names.get(target.name) ?? 0) + 1);
-  const kinds = [
-    "skill-exposure",
-    "plugin",
-    "mcp-registration",
-    "app-binding",
+  const groups = [
+    [
+      "skill-exposure",
+      targets.filter(
+        (target) =>
+          target.kind === "skill-exposure" && target.owner.kind !== "plugin",
+      ),
+    ],
+    ["plugin", targets.filter((target) => target.kind === "plugin")],
+    ["app-binding", targets.filter((target) => target.kind === "app-binding")],
+    [
+      "mcp-registration",
+      targets.filter((target) => target.kind === "mcp-registration"),
+    ],
   ] as const;
-  return kinds.flatMap((kind) => {
-    const members = targets.filter((target) => target.kind === kind);
+  return groups.flatMap(([kind, members]) => {
     if (members.length === 0) return [];
     return [
       {
@@ -60,10 +68,30 @@ function typedEntries(
         owner: "",
         note: null,
         target: null,
+        rowKind: "heading" as const,
         selectable: false,
       },
-      ...members.map((target) =>
-        entry(target, (names.get(target.name) ?? 0) > 1),
+      ...members.flatMap((target) =>
+        target.kind !== "plugin"
+          ? [entry(target, (names.get(target.name) ?? 0) > 1)]
+          : [
+              entry(target, (names.get(target.name) ?? 0) > 1),
+              ...targets
+                .filter(
+                  (child) =>
+                    child.kind === "skill-exposure" &&
+                    child.owner.kind === "plugin" &&
+                    child.owner.pluginBoundaryId === target.pluginBoundaryId,
+                )
+                .map((child, index, children) => ({
+                  ...entry(child, (names.get(child.name) ?? 0) > 1),
+                  rowKind: "plugin-skill" as const,
+                  treeBranch:
+                    index === children.length - 1
+                      ? ("last" as const)
+                      : ("middle" as const),
+                })),
+            ],
       ),
     ];
   });

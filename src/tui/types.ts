@@ -116,7 +116,7 @@ export interface TuiPaneView<Item> {
 export interface TuiEntry {
   readonly key: string;
   /** Read-only child rows provide context for a selectable parent boundary. */
-  readonly rowKind?: "plugin-skill";
+  readonly rowKind?: "plugin-skill" | "heading" | "suspended-skill";
   /** Tree connector used when rendering a child beneath its Plugin. */
   readonly treeBranch?: "middle" | "last";
   readonly name: string;
