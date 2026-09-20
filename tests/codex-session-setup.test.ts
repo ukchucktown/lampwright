@@ -176,6 +176,71 @@ describe("Codex Session setup Inventory", () => {
     );
   });
 
+  it("reports malformed installed-owner declarations instead of inventing targets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const pluginRoot = join(
+      codex,
+      "plugins",
+      "cache",
+      "market",
+      "broken",
+      "1.0.0",
+    );
+    await writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), {
+      name: "broken",
+      version: "1.0.0",
+      mcpServers: { invalid: "not-a-server" },
+    });
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            installed: [
+              {
+                pluginId: "broken@market",
+                name: "broken",
+                marketplaceName: "market",
+                version: "1.0.0",
+                installed: true,
+                enabled: true,
+                source: { source: "git", url: "https://example.test/broken" },
+                installPolicy: "AVAILABLE",
+                authPolicy: "ON_USE",
+              },
+            ],
+            available: [],
+          }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    expect(
+      snapshot.targets.filter((target) => target.kind === "mcp-registration"),
+    ).toEqual([]);
+    expect(snapshot.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "mcp-registration",
+          status: "invalid",
+          reason: expect.stringContaining("invalid declaration"),
+        }),
+      ]),
+    );
+  });
+
   it("prefers a trusted workspace MCP policy and executes both native directions", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
