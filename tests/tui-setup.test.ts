@@ -132,4 +132,46 @@ describe("Session setup terminal area", () => {
     await controller.dispatch({ kind: "move", delta: -1 });
     expect(controller.state.model.selected.size).toBe(1);
   });
+
+  it("keeps search scoped to the active setup harness and stages additively", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => twoHarnessSnapshot(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "open-search" });
+    await controller.dispatch({ kind: "append-query", value: "example" });
+    await controller.dispatch({ kind: "append-query", value: "-skill" });
+    expect(controller.state.screen).toBe("search");
+    if (controller.state.screen !== "search") throw new Error();
+    expect(
+      controller.state.model.results.every(
+        (result) => result.entry.exposedTo[0] === "codex",
+      ),
+    ).toBe(true);
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "apply-search" });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.model.selected.size).toBe(1);
+  });
+
+  it("does not apply invalid or empty-match setup expressions", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => twoHarnessSnapshot(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "open-search" });
+    await controller.dispatch({ kind: "append-query", value: "(" });
+    if (controller.state.screen !== "search") throw new Error();
+    expect(controller.state.model.matchError).not.toBeNull();
+    await controller.dispatch({ kind: "apply-search" });
+    expect(controller.state.screen).toBe("search");
+  });
 });
