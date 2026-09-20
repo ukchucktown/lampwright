@@ -165,6 +165,30 @@ async function scanCodexSessionSetup(
       ),
     );
   }
+  const nativePolicySources = new Map<string, SetupSourceRef>();
+  const nativePolicySource = (
+    kind: "skill-exposure" | "plugin",
+    evidence: import("../model/types.js").NativeControlDocumentEvidence,
+  ) => {
+    const key = `${kind}:${pathKey(evidence.path)}`;
+    const existing = nativePolicySources.get(key);
+    if (existing) return existing;
+    const source = addSource(
+      kind,
+      evidence.scope as SetupScope,
+      `codex:${kind}-policy:${evidence.path}`,
+      [],
+      evidence.selectorValue === null && evidence.exists
+        ? "invalid"
+        : "success",
+      evidence.selectorValue === null && evidence.exists
+        ? "Codex configuration is unsafe or malformed"
+        : null,
+      evidence.path,
+    );
+    nativePolicySources.set(key, source);
+    return source;
+  };
 
   // Standalone Skills use the pre-existing exact path exposure evidence.
   for (const installation of inventory.installations) {
@@ -183,6 +207,9 @@ async function scanCodexSessionSetup(
       installation.scope as SetupScope,
       `codex:skill:${installation.id}`,
       [id],
+      "success",
+      null,
+      installation.location.path,
     );
     targets.push({
       id,
@@ -194,7 +221,7 @@ async function scanCodexSessionSetup(
       owner: ownerForInstallation(installation.ownership),
       definitionScope: installation.scope as SetupScope,
       state: stateFromExposure(exposure.status),
-      control: controlFromExposure(exposure, source),
+      control: controlFromExposure(exposure, id, nativePolicySource),
       installationId: installation.id,
     });
   }
@@ -202,6 +229,26 @@ async function scanCodexSessionSetup(
   const pluginTargets = new Map<string, string>();
   const pluginMcpIds = new Map<string, string[]>();
   const requiredApps = new Map<string, string[]>();
+  const ownerStatus = installedOwnerStatus ?? "unavailable";
+  const installedOwnerSource = addSource(
+    "plugin",
+    { kind: "user" },
+    "codex:installed-owner",
+    inventory.plugins
+      .filter(
+        (item) =>
+          item.adapterId === CODEX_PLUGIN_ADAPTER_ID &&
+          item.exposedTo.includes("codex"),
+      )
+      .map((item) => stableId("setup-plugin", item.id))
+      .sort(),
+    ownerStatus,
+    ownerStatus === "success"
+      ? null
+      : ownerStatus === "unavailable"
+        ? "the authoritative Codex installed-owner command is unavailable"
+        : "the authoritative Codex installed-owner command returned invalid output",
+  );
   for (const plugin of inventory.plugins) {
     if (
       plugin.adapterId !== CODEX_PLUGIN_ADAPTER_ID ||
@@ -210,41 +257,22 @@ async function scanCodexSessionSetup(
       continue;
     const id = stableId("setup-plugin", plugin.id);
     pluginTargets.set(plugin.id, id);
-    const source = addSource(
-      "plugin",
-      { kind: "user" },
-      `codex:plugin-policy:${plugin.id}`,
-      [id],
-    );
     targets.push({
       id,
       kind: "plugin",
       harnessId: "codex",
       workspace,
       name: plugin.pluginId,
-      source,
+      source: installedOwnerSource,
       owner: { kind: "plugin", pluginBoundaryId: plugin.id },
       definitionScope: { kind: "user" },
       state: stateFromPlugin(plugin.availability.status),
-      control: pluginControl(plugin, source, userDocument),
+      control: pluginControl(plugin, id, nativePolicySource),
       pluginBoundaryId: plugin.id,
       pluginId: plugin.pluginId,
       childTargetIds: [],
     });
   }
-  const ownerStatus = installedOwnerStatus ?? "unavailable";
-  addSource(
-    "plugin",
-    { kind: "user" },
-    "codex:installed-owner",
-    [...pluginTargets.values()].sort(),
-    ownerStatus,
-    ownerStatus === "success"
-      ? null
-      : ownerStatus === "unavailable"
-        ? "the authoritative Codex installed-owner command is unavailable"
-        : "the authoritative Codex installed-owner command returned invalid output",
-  );
   const childIds = new Map<string, string[]>();
   for (const installation of inventory.installations) {
     if (
@@ -279,9 +307,16 @@ async function scanCodexSessionSetup(
           (plugin) => plugin.id === installation.pluginBoundaryId,
         )?.availability.status ?? "unresolved",
       ),
-      control: unavailablePathControl(
-        installation.location.path,
+      control: unavailableControl(
+        {
+          kind: "skill-path",
+          id: `skill:${installation.location.path}`,
+          path: installation.location.path,
+          authority: "exact-target",
+          governedTargetIds: [id],
+        },
         "Plugin-owned Skills have no independent Codex availability policy",
+        [],
       ),
       installationId: installation.id,
     });
@@ -678,20 +713,43 @@ function configurationControl(
 }
 function pluginControl(
   plugin: PluginBoundary,
-  source: SetupSourceRef,
-  document: Document,
+  targetId: string,
+  policySource: (
+    kind: "skill-exposure" | "plugin",
+    evidence: import("../model/types.js").NativeControlDocumentEvidence,
+  ) => SetupSourceRef,
 ): SetupNativeControl {
-  return configurationControl(
-    {
-      kind: "plugin-id",
-      id: `plugin:${plugin.id}`,
-      pluginId: plugin.pluginId,
-      authority: "exact-target",
-      governedTargetIds: [stableId("setup-plugin", plugin.id)],
-    },
-    source,
-    document,
+  const control = plugin.availability.control;
+  const selector = {
+    kind: "plugin-id" as const,
+    id: `plugin:${plugin.id}`,
+    pluginId: plugin.pluginId,
+    authority: "exact-target" as const,
+    governedTargetIds: [targetId] as [string],
+  };
+  if (control.kind !== "native")
+    return unavailableControl(selector, control.reason, []);
+  const layers = control.layers.map((evidence) =>
+    nativeLayer(evidence, policySource("plugin", evidence)),
   );
+  const operation = (action: "enable" | "disable") => {
+    if (plugin.runtimeDefault)
+      return {
+        kind: "unavailable" as const,
+        reason: "runtime-default Plugins are protected",
+      };
+    const availability = control.availability[action];
+    if (availability.kind === "unavailable") return availability;
+    return configurationOperation(layers, control.writableLayerPaths);
+  };
+  return {
+    selector,
+    layers,
+    availability: {
+      enable: operation("enable"),
+      disable: operation("disable"),
+    },
+  };
 }
 function mcpControl(
   serverKey: string,
@@ -756,62 +814,109 @@ function appControl(
 }
 function controlFromExposure(
   exposure: import("../model/types.js").HarnessExposure,
-  source: SetupSourceRef,
+  targetId: string,
+  policySource: (
+    kind: "skill-exposure" | "plugin",
+    evidence: import("../model/types.js").NativeControlDocumentEvidence,
+  ) => SetupSourceRef,
 ): SetupNativeControl {
-  if (
-    exposure.control.kind !== "native" ||
-    exposure.control.selector.kind !== "path"
-  )
-    return unavailablePathControl(
-      source.sourceId,
-      "this Skill exposure has no supported Codex native policy",
+  const control = exposure.control;
+  if (control.kind !== "native" || control.selector.kind !== "path")
+    return unavailableControl(
+      {
+        kind: "skill-path",
+        id: `skill:${control.kind === "native" ? control.selector.value : targetId}`,
+        path: control.kind === "native" ? control.selector.value : targetId,
+        authority: "exact-target",
+        governedTargetIds: [targetId],
+      },
+      control.kind === "unsupported"
+        ? control.reason
+        : "this Skill exposure has no supported Codex native policy",
+      [],
     );
-  const evidence = exposure.control.layers[0];
-  if (!evidence)
-    return unavailablePathControl(
-      source.sourceId,
-      "Codex Skill policy has no configuration evidence",
-    );
-  const doc: Document = {
-    path: evidence.path,
-    scope: evidence.scope as SetupScope,
-    evidence,
-    value: {},
-    unsafe: evidence.selectorValue === null,
-  };
-  const targetId = source.sourceId.slice("codex:skill:".length);
-  const result = configurationControl(
-    {
-      kind: "skill-path",
-      id: `skill:${exposure.control.selector.value}`,
-      path: exposure.control.selector.value,
-      authority: "exact-target",
-      governedTargetIds: [stableId("setup-skill", targetId)],
-    },
-    source,
-    doc,
+  const layers = control.layers.map((evidence) =>
+    nativeLayer(evidence, policySource("skill-exposure", evidence)),
   );
-  return exposure.control.availability.enable.kind === "available" &&
-    exposure.control.availability.disable.kind === "available"
-    ? result
-    : unavailablePathControl(
-        source.sourceId,
-        "Codex Skill policy is unavailable",
-      );
+  const selector = {
+    kind: "skill-path" as const,
+    id: `skill:${control.selector.value}`,
+    path: control.selector.value,
+    authority: "exact-target" as const,
+    governedTargetIds: [targetId] as [string],
+  };
+  const operation = (action: "enable" | "disable") => {
+    const availability = control.availability[action];
+    return availability.kind === "unavailable"
+      ? availability
+      : configurationOperation(layers, control.writableLayerPaths);
+  };
+  return {
+    selector,
+    layers,
+    availability: {
+      enable: operation("enable"),
+      disable: operation("disable"),
+    },
+  };
 }
-function unavailablePathControl(
-  id: string,
+function nativeLayer(
+  evidence: import("../model/types.js").NativeControlDocumentEvidence,
+  source: SetupSourceRef,
+): SetupConfigurationLayer {
+  return {
+    source,
+    format: evidence.format,
+    scope: evidence.scope as SetupScope,
+    precedence: evidence.documentScope === "user" ? 0 : 1,
+    applies: evidence.applies,
+    exists: evidence.exists,
+    canonicalPath: evidence.canonicalPath,
+    expectedPreimage: evidence.preimageHash,
+    protection: evidence.protection,
+    integrity: evidence.exists
+      ? evidence.canonicalPath === null
+        ? "unreadable"
+        : "regular"
+      : "missing",
+  };
+}
+function configurationOperation(
+  layers: readonly SetupConfigurationLayer[],
+  writablePaths: readonly string[],
+) {
+  const layer = layers.find(
+    (candidate) =>
+      writablePaths.includes(candidate.source.path ?? "") &&
+      candidate.canonicalPath !== null &&
+      candidate.protection.git.kind !== "protected" &&
+      candidate.protection.system.kind === "none" &&
+      candidate.protection.filesystem.kind === "writable",
+  );
+  return layer === undefined
+    ? {
+        kind: "unavailable" as const,
+        reason: "no writable native configuration candidate is safe to modify",
+      }
+    : {
+        kind: "available" as const,
+        controlScope: layer.scope,
+        authority: {
+          kind: "configuration" as const,
+          source: layer.source,
+          layerSourceId: layer.source.sourceId,
+          layerCanonicalPath: layer.canonicalPath!,
+        },
+      };
+}
+function unavailableControl(
+  selector: SetupNativeControl["selector"],
   reason: string,
+  layers: readonly SetupConfigurationLayer[],
 ): SetupNativeControl {
   return {
-    selector: {
-      kind: "skill-path",
-      id: `skill:${id}`,
-      path: id,
-      authority: "exact-target",
-      governedTargetIds: ["pending"],
-    },
-    layers: [],
+    selector,
+    layers,
     availability: {
       enable: { kind: "unavailable", reason },
       disable: { kind: "unavailable", reason },
