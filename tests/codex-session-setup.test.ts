@@ -241,6 +241,55 @@ describe("Codex Session setup Inventory", () => {
     );
   });
 
+  it("does not turn cache-only Plugin material into setup targets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    await writeJson(
+      join(
+        codex,
+        "plugins",
+        "cache",
+        "market",
+        "orphan",
+        "1.0.0",
+        ".codex-plugin",
+        "plugin.json",
+      ),
+      {
+        name: "orphan",
+        version: "1.0.0",
+        mcpServers: { hidden: { command: "hidden" } },
+      },
+    );
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ installed: [], available: [] }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    expect(snapshot.targets).toEqual([]);
+    expect(
+      snapshot.sources.some(
+        (source) =>
+          source.status === "success" && source.targetIds.length === 0,
+      ),
+    ).toBe(true);
+  });
+
   it("prefers a trusted workspace MCP policy and executes both native directions", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
