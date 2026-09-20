@@ -911,15 +911,50 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
             value: null,
           }
         : await readJsoncDescriptor(path);
+    const mcpValue =
+      resource.id === "mcp-servers"
+        ? (record(read.value?.mcpServers) ??
+          record(read.value?.mcp_servers) ??
+          read.value)
+        : record(read.value?.mcpServers);
+    const appValue = record(read.value?.apps);
+    const invalidMcp =
+      kinds.includes("mcp-registration") &&
+      read.kind === "valid" &&
+      mcpValue !== undefined &&
+      !validDescriptorEntries(mcpValue);
+    const invalidApp =
+      kinds.includes("app-binding") &&
+      read.kind === "valid" &&
+      appValue !== null &&
+      !validDescriptorEntries(appValue);
     for (const kind of kinds)
       sources.push({
         kind,
         resourceId: resource.id,
         path,
-        status: read.kind === "valid" ? "success" : read.kind,
-        reason: read.kind === "valid" ? null : read.reason,
+        status:
+          (kind === "mcp-registration" && invalidMcp) ||
+          (kind === "app-binding" && invalidApp)
+            ? "invalid"
+            : read.kind === "valid"
+              ? "success"
+              : read.kind,
+        reason:
+          (kind === "mcp-registration" && invalidMcp) ||
+          (kind === "app-binding" && invalidApp)
+            ? "the descriptor contains an invalid declaration"
+            : read.kind === "valid"
+              ? null
+              : read.reason,
       });
-    if (read.kind !== "valid" || read.value === null) continue;
+    if (
+      read.kind !== "valid" ||
+      read.value === null ||
+      invalidMcp ||
+      invalidApp
+    )
+      continue;
     if (kinds.includes("mcp-registration")) mcpPath ??= path;
     if (kinds.includes("app-binding")) appPath ??= path;
     if (resource.id === "mcp-servers") {
@@ -935,6 +970,14 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
     }
   }
   return { ...combined, mcpPath, appPath, sources };
+}
+function validDescriptorEntries(
+  value: unknown,
+): value is Record<string, unknown> {
+  const map = record(value);
+  return (
+    map !== null && Object.values(map).every((entry) => record(entry) !== null)
+  );
 }
 interface DescriptorSourceResult {
   readonly kind: "mcp-registration" | "app-binding";
