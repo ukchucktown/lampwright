@@ -213,4 +213,29 @@ describe("Session setup terminal area", () => {
     if (controller.state.screen !== "browse") throw new Error();
     expect(controller.state.model.leftPercent).toBe(disabled.leftPercent);
   });
+
+  it("selects only selectable setup rows with Ctrl-A and clears with Ctrl-U", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => buildSessionSetupSnapshot(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    if (controller.state.screen !== "browse") throw new Error();
+    await controller.dispatch(
+      parseRawTuiAction(controller.state, "", { ctrl: true, name: "a" }),
+    );
+    expect(
+      [...controller.state.model.selected].every(
+        (key) => key.startsWith("setup:") && !key.startsWith("setup-heading:"),
+      ),
+    ).toBe(true);
+    expect(controller.state.model.selected.size).toBe(1);
+    await controller.dispatch(
+      parseRawTuiAction(controller.state, "", { ctrl: true, name: "u" }),
+    );
+    expect(controller.state.model.selected.size).toBe(0);
+  });
 });
