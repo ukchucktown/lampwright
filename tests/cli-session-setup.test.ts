@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { resolve } from "node:path";
 
 import { formatCliOutput, runCli } from "../src/cli.js";
 import {
@@ -33,7 +34,7 @@ describe("Session setup CLI", () => {
       output: { kind: "session-setup-snapshot" },
     });
     expect(scanSessionSetup).toHaveBeenCalledWith({
-      workspace: { path: "/fixtures/workspace" },
+      workspace: { path: resolve("/fixtures/workspace") },
       harnessId: "codex",
     });
   });
