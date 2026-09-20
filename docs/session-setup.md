@@ -7,7 +7,7 @@ Application support follows the delivery issues below. This document does not cl
 
 Before a new agent session, the user chooses which capabilities the harness can use. Session setup provides native Enable and Disable controls for Skill Harness Exposures, complete Plugins, MCP Registrations, and App Bindings. It preserves definitions, credentials, and installed content.
 
-Codex and the Claude Code terminal use the same module interfaces and TUI. Gemini CLI follows in the next delivery issue. Claude desktop and account surfaces remain unverified. The user chose a separate Session setup area on 2026-09-19. Existing Skills & plugins lifecycle operations retain their behavior.
+Codex, the Claude Code terminal, and Gemini CLI use the same module interfaces and TUI. Claude desktop and account surfaces remain unverified. The user chose a separate Session setup area on 2026-09-19. Existing Skills & plugins lifecycle operations retain their behavior.
 
 Session setup changes durable native configuration. It does not launch an agent, attach to an active session, disconnect an account, or promise an exact token reduction. Presets, token measurement, per-tool filters, arbitrary harness configuration, and permanent MCP deletion are outside this increment.
 
@@ -172,9 +172,10 @@ Issue #149 publishes `SessionSetupSnapshot` (also exported as
 `SessionSetupIntent`, `SessionSetupPlan`, `SessionSetupReport`, and
 `SessionSetupSourceProfile`. The matching parse functions reject unknown fields
 and unsafe cross-record references, then return deeply frozen values. The package
-also includes `session-setup-v1.schema.json`. The recovered Codex 0.154.0, Claude
-Code 2.1.270, and Gemini CLI 0.59.0 profiles are explicitly `fixture-only`. They
-do not claim production discovery or desktop compatibility.
+also includes `session-setup-v1.schema.json`. The recovered profiles began as
+fixture-only contracts. The Codex 0.154.0, Claude Code 2.1.270, and Gemini CLI
+0.59.0 terminal profiles are now qualified by their delivery adapters. They do
+not claim desktop compatibility.
 
 The setup public value is a direct discriminated union. A snapshot carries the
 parsed legacy Inventory, SHA-256 semantic fingerprint, sources, profiles,

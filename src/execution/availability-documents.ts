@@ -104,16 +104,36 @@ export const createClaudeCodeSessionSetupConfigurationWriter = (
     createClaudeCodeSessionSetupConfigurationEditor(workspacePath),
   );
 
+/** Checked JSON/JSONC edits for the qualified Gemini CLI profile. */
+export function createGeminiCliSessionSetupConfigurationEditor(
+  workspacePath: string,
+): SessionSetupConfigurationEditor {
+  return {
+    edit: (text, request) => editGeminiJson(text, request, workspacePath),
+  };
+}
+
+export const createGeminiCliSessionSetupConfigurationWriter = (
+  workspacePath: string,
+) =>
+  createSessionSetupConfigurationWriter(
+    createGeminiCliSessionSetupConfigurationEditor(workspacePath),
+  );
+
 /** Dispatches only the native formats supported by qualified setup profiles. */
 export function createBuiltInSessionSetupConfigurationEditor(
   workspacePath: string,
 ): SessionSetupConfigurationEditor {
   const codex = createCodexSessionSetupConfigurationEditor();
   const claude = createClaudeCodeSessionSetupConfigurationEditor(workspacePath);
+  const gemini = createGeminiCliSessionSetupConfigurationEditor(workspacePath);
   return {
     edit(document, request) {
-      return request.format === "toml"
-        ? codex.edit(document, request)
+      if (request.format === "toml") return codex.edit(document, request);
+      return request.selectors.every((selector) =>
+        selector.id.startsWith("gemini-cli:"),
+      )
+        ? gemini.edit(document, request)
         : claude.edit(document, request);
     },
   };
@@ -255,6 +275,102 @@ function editClaudeJson(
     );
   }
   parseJson(updated, false);
+  return updated;
+}
+
+function editGeminiJson(
+  text: string,
+  request: SessionSetupConfigurationRequest,
+  workspacePath: string,
+): string {
+  parseJson(text, request.format === "jsonc");
+  let updated = text;
+  for (const mutation of request.mutations) {
+    const selector = request.selectors.find(
+      (item) => item.id === mutation.selectorId,
+    );
+    if (!selector)
+      throw new Error(
+        "Gemini CLI mutation selector is absent from its checked request",
+      );
+    const formattingOptions = {
+      insertSpaces: true,
+      tabSize: 2,
+      eol: updated.includes("\r\n") ? "\r\n" : "\n",
+    };
+    const root = parseJson(updated, request.format === "jsonc");
+    if (selector.kind === "skill-name") {
+      const skills = objectValue(root, "skills");
+      if (skills !== undefined && !isRecord(skills))
+        throw new Error("Gemini CLI Skill settings are malformed");
+      const rawDisabled = objectValue(skills, "disabled");
+      if (
+        rawDisabled !== undefined &&
+        (!Array.isArray(rawDisabled) ||
+          !rawDisabled.every((item) => typeof item === "string"))
+      )
+        throw new Error("Gemini CLI disabled Skill names are malformed");
+      const disabled = Array.isArray(rawDisabled)
+        ? (rawDisabled as string[])
+        : [];
+      const next =
+        mutation.policy === "disabled"
+          ? disabled.includes(selector.name)
+            ? disabled
+            : [...disabled, selector.name]
+          : disabled.filter((item) => item !== selector.name);
+      updated = applyEdits(
+        updated,
+        modify(updated, ["skills", "disabled"], next, {
+          formattingOptions,
+        }),
+      );
+      continue;
+    }
+    if (selector.kind === "plugin-id") {
+      const entry = objectValue(root, selector.pluginId);
+      if (entry !== undefined && !isRecord(entry))
+        throw new Error("Gemini CLI extension enablement is malformed");
+      const rawOverrides = objectValue(entry, "overrides");
+      if (
+        rawOverrides !== undefined &&
+        (!Array.isArray(rawOverrides) ||
+          !rawOverrides.every((item) => typeof item === "string"))
+      )
+        throw new Error("Gemini CLI extension overrides are malformed");
+      const overrides = Array.isArray(rawOverrides)
+        ? (rawOverrides as string[])
+        : [];
+      const next = updateGeminiOverrides(
+        overrides,
+        workspacePath,
+        mutation.policy === "enabled",
+      );
+      updated = applyEdits(
+        updated,
+        modify(updated, [selector.pluginId, "overrides"], next, {
+          formattingOptions,
+        }),
+      );
+      continue;
+    }
+    if (selector.kind !== "mcp-server-key")
+      throw new Error("selector is not supported by Gemini CLI JSON");
+    const entry = objectValue(root, selector.serverKey);
+    if (entry !== undefined && !isRecord(entry))
+      throw new Error("Gemini CLI MCP enablement is malformed");
+    updated = applyEdits(
+      updated,
+      mutation.policy === "disabled"
+        ? modify(updated, [selector.serverKey, "enabled"], false, {
+            formattingOptions,
+          })
+        : modify(updated, [selector.serverKey], undefined, {
+            formattingOptions,
+          }),
+    );
+  }
+  parseJson(updated, request.format === "jsonc");
   return updated;
 }
 

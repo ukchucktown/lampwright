@@ -146,6 +146,14 @@ const availability = z.discriminatedUnion("kind", [
     kind: z.literal("available"),
     controlScope: scope,
     authority,
+    additionalControls: z
+      .array(
+        z.strictObject({
+          controlScope: scope,
+          authority,
+        }),
+      )
+      .optional(),
   }),
   z.strictObject({ kind: z.literal("unavailable"), reason: text }),
 ]);
@@ -832,34 +840,36 @@ function validateTargets(
     for (const operation of ["enable", "disable"] as const) {
       const operationValue = target.control.availability[operation];
       if (operationValue.kind !== "available") continue;
-      if (!scopeMatchesTarget(operationValue.controlScope, target))
-        issues.push({
-          path: ["targets", i, "control", "availability", operation],
-          message: "control scope does not match target context",
-        });
-      if (
-        operationValue.authority.kind === "native-command" &&
-        !scopeMatchesTarget(operationValue.authority.scope, target)
-      )
-        issues.push({
-          path: ["targets", i, "control", "availability", operation],
-          message: "command scope does not match target context",
-        });
-      if (operationValue.authority.kind === "configuration") {
-        const configurationAuthority = operationValue.authority;
+      for (const controlValue of operationControls(operationValue)) {
+        if (!scopeMatchesTarget(controlValue.controlScope, target))
+          issues.push({
+            path: ["targets", i, "control", "availability", operation],
+            message: "control scope does not match target context",
+          });
         if (
-          !target.control.layers.some(
-            (item) =>
-              item.source.sourceId === configurationAuthority.layerSourceId &&
-              (item.canonicalPath ?? item.source.path) ===
-                configurationAuthority.layerCanonicalPath &&
-              sameSource(item.source, configurationAuthority.source),
-          )
+          controlValue.authority.kind === "native-command" &&
+          !scopeMatchesTarget(controlValue.authority.scope, target)
         )
           issues.push({
             path: ["targets", i, "control", "availability", operation],
-            message: "configuration authority is not an exact target layer",
+            message: "command scope does not match target context",
           });
+        if (controlValue.authority.kind === "configuration") {
+          const configurationAuthority = controlValue.authority;
+          if (
+            !target.control.layers.some(
+              (item) =>
+                item.source.sourceId === configurationAuthority.layerSourceId &&
+                (item.canonicalPath ?? item.source.path) ===
+                  configurationAuthority.layerCanonicalPath &&
+                sameSource(item.source, configurationAuthority.source),
+            )
+          )
+            issues.push({
+              path: ["targets", i, "control", "availability", operation],
+              message: "configuration authority is not an exact target layer",
+            });
+        }
       }
     }
   }
@@ -960,27 +970,39 @@ function validateTargets(
   for (const [targetIndex, target] of targets.entries())
     for (const operation of ["enable", "disable"] as const) {
       const operationValue = target.control.availability[operation];
-      if (
-        operationValue.kind !== "available" ||
-        operationValue.authority.kind !== "native-command"
-      )
-        continue;
-      let includesPrimarySelector = false;
-      for (const effect of operationValue.authority.effects) {
-        const controlledTargets = selectors.get(effect.selectorId);
-        if (effect.selectorId === target.control.selector.id)
-          includesPrimarySelector = true;
-        if (
-          controlledTargets === undefined ||
-          !sameStringSet(
-            effect.targets.map((item) => item.targetId),
-            controlledTargets.map((item) => item.id),
-          ) ||
-          effect.targets.some((ref) => {
-            const affected = targetById.get(ref.targetId);
-            return affected === undefined || !sameRef(refFor(affected), ref);
-          })
-        )
+      if (operationValue.kind !== "available") continue;
+      for (const controlValue of operationControls(operationValue)) {
+        if (controlValue.authority.kind !== "native-command") continue;
+        let includesPrimarySelector = false;
+        for (const effect of controlValue.authority.effects) {
+          const controlledTargets = selectors.get(effect.selectorId);
+          if (effect.selectorId === target.control.selector.id)
+            includesPrimarySelector = true;
+          if (
+            controlledTargets === undefined ||
+            !sameStringSet(
+              effect.targets.map((item) => item.targetId),
+              controlledTargets.map((item) => item.id),
+            ) ||
+            effect.targets.some((ref) => {
+              const affected = targetById.get(ref.targetId);
+              return affected === undefined || !sameRef(refFor(affected), ref);
+            })
+          )
+            issues.push({
+              path: [
+                "targets",
+                targetIndex,
+                "control",
+                "availability",
+                operation,
+                "authority",
+                "effects",
+              ],
+              message: "native-command effect exceeds selector authority",
+            });
+        }
+        if (!includesPrimarySelector)
           issues.push({
             path: [
               "targets",
@@ -991,22 +1013,9 @@ function validateTargets(
               "authority",
               "effects",
             ],
-            message: "native-command effect exceeds selector authority",
+            message: "native-command omits its primary selector effect",
           });
       }
-      if (!includesPrimarySelector)
-        issues.push({
-          path: [
-            "targets",
-            targetIndex,
-            "control",
-            "availability",
-            operation,
-            "authority",
-            "effects",
-          ],
-          message: "native-command omits its primary selector effect",
-        });
     }
   if (issues.length) throw new SessionSetupValidationError(issues);
 }
@@ -1431,28 +1440,38 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
     for (const targetRef of action.targets) {
       const target = targetById.get(targetRef.targetId);
       const operation = target?.control.availability[action.operation];
-      if (
-        operation?.kind === "available" &&
-        !action.approvals.some(
-          (approval) =>
-            approval.kind === "scope-disclosure" &&
-            JSON.stringify(approval.scope) ===
-              JSON.stringify(operation.controlScope),
-        )
-      )
-        planIssues.push({
-          path: ["actions", action.id, "approvals"],
-          message: "action omits its native control scope disclosure",
-        });
+      if (operation?.kind === "available")
+        for (const controlValue of operationControls(operation)) {
+          const used = action.mutations.some(
+            (mutation) =>
+              mutation.selectorId === target?.control.selector.id &&
+              JSON.stringify(mutation.authority) ===
+                JSON.stringify(controlValue.authority),
+          );
+          if (
+            used &&
+            !action.approvals.some(
+              (approval) =>
+                approval.kind === "scope-disclosure" &&
+                JSON.stringify(approval.scope) ===
+                  JSON.stringify(controlValue.controlScope),
+            )
+          )
+            planIssues.push({
+              path: ["actions", action.id, "approvals"],
+              message: "action omits its native control scope disclosure",
+            });
+        }
     }
     for (const mutation of action.mutations) {
-      const priorSelectorOwner = mutationOwners.get(mutation.selectorId);
+      const mutationOwnerKey = `${mutation.selectorId}:${JSON.stringify(mutation.authority)}`;
+      const priorSelectorOwner = mutationOwners.get(mutationOwnerKey);
       if (priorSelectorOwner)
         planIssues.push({
           path: ["actions", action.id, "mutations"],
           message: `selector mutation is already owned by action ${priorSelectorOwner}`,
         });
-      else mutationOwners.set(mutation.selectorId, action.id);
+      else mutationOwners.set(mutationOwnerKey, action.id);
       const methodKey =
         mutation.kind === "configuration"
           ? `configuration:${mutation.authority.layerCanonicalPath ?? "missing"}`
@@ -1488,13 +1507,15 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
       const availabilityValue = value.targets.find(
         (target) => target.control.selector.id === mutation.selectorId,
       )?.control.availability[expectedAuthority];
-      if (
-        !availabilityValue ||
-        availabilityValue.kind !== "available" ||
-        availabilityValue.authority.kind !== mutation.kind ||
-        JSON.stringify(availabilityValue.authority) !==
-          JSON.stringify(mutation.authority)
-      )
+      const authorized =
+        availabilityValue?.kind === "available" &&
+        operationControls(availabilityValue).some(
+          (controlValue) =>
+            controlValue.authority.kind === mutation.kind &&
+            JSON.stringify(controlValue.authority) ===
+              JSON.stringify(mutation.authority),
+        );
+      if (!authorized)
         throw new SessionSetupValidationError([
           {
             path: ["actions", action.id, "mutations"],
@@ -1585,6 +1606,18 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
       ]);
   }
   return value;
+}
+
+function operationControls(
+  operation: Extract<
+    import("./types.js").SetupOperationAvailability,
+    { readonly kind: "available" }
+  >,
+) {
+  return [
+    { controlScope: operation.controlScope, authority: operation.authority },
+    ...(operation.additionalControls ?? []),
+  ];
 }
 export function parseSessionSetupReport(input: unknown): SessionSetupReport {
   const value = parse<SessionSetupReport>(sessionSetupReportSchema, input);

@@ -84,13 +84,15 @@ export function planSessionSetup(
         reason: availability.reason,
       });
     } else {
-      if (availability.authority.kind === "configuration")
-        addConfigurationBlocks(target, ref, availability.authority, blocks);
-      warnings.push({
-        kind: "control-scope",
-        target: ref,
-        scope: availability.controlScope,
-      });
+      for (const control of operationControls(availability)) {
+        if (control.authority.kind === "configuration")
+          addConfigurationBlocks(target, ref, control.authority, blocks);
+        warnings.push({
+          kind: "control-scope",
+          target: ref,
+          scope: control.controlScope,
+        });
+      }
       warnings.push({
         kind: "activation",
         target: ref,
@@ -121,17 +123,18 @@ export function planSessionSetup(
       availability.kind === "available" &&
       blocks.length === priorBlockCount
     ) {
-      candidates.push({
-        target,
-        ref,
-        scope: availability.controlScope,
-        mutation: {
-          kind: availability.authority.kind,
-          authority: availability.authority,
-          selectorId: target.control.selector.id,
-          policy: intent.action === "enable" ? "enabled" : "disabled",
-        } as SetupMutation,
-      });
+      for (const control of operationControls(availability))
+        candidates.push({
+          target,
+          ref,
+          scope: control.controlScope,
+          mutation: {
+            kind: control.authority.kind,
+            authority: control.authority,
+            selectorId: target.control.selector.id,
+            policy: intent.action === "enable" ? "enabled" : "disabled",
+          } as SetupMutation,
+        });
     }
   }
 
@@ -148,10 +151,13 @@ export function planSessionSetup(
   const preliminaryGroups = groupCandidates(
     candidates.filter((candidate) => !blockedIds.has(candidate.target.id)),
   );
-  const preliminaryGroupByTarget = new Map<string, ActionGroup>();
+  const preliminaryGroupByTarget = new Map<string, ActionGroup[]>();
   for (const group of preliminaryGroups)
     for (const candidate of group.candidates)
-      preliminaryGroupByTarget.set(candidate.target.id, group);
+      preliminaryGroupByTarget.set(candidate.target.id, [
+        ...(preliminaryGroupByTarget.get(candidate.target.id) ?? []),
+        group,
+      ]);
 
   for (const targetId of cyclicTargets(
     prerequisites,
@@ -196,27 +202,30 @@ export function planSessionSetup(
   const finalGroups = groupCandidates(
     candidates.filter((candidate) => !blockedIds.has(candidate.target.id)),
   );
-  const actionIdByTarget = new Map<string, string>();
+  const actionIdsByTarget = new Map<string, string[]>();
   const actionIdByGroup = new Map<string, string>();
   for (const group of finalGroups) {
     const id = stableId("setup-action", intent.action, group.key);
     actionIdByGroup.set(group.key, id);
     for (const candidate of group.candidates)
-      actionIdByTarget.set(candidate.target.id, id);
+      actionIdsByTarget.set(candidate.target.id, [
+        ...(actionIdsByTarget.get(candidate.target.id) ?? []),
+        id,
+      ]);
   }
   const actions = finalGroups.map((group) => {
     const id = actionIdByGroup.get(group.key)!;
     const dependsOn = new Set<string>();
     for (const candidate of group.candidates)
       for (const requiredId of prerequisites.get(candidate.target.id) ?? []) {
-        const dependencyId = actionIdByTarget.get(requiredId);
-        if (dependencyId && dependencyId !== id) dependsOn.add(dependencyId);
+        for (const dependencyId of actionIdsByTarget.get(requiredId) ?? [])
+          if (dependencyId !== id) dependsOn.add(dependencyId);
       }
     const scopes = uniqueScopes(group.candidates.map((item) => item.scope));
     return {
       id,
       kind: "native-availability" as const,
-      targets: group.candidates.map((item) => item.ref) as [
+      targets: uniqueRefs(group.candidates.map((item) => item.ref)) as [
         SessionSetupTargetRef,
         ...SessionSetupTargetRef[],
       ],
@@ -342,7 +351,8 @@ function addSourceBlocks(
 ): void {
   const sourceIds = new Set([target.source.sourceId]);
   if (availability.kind === "available")
-    sourceIds.add(availability.authority.source.sourceId);
+    for (const control of operationControls(availability))
+      sourceIds.add(control.authority.source.sourceId);
   // A contributing layer is evidence for the selected native policy even when
   // the chosen mutation is written to another layer.  An unresolved workspace
   // layer must therefore fail closed; an explicitly untrusted layer does not
@@ -409,6 +419,7 @@ function addSelectorBlocks(
         candidate.harnessId === target.harnessId &&
         candidate.workspace.path === target.workspace.path &&
         (target.harnessId === "claude-code" ||
+          target.harnessId === "gemini-cli" ||
           (candidate.control.selector.policyOwner.kind === "plugin" &&
             target.control.selector.policyOwner.kind === "plugin" &&
             candidate.control.selector.policyOwner.pluginId ===
@@ -623,7 +634,7 @@ function groupCandidates(candidates: readonly Candidate[]): ActionGroup[] {
 
 function cyclicTargets(
   prerequisites: ReadonlyMap<string, ReadonlySet<string>>,
-  groups: ReadonlyMap<string, ActionGroup>,
+  groups: ReadonlyMap<string, readonly ActionGroup[]>,
 ): ReadonlySet<string> {
   const state = new Map<string, "visiting" | "visited">();
   const stack: string[] = [];
@@ -639,13 +650,22 @@ function cyclicTargets(
     state.set(targetId, "visiting");
     stack.push(targetId);
     for (const requiredId of prerequisites.get(targetId) ?? [])
-      if (groups.get(requiredId)?.key !== groups.get(targetId)?.key)
+      if (!shareActionGroup(groups.get(requiredId), groups.get(targetId)))
         visit(requiredId);
     stack.pop();
     state.set(targetId, "visited");
   };
   for (const targetId of prerequisites.keys()) visit(targetId);
   return cyclic;
+}
+
+function shareActionGroup(
+  left: readonly ActionGroup[] | undefined,
+  right: readonly ActionGroup[] | undefined,
+): boolean {
+  return !!left?.some((candidate) =>
+    right?.some((other) => other.key === candidate.key),
+  );
 }
 
 function mutationGroupKey(mutation: SetupMutation): string {
@@ -675,6 +695,26 @@ function uniqueScopes(scopes: readonly SetupScope[]): SetupScope[] {
   return [...unique.values()].sort((left, right) =>
     stringifyModel(left, 0).localeCompare(stringifyModel(right, 0)),
   );
+}
+
+function uniqueRefs(
+  refs: readonly SessionSetupTargetRef[],
+): SessionSetupTargetRef[] {
+  return [
+    ...new Map(refs.map((ref) => [stringifyModel(ref, 0), ref])).values(),
+  ];
+}
+
+function operationControls(
+  operation: Extract<
+    SessionSetupTarget["control"]["availability"]["enable"],
+    { readonly kind: "available" }
+  >,
+) {
+  return [
+    { controlScope: operation.controlScope, authority: operation.authority },
+    ...(operation.additionalControls ?? []),
+  ];
 }
 
 function closureTargets(
