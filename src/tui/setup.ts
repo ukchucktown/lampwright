@@ -165,8 +165,7 @@ function entry(target: SessionSetupTarget, duplicate = false): TuiEntry {
 function selectable(target: SessionSetupTarget): boolean {
   return (
     !(target.kind === "skill-exposure" && target.owner.kind === "plugin") &&
-    target.owner.kind !== "runtime" &&
-    target.state.policy !== "unresolved"
+    target.owner.kind !== "runtime"
   );
 }
 export function selectedSetupTargetIds(

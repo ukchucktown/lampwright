@@ -1339,7 +1339,11 @@ export class TuiController {
               },
             };
         }
-      }
+      } else
+        this.stateValue = {
+          ...state,
+          model: reduceBrowse(state.model, { kind: "focus", pane: "detail" }),
+        };
       return;
     }
     const ids = selectedSetupTargetIds(

@@ -737,7 +737,8 @@ export function parseRawTuiAction(
   ) {
     if (
       (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
+        state.screen === "update-report" ||
+        state.screen === "setup-report") &&
       key.name === "escape"
     )
       return { kind: "cancel" };
