@@ -374,6 +374,7 @@ export interface TuiSetupReportState {
   readonly report: SessionSetupReport;
   readonly technicalDetails: boolean;
   readonly scrollOffset: number;
+  readonly refreshError?: string;
 }
 
 export interface TuiUpdatePlanState {

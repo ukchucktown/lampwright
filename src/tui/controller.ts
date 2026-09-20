@@ -1484,22 +1484,50 @@ export class TuiController {
           : await this.dependencies.scanSessionSetup();
       if (snapshot === undefined) throw new Error();
       const view = state.browse.view === "disabled" ? "disabled" : "inventory";
+      const inventoryView = {
+        inventory: snapshot.legacyInventory,
+        setupInventory: snapshot,
+        area: "setup" as const,
+        view: "inventory" as const,
+        model: preserveBrowseModel(
+          state.browse.view === "inventory"
+            ? state.browse.model
+            : (state.browse.viewSnapshots?.inventory?.model ??
+                state.browse.model),
+          createSetupSections(
+            snapshot,
+            "inventory",
+            state.browse.disabledEntries,
+          ),
+        ),
+      };
+      const disabledView = {
+        inventory: snapshot.legacyInventory,
+        setupInventory: snapshot,
+        area: "setup" as const,
+        view: "disabled" as const,
+        model: preserveBrowseModel(
+          state.browse.view === "disabled"
+            ? state.browse.model
+            : (state.browse.viewSnapshots?.disabled?.model ??
+                state.browse.model),
+          createSetupSections(
+            snapshot,
+            "disabled",
+            state.browse.disabledEntries,
+          ),
+        ),
+      };
       this.stateValue = {
         screen: "browse",
-        inventory: state.browse.inventory,
-        setupInventory: snapshot,
-        area: "setup",
-        view,
-        model: createBrowseModel(
-          createSetupSections(snapshot, view, state.browse.disabledEntries),
-          state.browse.model.viewport,
-        ),
-        ...(state.browse.areaSnapshots === undefined
-          ? {}
-          : { areaSnapshots: state.browse.areaSnapshots }),
+        ...(view === "disabled" ? disabledView : inventoryView),
+        viewSnapshots: { inventory: inventoryView, disabled: disabledView },
       };
     } catch {
-      this.stateValue = { screen: "done", report: state.report };
+      this.stateValue = {
+        ...state,
+        refreshError: "Refresh failed; the report remains available.",
+      };
     }
   }
 
