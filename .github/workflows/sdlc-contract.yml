@@ -1,0 +1,43 @@
+name: SDLC PR contract
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read trusted SDLC automation
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .sdlc/base
+
+      - name: Validate pull request contract
+        id: contract
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node .sdlc/base/.github/scripts/sdlc-pr-contract.mjs validate
+          --event "$GITHUB_EVENT_PATH"
+          --config .sdlc/base/docs/agents/sdlc.md
+
+      - name: Check out pull request code
+        if: steps.contract.outputs.profile != 'none'
+        uses: actions/checkout@v5
+        with:
+          path: .sdlc/head
+
+      - name: Run configured validation
+        if: steps.contract.outputs.profile != 'none'
+        run: >-
+          node .sdlc/base/.github/scripts/sdlc-pr-contract.mjs run-validation
+          --profile "${{ steps.contract.outputs.profile }}"
+          --repository-root .sdlc/head
+          --config .sdlc/base/docs/agents/sdlc.md

@@ -1,0 +1,29 @@
+name: SDLC close child
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close-child:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read trusted SDLC automation
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: .sdlc/base
+
+      - name: Close a merged child issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node .sdlc/base/.github/scripts/sdlc-close-child.mjs
+          --event "$GITHUB_EVENT_PATH"
+          --config .sdlc/base/docs/agents/sdlc.md
