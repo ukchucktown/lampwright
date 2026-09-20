@@ -9,6 +9,7 @@ closeChildOnIntegrationMerge: true
 autoMergeChildPullRequests: true
 childMergeMethod: "squash"
 featureMergeMethod: "merge"
+validationSetupCommands: [{"executable":"npm","args":["ci","--ignore-scripts"]}]
 childValidationCommands: [{"executable":"npm","args":["run","format:check"]},{"executable":"npm","args":["run","lint"]},{"executable":"npm","args":["run","typecheck"]},{"executable":"npm","args":["test"]}]
 featureValidationCommands: [{"executable":"npm","args":["run","format:check"]},{"executable":"npm","args":["run","lint"]},{"executable":"npm","args":["run","typecheck"]},{"executable":"npm","args":["test"]}]
 finalMergeApproval: "required"
