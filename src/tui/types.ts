@@ -298,6 +298,8 @@ export interface TuiSearchState {
   /** The untouched browse position to restore on done or cancel. */
   readonly browse: TuiBrowseSnapshot;
   readonly model: TuiSearchModel;
+  /** Search must retain the area/harness projection it opened over. */
+  readonly scope?: readonly TuiSection[];
 }
 
 export interface TuiPlanState {

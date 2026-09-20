@@ -464,6 +464,7 @@ export class TuiController {
         screen: "search",
         browse: browseSnapshot(state),
         model,
+        scope: state.model.sections,
       };
       return;
     }
@@ -671,7 +672,11 @@ export class TuiController {
     if (command === null) return;
     this.stateValue = {
       ...state,
-      model: reduceSearch(state.model, state.browse.model.sections, command),
+      model: reduceSearch(
+        state.model,
+        state.scope ?? state.browse.model.sections,
+        command,
+      ),
     };
   }
 
@@ -1247,6 +1252,7 @@ export class TuiController {
         screen: "search",
         browse: browseSnapshot(state),
         model,
+        scope: searchBrowse.sections,
       };
       return;
     }
@@ -1281,7 +1287,13 @@ export class TuiController {
           ...state,
           model:
             restored === undefined
-              ? next
+              ? {
+                  ...createBrowseModel(
+                    state.model.sections,
+                    state.model.viewport,
+                  ),
+                  sectionIndex: next.sectionIndex,
+                }
               : { ...restored, sectionIndex: next.sectionIndex },
           setupHarnessStates,
         };
@@ -1724,10 +1736,14 @@ function resizeState(
     return {
       ...state,
       browse: resizeBrowse(state.browse, viewport),
-      model: reduceSearch(state.model, state.browse.model.sections, {
-        kind: "viewport",
-        viewport,
-      }),
+      model: reduceSearch(
+        state.model,
+        state.scope ?? state.browse.model.sections,
+        {
+          kind: "viewport",
+          viewport,
+        },
+      ),
     };
   if (state.screen === "report") {
     const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };

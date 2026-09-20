@@ -115,8 +115,7 @@ export function selectedSetupTargetIds(
   sectionIndex: number,
   entryIndex: number,
 ): readonly string[] {
-  const selectedIds = sections
-    .flatMap((section) => section.entries)
+  const selectedIds = (sections[sectionIndex]?.entries ?? [])
     .filter((entry) => selected.has(entry.key))
     .map((entry) => entry.key.slice(6));
   if (selectedIds.length) return selectedIds;
