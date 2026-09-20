@@ -136,7 +136,9 @@ async function scanCodexSessionSetup(
     });
     return source;
   };
-  for (const document of [userDocument, projectDocument])
+  for (const [index, document] of [userDocument, projectDocument].entries()) {
+    if (index === 1 && pathKey(document.path) === pathKey(userDocument.path))
+      continue;
     addSource(
       "mcp-registration",
       document.scope,
@@ -154,6 +156,7 @@ async function scanCodexSessionSetup(
           : "the Codex configuration is absent",
       document.path,
     );
+  }
 
   // Standalone Skills use the pre-existing exact path exposure evidence.
   for (const installation of inventory.installations) {
