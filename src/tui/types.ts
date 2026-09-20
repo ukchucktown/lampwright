@@ -133,6 +133,7 @@ export interface TuiEntry {
   readonly availabilityTargets?: readonly AvailabilityTarget[];
   /** Overrides target-based selectability for non-removal projections. */
   readonly selectable?: boolean;
+  readonly lifecycleDisabledKey?: string;
 }
 
 export interface TuiSection {

@@ -2,12 +2,14 @@ import type {
   SessionSetupSnapshot,
   SessionSetupTarget,
 } from "../session-setup/types.js";
+import type { DisabledEntry } from "../disabled-storage/types.js";
 import type { TuiEntry, TuiSection } from "./types.js";
 
 const harnesses = ["codex", "claude-code", "gemini-cli"] as const;
 export function createSetupSections(
   snapshot: SessionSetupSnapshot,
   view: "inventory" | "disabled",
+  disabledEntries: readonly DisabledEntry[] = [],
 ): readonly TuiSection[] {
   return harnesses.map((harnessId) => {
     const targets = snapshot.targets
@@ -31,9 +33,39 @@ export function createSetupSections(
       detail: `${targets.length} target(s) · ${sources.length} source(s)${sources.some((source) => source.status !== "success") ? " · unavailable/incomplete evidence" : ""}`,
       selectable: targets.some(selectable),
       target: null,
-      entries: typedEntries(targets),
+      entries: [
+        ...typedEntries(targets),
+        ...(view === "disabled"
+          ? suspendedEntries(disabledEntries, harnessId)
+          : []),
+      ],
     };
   });
+}
+function suspendedEntries(
+  entries: readonly DisabledEntry[],
+  harnessId: string,
+): readonly TuiEntry[] {
+  return entries
+    .filter((entry) =>
+      entry.harnessExposures.some(
+        (exposure) => exposure.harnessId === harnessId,
+      ),
+    )
+    .map((entry) => ({
+      key: `setup-suspended:${entry.id}:${harnessId}`,
+      rowKind: "suspended-skill" as const,
+      name: entry.operation.displayNames.join(", "),
+      description:
+        "Suspended Skill. Open the lifecycle Disabled entry to enable it.",
+      exposedTo: [harnessId],
+      paths: [],
+      owner: entry.ownership.kind,
+      note: "Suspended · lifecycle route",
+      target: null,
+      selectable: false,
+      lifecycleDisabledKey: `disabled-entry:${entry.id}`,
+    }));
 }
 function typedEntries(
   targets: readonly SessionSetupTarget[],

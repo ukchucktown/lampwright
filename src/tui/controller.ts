@@ -1167,7 +1167,11 @@ export class TuiController {
         view: "inventory",
         model: {
           ...createBrowseModel(
-            createSetupSections(setupInventory, "inventory"),
+            createSetupSections(
+              setupInventory,
+              "inventory",
+              state.disabledEntries,
+            ),
             state.model.viewport,
           ),
           notice:
@@ -1213,7 +1217,7 @@ export class TuiController {
               ...state,
               view,
               model: createBrowseModel(
-                createSetupSections(snapshot, view),
+                createSetupSections(snapshot, view, state.disabledEntries),
                 state.model.viewport,
               ),
               viewSnapshots: snapshots,
@@ -1304,7 +1308,29 @@ export class TuiController {
       action.kind !== "select"
     )
       return;
-    if (action.kind === "select") return; // details is browse-only; never implies removal.
+    if (action.kind === "select") {
+      const entry = currentEntry(state.model);
+      if (entry?.lifecycleDisabledKey !== undefined) {
+        await this.openView({ ...state, area: "skills" }, "disabled");
+        if (this.stateValue.screen === "browse") {
+          const index = this.stateValue.model.sections
+            .flatMap((section) => section.entries)
+            .findIndex(
+              (candidate) => candidate.key === entry.lifecycleDisabledKey,
+            );
+          if (index >= 0)
+            this.stateValue = {
+              ...this.stateValue,
+              model: {
+                ...this.stateValue.model,
+                focus: "entries",
+                entryIndex: index,
+              },
+            };
+        }
+      }
+      return;
+    }
     const ids = selectedSetupTargetIds(
       state.model.sections,
       state.model.selected,
@@ -1447,7 +1473,7 @@ export class TuiController {
         area: "setup",
         view,
         model: createBrowseModel(
-          createSetupSections(snapshot, view),
+          createSetupSections(snapshot, view, state.browse.disabledEntries),
           state.browse.model.viewport,
         ),
         ...(state.browse.areaSnapshots === undefined
