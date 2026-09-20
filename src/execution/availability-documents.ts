@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import { parse as parseToml } from "@iarna/toml";
 import {
@@ -88,6 +88,44 @@ export const createCodexSessionSetupConfigurationWriter = () =>
     createCodexSessionSetupConfigurationEditor(),
   );
 
+/** Checked JSON edits for the qualified Claude Code terminal profile. */
+export function createClaudeCodeSessionSetupConfigurationEditor(
+  workspacePath: string,
+): SessionSetupConfigurationEditor {
+  return {
+    edit: (text, request) => editClaudeJson(text, request, workspacePath),
+  };
+}
+
+export const createClaudeCodeSessionSetupConfigurationWriter = (
+  workspacePath: string,
+) =>
+  createSessionSetupConfigurationWriter(
+    createClaudeCodeSessionSetupConfigurationEditor(workspacePath),
+  );
+
+/** Dispatches only the native formats supported by qualified setup profiles. */
+export function createBuiltInSessionSetupConfigurationEditor(
+  workspacePath: string,
+): SessionSetupConfigurationEditor {
+  const codex = createCodexSessionSetupConfigurationEditor();
+  const claude = createClaudeCodeSessionSetupConfigurationEditor(workspacePath);
+  return {
+    edit(document, request) {
+      return request.format === "toml"
+        ? codex.edit(document, request)
+        : claude.edit(document, request);
+    },
+  };
+}
+
+export const createBuiltInSessionSetupConfigurationWriter = (
+  workspacePath: string,
+) =>
+  createSessionSetupConfigurationWriter(
+    createBuiltInSessionSetupConfigurationEditor(workspacePath),
+  );
+
 function editCodexToml(
   text: string,
   request: SessionSetupConfigurationRequest,
@@ -102,6 +140,8 @@ function editCodexToml(
       throw new Error(
         "Codex mutation selector is absent from its checked request",
       );
+    if (selector.kind === "skill-name")
+      throw new Error("Claude Skill selectors cannot edit Codex TOML");
     const path =
       selector.kind === "skill-path"
         ? ["skills", "config"]
@@ -126,6 +166,106 @@ function editCodexToml(
   }
   parseToml(updated);
   return updated;
+}
+
+function editClaudeJson(
+  text: string,
+  request: SessionSetupConfigurationRequest,
+  workspacePath: string,
+): string {
+  parseJson(text, false);
+  let updated = text;
+  for (const mutation of request.mutations) {
+    const selector = request.selectors.find(
+      (item) => item.id === mutation.selectorId,
+    );
+    if (!selector)
+      throw new Error(
+        "Claude Code mutation selector is absent from its checked request",
+      );
+    const formattingOptions = {
+      insertSpaces: true,
+      tabSize: 2,
+      eol: updated.includes("\r\n") ? "\r\n" : "\n",
+    };
+    if (selector.kind === "skill-name") {
+      updated = applyEdits(
+        updated,
+        modify(
+          updated,
+          ["skillOverrides", selector.name],
+          mutation.policy === "enabled" ? "on" : "off",
+          { formattingOptions },
+        ),
+      );
+      continue;
+    }
+    if (selector.kind === "plugin-id") {
+      updated = applyEdits(
+        updated,
+        modify(
+          updated,
+          ["enabledPlugins", selector.pluginId],
+          mutation.policy === "enabled",
+          { formattingOptions },
+        ),
+      );
+      continue;
+    }
+    if (selector.kind !== "mcp-server-key")
+      throw new Error("selector is not supported by Claude Code JSON");
+    const root = parseJson(updated, false);
+    const projects = objectValue(root, "projects");
+    if (projects !== undefined && !isRecord(projects))
+      throw new Error("Claude Code projects state is malformed");
+    const matchingProjectKeys = Object.keys(
+      isRecord(projects) ? projects : {},
+    ).filter((key) => normalizePath(key) === normalizePath(workspacePath));
+    if (matchingProjectKeys.length > 1)
+      throw new Error("Claude Code workspace state is ambiguous");
+    const projectKey = matchingProjectKeys[0] ?? workspacePath;
+    const project = isRecord(projects)
+      ? objectValue(projects, projectKey)
+      : undefined;
+    if (project !== undefined && !isRecord(project))
+      throw new Error("Claude Code workspace state is malformed");
+    const rawDisabled = isRecord(project)
+      ? objectValue(project, "disabledMcpServers")
+      : undefined;
+    if (
+      rawDisabled !== undefined &&
+      (!Array.isArray(rawDisabled) ||
+        !rawDisabled.every((item) => typeof item === "string"))
+    )
+      throw new Error("Claude Code disabled MCP preferences are malformed");
+    const disabled = Array.isArray(rawDisabled)
+      ? (rawDisabled as string[])
+      : [];
+    const next =
+      mutation.policy === "disabled"
+        ? disabled.includes(selector.serverKey)
+          ? disabled
+          : [...disabled, selector.serverKey]
+        : disabled.filter((item) => item !== selector.serverKey);
+    updated = applyEdits(
+      updated,
+      modify(updated, ["projects", projectKey, "disabledMcpServers"], next, {
+        formattingOptions,
+      }),
+    );
+  }
+  parseJson(updated, false);
+  return updated;
+}
+
+function normalizePath(value: string): string {
+  return process.platform === "win32"
+    ? resolve(value).replaceAll("\\", "/").toLowerCase()
+    : resolve(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function setCodexTomlEnabled(

@@ -39,6 +39,7 @@ import type {
   InventoryScannerOptions,
 } from "./types.js";
 import type { CodexInstalledOwnerStatus } from "./codex-plugins.js";
+import { scanClaudeCodeSessionSetup } from "./claude-session-setup.js";
 
 const codexProfile = recoveredSourceProfiles.find(
   (profile) => profile.id === "codex-0.154.0",
@@ -59,7 +60,8 @@ export function createSessionSetupScanner(
   options: InventoryScannerOptions,
 ): CodexSessionSetupScanner {
   return {
-    scanSessionSetup: (request = {}) => scanCodexSessionSetup(request, options),
+    scanSessionSetup: (request = {}) =>
+      scanSupportedSessionSetup(request, options),
   };
 }
 
@@ -67,10 +69,69 @@ export function createSessionSetupScanner(
 export async function scanSessionSetup(
   request: CodexSessionSetupScanRequest = {},
 ): Promise<SessionSetupSnapshot> {
-  return scanCodexSessionSetup(request, {
+  return scanSupportedSessionSetup(request, {
     now: () => new Date(),
     environment: defaultInventoryScanEnvironment(),
     commandRunner: systemCommandRunner,
+  });
+}
+
+async function scanSupportedSessionSetup(
+  request: CodexSessionSetupScanRequest,
+  options: InventoryScannerOptions,
+): Promise<SessionSetupSnapshot> {
+  if (request.harnessId === "codex")
+    return scanCodexSessionSetup(request, options);
+  if (request.harnessId === "claude-code")
+    return scanClaudeCodeSessionSetup(request, options);
+  if (request.harnessId === "gemini-cli")
+    throw new Error(
+      "the Gemini CLI Session setup profile is not yet qualified",
+    );
+  const codex = await scanCodexSessionSetup(request, options);
+  const claude = await scanClaudeCodeSessionSetup(
+    request,
+    options,
+    codex.legacyInventory,
+  );
+  return mergeSessionSetupSnapshots(codex, claude);
+}
+
+function mergeSessionSetupSnapshots(
+  codex: SessionSetupSnapshot,
+  claude: SessionSetupSnapshot,
+): SessionSetupSnapshot {
+  const snapshotBase = {
+    schemaVersion: 1 as const,
+    kind: "session-setup-snapshot" as const,
+    scannedAt: codex.scannedAt,
+    workspace: codex.workspace,
+    harnesses: ["codex" as const, "claude-code" as const],
+    targets: [...codex.targets, ...claude.targets],
+    sources: [...codex.sources, ...claude.sources],
+    profiles: [...codex.profiles, ...claude.profiles],
+    dependencies: [...codex.dependencies, ...claude.dependencies],
+    legacyInventory: codex.legacyInventory,
+  };
+  const fingerprint = createHash("sha256")
+    .update(
+      stringifyModel(
+        {
+          ...snapshotBase,
+          scannedAt: "",
+          legacyInventory: {
+            ...snapshotBase.legacyInventory,
+            scannedAt: "",
+          },
+        },
+        0,
+      ),
+    )
+    .digest("hex");
+  return parseSessionSetupSnapshot({
+    ...snapshotBase,
+    id: stableId("session-setup", fingerprint),
+    semanticFingerprint: { algorithm: "sha256", digest: fingerprint },
   });
 }
 
@@ -1100,7 +1161,7 @@ function entries(value: unknown): readonly [string, Record<string, unknown>][] {
       })
     : [];
 }
-async function pluginDescriptor(plugin: PluginBoundary): Promise<{
+export async function pluginDescriptor(plugin: PluginBoundary): Promise<{
   readonly mcp: readonly DescriptorDeclaration[];
   readonly apps: readonly DescriptorDeclaration[];
   readonly sources: readonly DescriptorSourceResult[];
@@ -1202,7 +1263,7 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
   }
   return { mcp, apps, sources };
 }
-interface DescriptorDeclaration {
+export interface DescriptorDeclaration {
   readonly key: string;
   readonly value: Record<string, unknown>;
   readonly path: string;
@@ -1234,7 +1295,7 @@ function validAppEntries(value: unknown): value is Record<string, unknown> {
     })
   );
 }
-interface DescriptorSourceResult {
+export interface DescriptorSourceResult {
   readonly kind: "mcp-registration" | "app-binding";
   readonly resourceId: string;
   readonly path: string | null;

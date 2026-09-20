@@ -15,7 +15,7 @@ import {
   createFilePackageTrustStore,
   createFileUpdateExecutionAuditWriter,
   createFileSessionSetupExecutionAuditWriter,
-  createCodexSessionSetupConfigurationWriter,
+  createBuiltInSessionSetupConfigurationWriter,
   systemExecutionProcessRunner,
 } from "./execution/index.js";
 import type {
@@ -884,7 +884,9 @@ async function productionExecuteSessionSetup(
     {
       scan,
       replan: planSessionSetup,
-      configurationWriter: createCodexSessionSetupConfigurationWriter(),
+      configurationWriter: createBuiltInSessionSetupConfigurationWriter(
+        args.workspace ?? process.cwd(),
+      ),
       processRunner: systemExecutionProcessRunner,
       inspectGitProtection: (path, artifactType) =>
         inspectGitProtection(
@@ -1473,7 +1475,8 @@ async function main(): Promise<void> {
                 commandRunner: systemCommandRunner,
               }).scanSessionSetup({ workspace: { path: workspace } }),
             replan: planSessionSetup,
-            configurationWriter: createCodexSessionSetupConfigurationWriter(),
+            configurationWriter:
+              createBuiltInSessionSetupConfigurationWriter(workspace),
             processRunner: systemExecutionProcessRunner,
             inspectGitProtection: (path, artifactType) =>
               inspectGitProtection(

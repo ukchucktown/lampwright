@@ -60,6 +60,13 @@ export type SetupNativeSelector =
       readonly governedTargetIds: readonly [string];
     }
   | {
+      readonly kind: "skill-name";
+      readonly id: string;
+      readonly name: string;
+      readonly authority: "exact-target";
+      readonly governedTargetIds: readonly [string];
+    }
+  | {
       readonly kind: "plugin-id";
       readonly id: string;
       readonly pluginId: string;

@@ -1,7 +1,7 @@
 import type { SessionSetupSourceProfile } from "./types.js";
 import { parseSessionSetupSourceProfile } from "./validation.js";
 
-/** Recovered offline baselines. Codex has qualified local-only evidence. */
+/** Qualified local terminal baselines plus fixture-only pending profiles. */
 const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
   {
     id: "codex-0.154.0",
@@ -46,13 +46,24 @@ const recoveredProfiles: readonly SessionSetupSourceProfile[] = [
     clientSurface: "cli",
     sourceVersion: "2.1.270",
     sourceSignature: "claude-native-preferences",
-    qualification: "fixture-only",
+    qualification: "qualified",
     definitionScopes: ["user", "workspace", "agent"],
-    precedence: ["workspace", "user"],
+    precedence: ["user", "shared-workspace", "local-workspace"],
     trust: "unknown",
     offlineProbe: "metadata-only",
-    activation: "restart",
-    fixtureCoverage: ["skill", "plugin", "mcp", "unavailable-account-source"],
+    activation: "new-session",
+    fixtureCoverage: [
+      "skill",
+      "plugin",
+      "mcp",
+      "plugin-mcp-namespace",
+      "selected-project-preference",
+      "approval-distinct-from-availability",
+      "owner-gate",
+      "native-enable-disable",
+      "unavailable-account-source",
+      "checked-writer-preservation-race",
+    ],
     supportedTargetKinds: ["skill-exposure", "plugin", "mcp-registration"],
     controlScopeKinds: ["user", "workspace"],
     selectorEffects: [

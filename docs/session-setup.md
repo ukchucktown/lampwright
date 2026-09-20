@@ -7,7 +7,7 @@ Application support follows the delivery issues below. This document does not cl
 
 Before a new agent session, the user chooses which capabilities the harness can use. Session setup provides native Enable and Disable controls for Skill Harness Exposures, complete Plugins, MCP Registrations, and App Bindings. It preserves definitions, credentials, and installed content.
 
-The first harness is Codex. Claude Code and Gemini CLI follow through the same module interfaces and TUI. The user chose a separate Session setup area on 2026-09-19. Existing Skills & plugins lifecycle operations retain their behavior.
+Codex and the Claude Code terminal use the same module interfaces and TUI. Gemini CLI follows in the next delivery issue. Claude desktop and account surfaces remain unverified. The user chose a separate Session setup area on 2026-09-19. Existing Skills & plugins lifecycle operations retain their behavior.
 
 Session setup changes durable native configuration. It does not launch an agent, attach to an active session, disconnect an account, or promise an exact token reduction. Presets, token measurement, per-tool filters, arbitrary harness configuration, and permanent MCP deletion are outside this increment.
 
