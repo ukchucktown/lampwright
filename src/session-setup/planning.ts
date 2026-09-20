@@ -391,6 +391,21 @@ function addSelectorBlocks(
       target: ref,
       reason: `Skill name '${target.name}' is ambiguous in the selected harness`,
     });
+  if (
+    target.kind === "mcp-registration" &&
+    target.control.selector.authority === "exact-target" &&
+    snapshot.targets.some(
+      (candidate) =>
+        candidate.kind === "mcp-registration" &&
+        candidate.id !== target.id &&
+        candidate.control.selector.id === target.control.selector.id,
+    )
+  )
+    blocks.push({
+      kind: "selector-collision",
+      target: ref,
+      reason: `MCP selector '${target.serverKey}' has multiple declarations`,
+    });
   if (target.control.selector.authority !== "shared-connector") return;
   const governed = [...target.control.selector.governedTargetIds].sort();
   const known = snapshot.targets

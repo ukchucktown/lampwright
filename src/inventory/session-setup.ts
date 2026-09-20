@@ -420,12 +420,18 @@ async function scanCodexSessionSetup(
         result.reason,
         result.path,
       );
-    for (const [serverKey] of entries(descriptor.mcp)) {
-      const id = stableId("setup-plugin-mcp", plugin.id, serverKey);
+    for (const declaration of descriptor.mcp) {
+      const { key: serverKey } = declaration;
+      const id = stableId(
+        "setup-plugin-mcp",
+        plugin.id,
+        declaration.path,
+        serverKey,
+      );
       const source = addSource(
         "mcp-registration",
         { kind: "user" },
-        `codex:plugin-mcp-policy:${plugin.id}:${serverKey}`,
+        `codex:plugin-mcp-policy:${plugin.id}:${declaration.path}:${serverKey}`,
         [id],
         "success",
         null,
@@ -434,11 +440,11 @@ async function scanCodexSessionSetup(
       const declarationSource = addSource(
         "mcp-registration",
         { kind: "user" },
-        `codex:plugin-mcp-declaration:${plugin.id}:${serverKey}`,
+        `codex:plugin-mcp-declaration:${plugin.id}:${declaration.path}:${serverKey}`,
         [],
         "success",
         null,
-        descriptor.mcpPath,
+        declaration.path,
       );
       targets.push({
         id,
@@ -460,21 +466,22 @@ async function scanCodexSessionSetup(
           false,
           ownerDisabled,
         ),
-        control: pluginMcpControl(plugin, serverKey, source, userDocument),
+        control: pluginMcpControl(plugin, serverKey, id, source, userDocument),
         declarationSource,
         serverKey,
         requiredAppBindingId: null,
       });
       pluginMcpIds.set(plugin.id, [...(pluginMcpIds.get(plugin.id) ?? []), id]);
     }
-    for (const [alias, raw] of entries(descriptor.apps)) {
+    for (const declaration of descriptor.apps) {
+      const { key: alias, value: raw } = declaration;
       const connectorId = stringAt(raw, ["id"]);
       if (!connectorId) continue;
-      const id = stableId("setup-app", plugin.id, alias);
+      const id = stableId("setup-app", plugin.id, declaration.path, alias);
       const source = addSource(
         "app-binding",
         { kind: "user" },
-        `codex:app-policy:${plugin.id}:${alias}`,
+        `codex:app-policy:${plugin.id}:${declaration.path}:${alias}`,
         [id],
         "success",
         null,
@@ -483,11 +490,11 @@ async function scanCodexSessionSetup(
       const declarationSource = addSource(
         "app-binding",
         { kind: "user" },
-        `codex:app-declaration:${plugin.id}:${alias}`,
+        `codex:app-declaration:${plugin.id}:${declaration.path}:${alias}`,
         [],
         "success",
         null,
-        descriptor.appPath,
+        declaration.path,
       );
       targets.push({
         id,
@@ -778,6 +785,7 @@ function mcpControl(
 function pluginMcpControl(
   plugin: PluginBoundary,
   serverKey: string,
+  targetId: string,
   source: SetupSourceRef,
   document: Document,
 ): SetupNativeControl {
@@ -788,7 +796,7 @@ function pluginMcpControl(
       serverKey,
       policyOwner: { kind: "plugin", pluginId: plugin.pluginId },
       authority: "exact-target",
-      governedTargetIds: [stableId("setup-plugin-mcp", plugin.id, serverKey)],
+      governedTargetIds: [targetId],
     },
     source,
     document,
@@ -1015,18 +1023,13 @@ function entries(value: unknown): readonly [string, Record<string, unknown>][] {
     : [];
 }
 async function pluginDescriptor(plugin: PluginBoundary): Promise<{
-  readonly mcp: Record<string, unknown>;
-  readonly apps: Record<string, unknown>;
-  readonly mcpPath: string | null;
-  readonly appPath: string | null;
+  readonly mcp: readonly DescriptorDeclaration[];
+  readonly apps: readonly DescriptorDeclaration[];
   readonly sources: readonly DescriptorSourceResult[];
 }> {
-  const combined: {
-    mcp: Record<string, unknown>;
-    apps: Record<string, unknown>;
-  } = { mcp: {}, apps: {} };
-  let mcpPath: string | null = null;
-  let appPath: string | null = null;
+  const mcp: DescriptorDeclaration[] = [];
+  const apps: DescriptorDeclaration[] = [];
+  const declarationKeys = new Set<string>();
   const sources: DescriptorSourceResult[] = [];
   for (const resource of plugin.resources.filter(
     (item) =>
@@ -1102,16 +1105,29 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
               : read.reason,
       });
     if (read.kind !== "valid" || read.value === null) continue;
-    if (kinds.includes("mcp-registration") && !invalidMcp) {
-      mcpPath ??= path;
-      Object.assign(combined.mcp, mcpValue ?? {});
-    }
-    if (kinds.includes("app-binding") && !invalidApp) {
-      appPath ??= path;
-      Object.assign(combined.apps, appValue ?? {});
-    }
+    if (kinds.includes("mcp-registration") && !invalidMcp && path !== null)
+      for (const [key, value] of entries(mcpValue)) {
+        const identity = `mcp:${pathKey(path)}:${key}`;
+        if (!declarationKeys.has(identity)) {
+          declarationKeys.add(identity);
+          mcp.push({ key, value, path });
+        }
+      }
+    if (kinds.includes("app-binding") && !invalidApp && path !== null)
+      for (const [key, value] of entries(appValue)) {
+        const identity = `app:${pathKey(path)}:${key}`;
+        if (!declarationKeys.has(identity)) {
+          declarationKeys.add(identity);
+          apps.push({ key, value, path });
+        }
+      }
   }
-  return { ...combined, mcpPath, appPath, sources };
+  return { mcp, apps, sources };
+}
+interface DescriptorDeclaration {
+  readonly key: string;
+  readonly value: Record<string, unknown>;
+  readonly path: string;
 }
 function validDescriptorEntries(
   value: unknown,
