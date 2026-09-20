@@ -87,6 +87,10 @@ const selector = z.discriminatedUnion("kind", [
     kind: z.literal("mcp-server-key"),
     id: text,
     serverKey: text,
+    policyOwner: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("standalone") }),
+      z.strictObject({ kind: z.literal("plugin"), pluginId: text }),
+    ]),
     authority: z.literal("exact-target"),
     governedTargetIds: z.tuple([text]),
   }),
@@ -593,7 +597,9 @@ function selectorMatchesTarget(target: SessionSetupTarget): boolean {
   if (target.kind === "mcp-registration")
     return (
       target.control.selector.kind === "mcp-server-key" &&
-      target.control.selector.serverKey === target.serverKey
+      target.control.selector.serverKey === target.serverKey &&
+      (target.owner.kind !== "plugin" ||
+        target.control.selector.policyOwner.kind === "plugin")
     );
   return (
     target.control.selector.kind === "app-connector-id" &&

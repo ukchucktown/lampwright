@@ -161,6 +161,7 @@ function completeFixture(): {
         kind: "mcp-server-key",
         id: "mcp-selector",
         serverKey: "same-name",
+        policyOwner: { kind: "plugin", pluginId: "example-plugin" },
         authority: "exact-target",
         governedTargetIds: ["mcp-target"],
       },
