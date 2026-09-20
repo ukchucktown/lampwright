@@ -32,6 +32,8 @@ import type {
 } from "../update/types.js";
 
 export interface TuiDependencies {
+  /** Invocation workspace supplied by the launcher without changing process cwd. */
+  readonly workspace?: { readonly path: string };
   readonly scan: () => Promise<Inventory>;
   readonly plan: (
     inventory: Inventory,

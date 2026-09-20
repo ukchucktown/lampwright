@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { link, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+  link,
+  mkdtemp,
+  readFile,
+  readdir,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
@@ -16,7 +23,10 @@ import {
   sessionSetupTargetSchema,
   sessionSetupJsonSchema,
 } from "../src/session-setup/index.js";
-import { createSessionSetupConfigurationWriter } from "../src/execution/index.js";
+import {
+  createFileSessionSetupExecutionAuditWriter,
+  createSessionSetupConfigurationWriter,
+} from "../src/execution/index.js";
 import {
   buildSessionSetupIntent,
   buildSessionSetupPlan,
@@ -694,6 +704,22 @@ describe("session setup contracts", () => {
     expect(validate(buildSessionSetupPlan())).toBe(true);
     expect(validate(buildSessionSetupIntent())).toBe(true);
     expect(validate(buildSessionSetupReport())).toBe(true);
+    expect(
+      validate({
+        schemaVersion: 1,
+        kind: "session-setup-confirmation-required",
+        operation: "disable",
+        plan: buildSessionSetupPlan(),
+      }),
+    ).toBe(true);
+    expect(
+      validate({
+        schemaVersion: 1,
+        kind: "session-setup-error",
+        code: "invalid-usage",
+        message: "invalid setup selector",
+      }),
+    ).toBe(true);
   });
 });
 
@@ -745,6 +771,30 @@ function grantsFor(plan: ReturnType<typeof planSessionSetup>) {
 }
 
 describe("session setup planning and execution", () => {
+  it("writes only validated session setup audit records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-setup-audit-"));
+    const writer = createFileSessionSetupExecutionAuditWriter(root);
+    const plan = buildSessionSetupPlan();
+    await writer.write({
+      schemaVersion: 1,
+      plan,
+      approvals: { grants: plan.actions.flatMap((action) => action.approvals) },
+      report: buildSessionSetupReport(),
+    });
+    const files = await readdir(join(root, "audit", "session-setup-v1"));
+    expect(files).toHaveLength(1);
+    await expect(
+      writer.write({
+        schemaVersion: 1,
+        plan,
+        approvals: {
+          grants: [{ kind: "confirmation", required: false }] as never,
+        },
+        report: buildSessionSetupReport(),
+      }),
+    ).rejects.toThrow(SessionSetupValidationError);
+  });
+
   it("keeps distinct missing configuration documents in separate actions", () => {
     const fixture = completeFixture();
     const withMissingDocument = <T extends SessionSetupTarget>(

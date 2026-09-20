@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,8 @@ import {
   createFileExecutionAuditWriter,
   createFilePackageTrustStore,
   createFileUpdateExecutionAuditWriter,
+  createFileSessionSetupExecutionAuditWriter,
+  createCodexSessionSetupConfigurationWriter,
   systemExecutionProcessRunner,
 } from "./execution/index.js";
 import type {
@@ -30,8 +32,21 @@ import { nodeArtifactFileSystem } from "./filesystem/artifact-filesystem.js";
 import { inspectGitProtection } from "./inventory/git-protection.js";
 import {
   createInventoryScanner,
+  createSessionSetupScanner,
   defaultInventoryScanEnvironment,
 } from "./inventory/index.js";
+import type {
+  SessionSetupPlan,
+  SessionSetupReport,
+  SessionSetupSnapshot,
+  SessionSetupTarget,
+  SessionSetupTargetRef,
+  SetupHarnessId,
+} from "./session-setup/types.js";
+import {
+  executeSessionSetup,
+  planSessionSetup,
+} from "./session-setup/index.js";
 import { systemCommandRunner } from "./inventory/process.js";
 import { stringifyModel } from "./model/json.js";
 import type {
@@ -92,6 +107,20 @@ export interface CliDependencies {
     plan: UpdatePlan,
     approvals: readonly ApprovalRequirement[],
   ) => Promise<UpdateReport>;
+  readonly scanSessionSetup?: (request: {
+    readonly workspace: { readonly path: string };
+    readonly harnessId?: SetupHarnessId;
+  }) => Promise<SessionSetupSnapshot>;
+  readonly planSessionSetup?: (
+    snapshot: SessionSetupSnapshot,
+    intent: SessionSetupPlan["intent"],
+  ) => SessionSetupPlan;
+  readonly executeSessionSetup?: (
+    plan: SessionSetupPlan,
+    approvals: {
+      readonly grants: readonly import("./session-setup/types.js").SetupApproval[];
+    },
+  ) => Promise<SessionSetupReport>;
 }
 export interface CliResult {
   readonly exitCode: number;
@@ -119,6 +148,9 @@ Discover and safely manage AI agent skills.
 Usage:
   lampwright
   lampwright scan [--json] [--adapter <path>]
+  lampwright scan --session-setup [--harness <id>] [--workspace <path>] [--json]
+  lampwright disable setup:<target-id> [--harness <id>] [--workspace <path>] [--dry-run] [--yes] [--json]
+  lampwright enable setup:<target-id> [--harness <id>] [--workspace <path>] [--dry-run] [--yes] [--json]
   lampwright disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
   lampwright enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
   lampwright update <selector> [--dry-run] [--yes] [--json] [--adapter <path>]
@@ -147,6 +179,9 @@ Options:
   --trust-adapter <id>:<sha256>       Approve exact local adapter content
   --trust-package npx:<pkg>@<version>:<adapter-sha256>
                                       Approve exact ephemeral package use
+  --session-setup                    Scan native session-setup targets
+  --harness <id>                     Limit Session setup to one harness
+  --workspace <path>                 Set Session setup or TUI workspace context
   -h, --help                          Show help
   -v, --version                       Show version
 `;
@@ -159,6 +194,12 @@ export async function runCli(
   try {
     parsed = parseArguments(argv);
   } catch (error: unknown) {
+    if (isSessionSetupInvocation(argv))
+      return sessionSetupError(
+        "invalid-usage",
+        error instanceof Error ? error.message : String(error),
+        2,
+      );
     return failure(
       "invalid-usage",
       error instanceof Error ? error.message : String(error),
@@ -169,6 +210,9 @@ export async function runCli(
     if (parsed.command === "help") return { exitCode: 0, output: help };
     if (parsed.command === "version")
       return { exitCode: 0, output: `${readPackageMetadata().version}\n` };
+    if (parsed.command === "scan")
+      if (parsed.sessionSetup)
+        return result(await sessionSetupScan(parsed, dependencies), 0);
     if (parsed.command === "scan")
       return result(
         (
@@ -183,11 +227,23 @@ export async function runCli(
     if (parsed.command === "remove") return await remove(parsed, dependencies);
     if (parsed.command === "update") return await update(parsed, dependencies);
     if (parsed.command === "disable" || parsed.command === "enable")
+      if (parsed.sessionSetup) return await sessionSetup(parsed, dependencies);
+    if (parsed.command === "disable" || parsed.command === "enable")
       return await availability(parsed, dependencies);
     if (parsed.command === "restore" || parsed.command === "purge")
       return await quarantineCommand(parsed, dependencies);
     return failure("invalid-usage", "unknown command", 2);
   } catch (error: unknown) {
+    const setupInvocation =
+      parsed?.sessionSetup === true || isSessionSetupInvocation(argv);
+    if (setupInvocation)
+      return sessionSetupError(
+        error instanceof PlanningError
+          ? "target-not-found"
+          : "operational-error",
+        error instanceof Error ? error.message : String(error),
+        error instanceof PlanningError ? 3 : 1,
+      );
     if (error instanceof AdapterTrustRequiredError)
       return result(
         {
@@ -231,6 +287,9 @@ type Parsed = {
   readonly bruteForce: boolean;
   readonly all: boolean;
   readonly includePlugins: boolean;
+  readonly sessionSetup: boolean;
+  readonly harness: SetupHarnessId | undefined;
+  readonly workspace: string | undefined;
   readonly adapters: readonly string[];
   readonly adapterTrusts: readonly AdapterTrustApproval[];
   readonly packageTrusts: readonly ApprovalRequirement[];
@@ -247,7 +306,11 @@ function parseArguments(argv: readonly string[]): Parsed {
     force = false,
     bruteForce = false,
     all = false,
-    includePlugins = false;
+    includePlugins = false,
+    sessionSetup = false;
+  let harness: SetupHarnessId | undefined;
+  let harnessCount = 0;
+  let workspace: string | undefined;
   let command: Parsed["command"] = "help";
   const first = argv[0];
   if (first === "--help" || first === "-h" || first === undefined) {
@@ -261,6 +324,9 @@ function parseArguments(argv: readonly string[]): Parsed {
       bruteForce,
       all,
       includePlugins,
+      sessionSetup,
+      harness,
+      workspace,
       adapters,
       adapterTrusts,
       packageTrusts,
@@ -277,6 +343,9 @@ function parseArguments(argv: readonly string[]): Parsed {
       bruteForce,
       all,
       includePlugins,
+      sessionSetup,
+      harness,
+      workspace,
       adapters,
       adapterTrusts,
       packageTrusts,
@@ -299,7 +368,23 @@ function parseArguments(argv: readonly string[]): Parsed {
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index]!;
     if (value === "--json") continue;
-    else if (value === "--dry-run") dryRun = true;
+    else if (value === "--session-setup") sessionSetup = true;
+    else if (value === "--harness") {
+      const requested = argv[++index];
+      if (
+        requested !== "codex" &&
+        requested !== "claude-code" &&
+        requested !== "gemini-cli"
+      )
+        throw new Error("--harness requires codex, claude-code, or gemini-cli");
+      harnessCount += 1;
+      harness = requested;
+    } else if (value === "--workspace") {
+      const requested = argv[++index];
+      if (requested === undefined || requested.startsWith("-"))
+        throw new Error("--workspace requires a path");
+      workspace = resolve(requested);
+    } else if (value === "--dry-run") dryRun = true;
     else if (value === "--yes") yes = true;
     else if (value === "--force") force = true;
     else if (value === "--brute-force") bruteForce = true;
@@ -320,6 +405,7 @@ function parseArguments(argv: readonly string[]): Parsed {
   }
   if (
     command === "scan" &&
+    !sessionSetup &&
     (values.length > 0 ||
       all ||
       includePlugins ||
@@ -330,6 +416,64 @@ function parseArguments(argv: readonly string[]): Parsed {
       packageTrusts.length > 0)
   )
     throw new Error("scan accepts only --json, --adapter, and --trust-adapter");
+  const setupSelectors = values.filter((value) => value.startsWith("setup:"));
+  if (harnessCount > 1) throw new Error("--harness may be supplied only once");
+  if (sessionSetup && command !== "scan")
+    throw new Error("--session-setup is valid only for scan");
+  if (
+    setupSelectors.length > 0 &&
+    command !== "enable" &&
+    command !== "disable"
+  )
+    throw new Error("setup selectors are valid only for enable or disable");
+  if (setupSelectors.length > 0 && setupSelectors.length !== values.length)
+    throw new Error("cannot mix setup and legacy selectors");
+  if (setupSelectors.length > 0) sessionSetup = true;
+  if (!sessionSetup && (harness !== undefined || workspace !== undefined))
+    throw new Error(
+      "--harness and --workspace apply only to Session setup commands",
+    );
+  if (
+    sessionSetup &&
+    command === "scan" &&
+    (values.length > 0 ||
+      dryRun ||
+      yes ||
+      force ||
+      bruteForce ||
+      all ||
+      includePlugins ||
+      packageTrusts.length > 0 ||
+      adapters.length > 0 ||
+      adapterTrusts.length > 0)
+  )
+    throw new Error(
+      "session setup scan accepts only --session-setup, --harness, --workspace, and --json",
+    );
+  if (sessionSetup && (command === "enable" || command === "disable")) {
+    if (harness === undefined)
+      throw new Error("session setup mutation requires --harness");
+    if (values.length === 0)
+      throw new Error(
+        `${command} requires at least one setup:<target-id> selector`,
+      );
+    if (values.some((value) => !/^setup:[^\s:]+$/u.test(value)))
+      throw new Error(
+        "session setup mutations require exact setup:<target-id> selectors",
+      );
+    if (
+      force ||
+      bruteForce ||
+      all ||
+      includePlugins ||
+      packageTrusts.length > 0 ||
+      adapters.length > 0 ||
+      adapterTrusts.length > 0
+    )
+      throw new Error(
+        "session setup mutations do not accept legacy force, all, fallback, or adapter options",
+      );
+  }
   if (
     (command === "restore" || command === "purge") &&
     (adapters.length > 0 ||
@@ -376,6 +520,9 @@ function parseArguments(argv: readonly string[]): Parsed {
     bruteForce,
     all,
     includePlugins,
+    sessionSetup,
+    harness,
+    workspace,
     adapters,
     adapterTrusts,
     packageTrusts,
@@ -631,6 +778,188 @@ async function availability(
   );
 }
 
+async function sessionSetupScan(
+  args: Parsed,
+  dependencies: CliDependencies,
+): Promise<SessionSetupSnapshot> {
+  return scanSessionSetupWithContext(args, dependencies);
+}
+
+async function sessionSetup(
+  args: Parsed,
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const snapshot = await scanSessionSetupWithContext(args, dependencies);
+  const operation = args.command as "enable" | "disable";
+  const targets = args.values.map((selector) => {
+    const id = selector.slice("setup:".length);
+    const target = snapshot.targets.find((candidate) => candidate.id === id);
+    return target === undefined
+      ? missingSessionSetupRef(id)
+      : sessionSetupRef(target);
+  }) as [SessionSetupTargetRef, ...SessionSetupTargetRef[]];
+  const crossHarness = args.values
+    .map((selector) =>
+      snapshot.targets.find(
+        (target) => target.id === selector.slice("setup:".length),
+      ),
+    )
+    .find(
+      (target) => target !== undefined && target.harnessId !== args.harness,
+    );
+  if (crossHarness !== undefined)
+    return sessionSetupError(
+      "invalid-usage",
+      `setup target ${crossHarness.id} belongs to ${crossHarness.harnessId}, not requested harness ${args.harness}`,
+      2,
+    );
+  const planner = dependencies.planSessionSetup ?? planSessionSetup;
+  const plan = planner(snapshot, {
+    schemaVersion: 1,
+    kind: "session-setup-intent",
+    action: operation,
+    harnessId: args.harness!,
+    workspace: snapshot.workspace,
+    targets,
+  });
+  if (args.dryRun || plan.blocks.length > 0 || plan.errors.length > 0)
+    return result(
+      plan,
+      plan.blocks.length === 0 && plan.errors.length === 0 ? 0 : 3,
+    );
+  if (!args.yes)
+    return result(
+      {
+        schemaVersion: 1,
+        kind: "session-setup-confirmation-required",
+        operation,
+        plan,
+      },
+      3,
+    );
+  const approvals = {
+    grants: plan.actions.flatMap((action) => action.approvals),
+  };
+  if (
+    dependencies.executeSessionSetup === undefined &&
+    (dependencies.scanSessionSetup !== undefined ||
+      dependencies.planSessionSetup !== undefined)
+  )
+    throw new Error(
+      "executeSessionSetup must be injected with Session setup CLI scan or Planning dependencies",
+    );
+  const report =
+    dependencies.executeSessionSetup === undefined
+      ? await productionExecuteSessionSetup(plan, args)
+      : await dependencies.executeSessionSetup(plan, approvals);
+  return result(report, sessionSetupExitCode(report));
+}
+
+async function scanSessionSetupWithContext(
+  args: Parsed,
+  dependencies: CliDependencies,
+): Promise<SessionSetupSnapshot> {
+  const request = {
+    workspace: { path: args.workspace ?? process.cwd() },
+    ...(args.harness === undefined ? {} : { harnessId: args.harness }),
+  };
+  if (dependencies.scanSessionSetup !== undefined)
+    return dependencies.scanSessionSetup(request);
+  return createSessionSetupScanner({
+    now: () => new Date(),
+    environment: defaultInventoryScanEnvironment(),
+    commandRunner: systemCommandRunner,
+  }).scanSessionSetup(request);
+}
+
+async function productionExecuteSessionSetup(
+  plan: SessionSetupPlan,
+  args: Parsed,
+): Promise<SessionSetupReport> {
+  const stateRoot = defaultLocalStateRoot();
+  const scan = () => scanSessionSetupWithContext(args, {});
+  return executeSessionSetup(
+    plan,
+    { grants: plan.actions.flatMap((action) => action.approvals) },
+    {
+      scan,
+      replan: planSessionSetup,
+      configurationWriter: createCodexSessionSetupConfigurationWriter(),
+      processRunner: systemExecutionProcessRunner,
+      inspectGitProtection: (path, artifactType) =>
+        inspectGitProtection(
+          path,
+          artifactType?.kind === "directory",
+          systemCommandRunner,
+        ),
+      auditWriter: createFileSessionSetupExecutionAuditWriter(stateRoot),
+      now: () => new Date(),
+    },
+  );
+}
+
+function sessionSetupRef(target: SessionSetupTarget): SessionSetupTargetRef {
+  switch (target.kind) {
+    case "skill-exposure":
+      return {
+        kind: target.kind,
+        targetId: target.id,
+        installationId: target.installationId,
+      };
+    case "plugin":
+      return {
+        kind: target.kind,
+        targetId: target.id,
+        pluginBoundaryId: target.pluginBoundaryId,
+      };
+    case "mcp-registration":
+      return {
+        kind: target.kind,
+        targetId: target.id,
+        declarationSourceId: target.declarationSource.sourceId,
+        serverKey: target.serverKey,
+      };
+    case "app-binding":
+      return {
+        kind: target.kind,
+        targetId: target.id,
+        declarationSourceId: target.declarationSource.sourceId,
+        alias: target.alias,
+        connectorId: target.connectorId,
+      };
+  }
+}
+
+function missingSessionSetupRef(id: string): SessionSetupTargetRef {
+  return { kind: "skill-exposure", targetId: id, installationId: id };
+}
+
+function sessionSetupExitCode(report: SessionSetupReport): number {
+  return report.status === "succeeded" || report.status === "unchanged"
+    ? 0
+    : report.status === "blocked"
+      ? 3
+      : 1;
+}
+
+function isSessionSetupInvocation(argv: readonly string[]): boolean {
+  return (
+    argv.includes("--session-setup") ||
+    argv.some((value) => value.startsWith("setup:"))
+  );
+}
+
+function sessionSetupError(
+  code: string,
+  message: string,
+  exitCode: number,
+): CliResult {
+  return result(
+    { schemaVersion: 1, kind: "session-setup-error", code, message },
+    exitCode,
+  );
+}
+
 function availabilityGrants(
   availabilityPlan: AvailabilityPlan,
 ): readonly ApprovalRequirement[] {
@@ -788,6 +1117,7 @@ async function scanWithContext(
   adapterPaths: readonly string[],
   adapterTrusts: readonly AdapterTrustApproval[],
   dependencies: CliDependencies,
+  workspaceOverride?: string,
 ): Promise<ScanContext> {
   if (dependencies.scan !== undefined)
     return {
@@ -795,7 +1125,7 @@ async function scanWithContext(
       newAdapterTrusts: [],
     };
   const home = homedir();
-  const workspace = process.cwd();
+  const workspace = workspaceOverride ?? process.cwd();
   const request = {
     localAdapterPaths: adapterPaths,
     pathBases: {
@@ -831,9 +1161,13 @@ async function scanWithContext(
     ];
     catalog = await loadAdapters({ ...request, approvals });
   }
+  const environment = defaultInventoryScanEnvironment();
   const inventory = await createInventoryScanner({
     now: () => new Date(),
-    environment: defaultInventoryScanEnvironment(),
+    environment: {
+      ...environment,
+      workspaceDirectory: workspaceOverride ?? environment.workspaceDirectory,
+    },
     commandRunner: systemCommandRunner,
     adapterCatalog: catalog,
   }).scan({});
@@ -851,25 +1185,23 @@ async function scanWithContext(
   };
 }
 
-async function scan(
-  adapterPaths: readonly string[],
-  adapterTrusts: readonly AdapterTrustApproval[],
-): Promise<Inventory> {
-  return (await scanWithContext(adapterPaths, adapterTrusts, {})).inventory;
-}
 async function productionExecute(
   removalPlan: RemovalPlan,
   adapterPaths: readonly string[],
   adapterTrusts: readonly AdapterTrustApproval[],
   newAdapterTrusts: readonly AdapterTrustApproval[],
   approvals: readonly ApprovalRequirement[],
+  workspaceOverride?: string,
 ): Promise<ExecutionReport> {
   const stateRoot = defaultLocalStateRoot();
   const adapterTrustStore = createFileAdapterTrustStore(stateRoot);
   for (const approval of newAdapterTrusts)
     await adapterTrustStore.trust(approval);
   const report = await createExecutionModule({
-    scan: () => scan(adapterPaths, adapterTrusts),
+    scan: () =>
+      scanWithContext(adapterPaths, adapterTrusts, {}, workspaceOverride).then(
+        (value) => value.inventory,
+      ),
     replan: plan,
     quarantine: createQuarantineModule(),
     processRunner: systemExecutionProcessRunner,
@@ -910,6 +1242,7 @@ async function productionExecuteAvailability(
   newAdapterTrusts: readonly AdapterTrustApproval[],
   approvals: readonly ApprovalRequirement[],
   providedStorage: DisabledStorageModule | undefined,
+  workspaceOverride?: string,
 ): Promise<AvailabilityReport> {
   if (providedStorage === undefined)
     throw new Error(
@@ -920,7 +1253,10 @@ async function productionExecuteAvailability(
   for (const approval of newAdapterTrusts)
     await adapterTrustStore.trust(approval);
   return createExecutionModule({
-    scan: () => scan(adapterPaths, adapterTrusts),
+    scan: () =>
+      scanWithContext(adapterPaths, adapterTrusts, {}, workspaceOverride).then(
+        (value) => value.inventory,
+      ),
     replan: plan,
     quarantine: createQuarantineModule(),
     processRunner: systemExecutionProcessRunner,
@@ -947,13 +1283,17 @@ async function productionExecuteUpdate(
   adapterTrusts: readonly AdapterTrustApproval[],
   newAdapterTrusts: readonly AdapterTrustApproval[],
   approvals: readonly ApprovalRequirement[],
+  workspaceOverride?: string,
 ): Promise<UpdateReport> {
   const stateRoot = defaultLocalStateRoot();
   const adapterTrustStore = createFileAdapterTrustStore(stateRoot);
   for (const approval of newAdapterTrusts)
     await adapterTrustStore.trust(approval);
   return createExecutionModule({
-    scan: () => scan(adapterPaths, adapterTrusts),
+    scan: () =>
+      scanWithContext(adapterPaths, adapterTrusts, {}, workspaceOverride).then(
+        (value) => value.inventory,
+      ),
     replan: plan,
     replanUpdate: planUpdate,
     quarantine: createQuarantineModule(),
@@ -1079,15 +1419,28 @@ function failure(code: string, message: string, exitCode: number): CliResult {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  if (argv.length === 0) {
+  if (argv.length === 0 || argv[0] === "--workspace") {
+    const workspace =
+      argv.length === 0
+        ? process.cwd()
+        : argv.length === 2 && argv[1] !== undefined && !argv[1].startsWith("-")
+          ? resolve(argv[1])
+          : null;
+    if (workspace === null) {
+      process.stderr.write("lampwright: --workspace requires one path\n");
+      process.exitCode = 2;
+      return;
+    }
     const quarantine = createQuarantineModule();
     const disabledStorage = createProductionDisabledStorage();
     const outcome = await runTui(
       {
-        scan: async () => (await scanWithContext([], [], {})).inventory,
+        workspace: { path: workspace },
+        scan: async () =>
+          (await scanWithContext([], [], {}, workspace)).inventory,
         plan,
         execute: (removalPlan, approvals) =>
-          productionExecute(removalPlan, [], [], [], approvals),
+          productionExecute(removalPlan, [], [], [], approvals, workspace),
         quarantine,
         listDisabled: () => disabledStorage.list(),
         planAvailability,
@@ -1099,10 +1452,11 @@ async function main(): Promise<void> {
             [],
             approvals,
             disabledStorage,
+            workspace,
           ),
         planUpdate,
         executeUpdate: (updatePlan, approvals) =>
-          productionExecuteUpdate(updatePlan, [], [], [], approvals),
+          productionExecuteUpdate(updatePlan, [], [], [], approvals, workspace),
       },
       createNodeTuiTerminal(),
     );
@@ -1132,6 +1486,28 @@ function human(output: unknown): string {
   if (isInventory(output)) {
     return `Found ${output.installations.length} Installation(s), ${output.logicalSkills.length} Logical Skill(s), ${output.plugins.length} Plugin(s), and ${output.otherFindings.length} other finding(s).\n`;
   }
+  if (output.kind === "session-setup-snapshot") {
+    const sources = Array.isArray(output.sources)
+      ? output.sources.filter(isRecord)
+      : [];
+    const unavailable = sources.filter((source) => source.status !== "success");
+    const lines = [
+      `Session setup: ${Array.isArray(output.targets) ? output.targets.length : 0} target(s) in ${String(isRecord(output.workspace) ? output.workspace.path : "unknown workspace")}; ${unavailable.length} source(s) unavailable, invalid, or incomplete.`,
+    ];
+    for (const source of unavailable)
+      lines.push(
+        `- Source ${String(isRecord(source.source) ? source.source.sourceId : "unknown")}: ${String(source.status)}${source.reason === null || source.reason === undefined ? "" : `; ${String(source.reason)}`}.`,
+      );
+    return `${lines.join("\n")}\n`;
+  }
+  if (output.kind === "session-setup-plan")
+    return humanSessionSetupPlan(output);
+  if (output.kind === "session-setup-confirmation-required")
+    return `${humanSessionSetupPlan(output.plan)}Confirmation required for ${String(output.operation)}. Re-run with --yes after reviewing every scope and effect.\n`;
+  if (output.kind === "session-setup-report")
+    return `Session setup ${String(output.status)}. A new session may be required before native policy changes take effect.\n`;
+  if (output.kind === "session-setup-error")
+    return `${String(output.code)}: ${String(output.message)}\n`;
   if (output.kind === "error")
     return `${String(output.code)}: ${String(output.message)}\n`;
   if (output.kind === "trust-required") {
@@ -1455,6 +1831,100 @@ function humanAvailabilityPlan(plan: unknown): string {
       ? ""
       : `${blocks.map((block) => `- ${describeBlock(block)}`).join("\n")}\nResolve the blocks or use --force only where the plan marks a block overridable.\n`;
   return `Availability ${operation} plan: ${targets} target(s), ${actions} action(s), ${blocks.length} block(s).\n${blockSummary}${approvalGuidance(plan)}`;
+}
+
+function humanSessionSetupPlan(plan: unknown): string {
+  if (!isRecord(plan)) return "Session setup plan unavailable.\n";
+  const targets = Array.isArray(plan.targets)
+    ? plan.targets.filter(isRecord)
+    : [];
+  const blocks = Array.isArray(plan.blocks) ? plan.blocks.filter(isRecord) : [];
+  const warnings = Array.isArray(plan.warnings)
+    ? plan.warnings.filter(isRecord)
+    : [];
+  const lines = [
+    `Session setup plan: ${targets.length} target(s), ${Array.isArray(plan.actions) ? plan.actions.length : 0} native action(s), ${blocks.length} block(s).`,
+  ];
+  const errors = Array.isArray(plan.errors) ? plan.errors.filter(isRecord) : [];
+  for (const error of errors)
+    lines.push(
+      `- Planning error: ${String(error.kind)}${typeof error.reason === "string" ? `; ${error.reason}` : ""}.`,
+    );
+  for (const target of targets) {
+    const source = isRecord(target.source) ? target.source : null;
+    lines.push(
+      `- Target: ${String(target.name)} (setup:${String(target.id)}; ${String(target.kind)}; harness ${String(target.harnessId)}; source ${source?.sourceId ?? "unknown"}).`,
+    );
+  }
+  const actions = Array.isArray(plan.actions)
+    ? plan.actions.filter(isRecord)
+    : [];
+  for (const action of actions) {
+    const mutations = Array.isArray(action.mutations)
+      ? action.mutations.filter(isRecord)
+      : [];
+    for (const mutation of mutations) {
+      const authority = isRecord(mutation.authority)
+        ? mutation.authority
+        : null;
+      const source =
+        authority !== null && isRecord(authority.source)
+          ? authority.source
+          : null;
+      lines.push(
+        `- Native effect: ${String(mutation.kind)} selector ${String(mutation.selectorId)} sets policy ${String(mutation.policy)}${source === null ? "" : ` in source ${String(source.sourceId)}`}.`,
+      );
+    }
+  }
+  for (const warning of warnings) {
+    if (warning.kind === "control-scope" && isRecord(warning.scope))
+      lines.push(
+        `- Effect scope: ${describeScope(warning.scope)}${warning.scope.kind === "user" ? "; affects future sessions in other projects" : ""}.`,
+      );
+    else if (warning.kind === "activation")
+      lines.push(
+        `- Activation: ${String(warning.activation)}; a new session may be required.`,
+      );
+    else if (
+      warning.kind === "source-unavailable" ||
+      warning.kind === "source-invalid" ||
+      warning.kind === "source-incomplete"
+    )
+      lines.push(
+        `- Source ${String(warning.kind)}: ${String(warning.reason ?? "native evidence is not complete")}.`,
+      );
+    else if (warning.kind === "owner-alternative")
+      lines.push(
+        `- Owner alternative: select ${isRecord(warning.owner) ? `setup:${String(warning.owner.targetId)}` : "the owner"} explicitly for a separate review.`,
+      );
+  }
+  for (const target of targets)
+    if (isRecord(target.state) && target.state.accountState === "unknown")
+      lines.push(`- ${String(target.name)}: account connectivity is unknown.`);
+  for (const block of blocks) {
+    if (block.kind === "owner-gate")
+      lines.push(
+        `- Block: the selected target needs its owner enabled. Select ${isRecord(block.owner) ? `setup:${String(block.owner.targetId)}` : "the owner"} explicitly for a separate setup review.`,
+      );
+    else if (
+      ["source-unavailable", "source-invalid", "source-incomplete"].includes(
+        String(block.kind),
+      )
+    )
+      lines.push(
+        `- Block: ${String(block.kind)}; native source evidence cannot safely support this change.`,
+      );
+    else if (block.kind === "missing-target")
+      lines.push(
+        "- Block: the exact setup target is missing or stale; scan again and select its current setup ID.",
+      );
+    else
+      lines.push(
+        `- Block: ${String(block.kind)}${typeof block.reason === "string" ? `: ${block.reason}` : ""}.`,
+      );
+  }
+  lines.push("No token saving is measured or claimed.");
+  return `${[...new Set(lines)].join("\n")}\n`;
 }
 
 function humanRemovalPlan(plan: unknown): string {

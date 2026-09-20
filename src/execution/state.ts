@@ -25,6 +25,57 @@ import {
 import type { AvailabilityExecutionAuditWriter } from "./types.js";
 import { parseUpdatePlan, parseUpdateReport } from "../update/validation.js";
 import type { UpdateExecutionAuditWriter } from "./types.js";
+import {
+  parseSessionSetupPlan,
+  parseSessionSetupReport,
+  parseSessionSetupApprovals,
+} from "../session-setup/validation.js";
+import type { SessionSetupExecutionAuditWriter } from "../session-setup/types.js";
+
+export function createFileSessionSetupExecutionAuditWriter(
+  stateRoot: string,
+): SessionSetupExecutionAuditWriter {
+  requireAbsoluteStateRoot(stateRoot);
+  return {
+    async write(record) {
+      const plan = parseSessionSetupPlan(record.plan);
+      const report = parseSessionSetupReport(record.report);
+      const approvals = parseSessionSetupApprovals(record.approvals);
+      if (
+        record.schemaVersion !== 1 ||
+        report.planId !== plan.id ||
+        report.snapshotId !== plan.snapshotId ||
+        !sameValues(
+          report.actionResults.map((result) => result.actionId),
+          plan.actions.map((action) => action.id),
+        ) ||
+        !sameValues(
+          report.targetResults.map((result) => result.target),
+          plan.intent.targets,
+        ) ||
+        (report.rescanError === null
+          ? !sameValues(
+              report.verificationResults.map((result) => result.verificationId),
+              plan.verifications.map((verification) => verification.id),
+            )
+          : report.verificationResults.length !== 0)
+      )
+        throw new ExecutionModuleError(
+          "audit-failed",
+          "audit record does not match its Session setup plan",
+        );
+      const parsed = { schemaVersion: 1 as const, plan, approvals, report };
+      const directory = join(stateRoot, "audit", "session-setup-v1");
+      await ensureStateDirectory(stateRoot, ["audit", "session-setup-v1"]);
+      const timestamp = report.completedAt.replaceAll(/[^0-9]/g, "");
+      await writeFile(
+        join(directory, `${timestamp}-${randomUUID()}.json`),
+        `${stringifyModel(parsed)}\n`,
+        { flag: "wx" },
+      );
+    },
+  };
+}
 
 export function createFileExecutionAuditWriter(
   stateRoot: string,
