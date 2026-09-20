@@ -31,17 +31,59 @@ export function createSetupSections(
       detail: `${targets.length} target(s) · ${sources.length} source(s)${sources.some((source) => source.status !== "success") ? " · unavailable/incomplete evidence" : ""}`,
       selectable: targets.some(selectable),
       target: null,
-      entries: targets.map(entry),
+      entries: typedEntries(targets),
     };
   });
 }
-function entry(target: SessionSetupTarget): TuiEntry {
+function typedEntries(
+  targets: readonly SessionSetupTarget[],
+): readonly TuiEntry[] {
+  const names = new Map<string, number>();
+  for (const target of targets)
+    names.set(target.name, (names.get(target.name) ?? 0) + 1);
+  const kinds = [
+    "skill-exposure",
+    "plugin",
+    "mcp-registration",
+    "app-binding",
+  ] as const;
+  return kinds.flatMap((kind) => {
+    const members = targets.filter((target) => target.kind === kind);
+    if (members.length === 0) return [];
+    return [
+      {
+        key: `setup-heading:${kind}`,
+        name: heading(kind),
+        description: null,
+        exposedTo: [],
+        paths: [],
+        owner: "",
+        note: null,
+        target: null,
+        selectable: false,
+      },
+      ...members.map((target) =>
+        entry(target, (names.get(target.name) ?? 0) > 1),
+      ),
+    ];
+  });
+}
+function heading(kind: SessionSetupTarget["kind"]): string {
+  return kind === "skill-exposure"
+    ? "Skill exposures"
+    : kind === "mcp-registration"
+      ? "MCP registrations"
+      : kind === "app-binding"
+        ? "App bindings"
+        : "Plugins";
+}
+function entry(target: SessionSetupTarget, duplicate = false): TuiEntry {
   const child =
     target.kind === "skill-exposure" && target.owner.kind === "plugin";
   return {
     key: `setup:${target.id}`,
     ...(child ? { rowKind: "plugin-skill" as const } : {}),
-    name: target.name,
+    name: duplicate ? `${target.name} · ${target.owner.kind}` : target.name,
     description: [
       `Type: ${target.kind}`,
       `Source: ${target.source.path ?? target.source.sourceId}`,

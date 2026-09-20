@@ -1129,10 +1129,24 @@ export class TuiController {
       return;
     }
     if (area === "setup") {
-      const setupInventory =
-        this.dependencies.scanSessionSetup === undefined
-          ? undefined
-          : await this.dependencies.scanSessionSetup();
+      let setupInventory:
+        import("../session-setup/types.js").SessionSetupSnapshot | undefined;
+      try {
+        setupInventory =
+          this.dependencies.scanSessionSetup === undefined
+            ? undefined
+            : await this.dependencies.scanSessionSetup();
+      } catch {
+        this.stateValue = {
+          ...state,
+          model: {
+            ...state.model,
+            notice:
+              "Session setup sources are unavailable; no setup state was changed.",
+          },
+        };
+        return;
+      }
       if (setupInventory === undefined) {
         this.stateValue = {
           ...state,

@@ -680,7 +680,10 @@ export function parseRawTuiAction(
       return state.view === "trash"
         ? { kind: "noop" }
         : { kind: "toggle-select" };
-    if (key.ctrl && key.name === "a") return { kind: "clear-selection" };
+    if (key.ctrl && key.name === "a")
+      return state.area === "setup"
+        ? { kind: "toggle-select" }
+        : { kind: "clear-selection" };
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
@@ -690,11 +693,11 @@ export function parseRawTuiAction(
         ? { kind: "noop" }
         : { kind: "update-review" };
     if (text === "d")
-      return state.view === "inventory"
+      return state.area === "setup" || state.view === "inventory"
         ? { kind: "disable-review" }
         : { kind: "noop" };
     if (text === "e")
-      return state.view === "disabled"
+      return state.area === "setup" || state.view === "disabled"
         ? { kind: "enable-review" }
         : { kind: "noop" };
     if (!key.ctrl && !key.meta && text.length > 0)
