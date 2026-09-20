@@ -1894,11 +1894,21 @@ export function renderBrowseLines(
         { text: " remove · ", paint: style.muted },
         ...updateControls,
       ];
+  const setupControls = [
+    { text: "d", paint: style.title },
+    { text: " disable · ", paint: style.muted },
+    { text: "e", paint: style.title },
+    { text: " enable · ", paint: style.muted },
+    { text: "space", paint: style.title },
+    { text: " select · ", paint: style.muted },
+    { text: "ctrl-a", paint: style.title },
+    { text: " select view", paint: style.muted },
+  ] as const;
   out.push(
     `${style.title("Lampwright")} ${state.area === "setup" ? style.muted("Skills & plugins") : style.selected("Skills & plugins")} ${style.muted("|")} ${state.area === "setup" ? style.selected("Session setup") : style.muted("Session setup")}`,
   );
   out.push(
-    `${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? ` · ${setupHarness}` : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`}  ${
+    `${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? ` · ${setupHarness} · Workspace: ${state.setupInventory?.workspace.path ?? "unknown"}` : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -1922,12 +1932,14 @@ export function renderBrowseLines(
         )
       : model.focus === "detail"
         ? fitStyledSegments(
-            [
-              { text: "↑↓/wheel", paint: style.title },
-              { text: " scroll · ", paint: style.muted },
-              { text: "PgUp/PgDn", paint: style.title },
-              { text: " page", paint: style.muted },
-            ],
+            state.area === "setup"
+              ? setupControls
+              : [
+                  { text: "↑↓/wheel", paint: style.title },
+                  { text: " scroll · ", paint: style.muted },
+                  { text: "PgUp/PgDn", paint: style.title },
+                  { text: " page", paint: style.muted },
+                ],
             usable,
             style.muted,
           )
@@ -2125,15 +2137,17 @@ function entryCell(
   const focused = index === model.entryIndex && model.focus === "entries";
   const selectable = entry.selectable ?? entry.target !== null;
   const marker =
-    entry.rowKind === "plugin-skill"
+    entry.rowKind === "heading"
       ? "   "
-      : isTrash
-        ? " • "
-        : section !== null && (!section.selectable || !selectable)
-          ? " - "
-          : model.selected.has(entry.key)
-            ? "[x]"
-            : "[ ]";
+      : entry.rowKind === "plugin-skill"
+        ? "   "
+        : isTrash
+          ? " • "
+          : section !== null && (!section.selectable || !selectable)
+            ? " - "
+            : model.selected.has(entry.key)
+              ? "[x]"
+              : "[ ]";
   const displayName =
     entry.rowKind === "plugin-skill"
       ? `${entry.treeBranch === "last" ? "└─" : "├─"} ${entry.name}`
