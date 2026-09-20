@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
+import { link, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import {
   SessionSetupValidationError,
+  executeSessionSetup,
+  planSessionSetup,
   parseSessionSetupPlan,
   parseSessionSetupPublicValue,
   parseSessionSetupSnapshot,
@@ -11,6 +16,7 @@ import {
   sessionSetupTargetSchema,
   sessionSetupJsonSchema,
 } from "../src/session-setup/index.js";
+import { createSessionSetupConfigurationWriter } from "../src/execution/index.js";
 import {
   buildSessionSetupIntent,
   buildSessionSetupPlan,
@@ -29,10 +35,12 @@ import type {
   McpRegistration,
   PluginTarget,
   SessionSetupSnapshot,
+  SessionSetupTarget,
   SetupNativeControl,
   SetupNativeSelector,
   SetupSourceRef,
   SkillHarnessExposure,
+  SetupMutation,
 } from "../src/session-setup/types.js";
 
 function completeFixture(): {
@@ -326,6 +334,26 @@ describe("session setup contracts", () => {
               { ...plan.actions[0]!.mutations[0], selectorId: "missing" },
             ],
           },
+        ],
+      }),
+    ).toThrow(SessionSetupValidationError);
+    expect(() =>
+      parseSessionSetupPlan({
+        ...plan,
+        actions: [
+          {
+            ...plan.actions[0],
+            approvals: [{ kind: "confirmation", required: true }],
+          },
+        ],
+      }),
+    ).toThrow(SessionSetupValidationError);
+    expect(() =>
+      parseSessionSetupPlan({
+        ...plan,
+        actions: [
+          plan.actions[0],
+          { ...plan.actions[0], id: "duplicate-selector-action" },
         ],
       }),
     ).toThrow(SessionSetupValidationError);
@@ -628,5 +656,891 @@ describe("session setup contracts", () => {
     expect(validate(buildSessionSetupPlan())).toBe(true);
     expect(validate(buildSessionSetupIntent())).toBe(true);
     expect(validate(buildSessionSetupReport())).toBe(true);
+  });
+});
+
+function setupIntent(
+  snapshot: SessionSetupSnapshot,
+  action: "enable" | "disable",
+  targets: readonly [
+    ReturnType<typeof targetRef>,
+    ...ReturnType<typeof targetRef>[],
+  ],
+) {
+  return buildSessionSetupIntent({
+    action,
+    harnessId: "codex",
+    workspace: snapshot.workspace,
+    targets,
+  });
+}
+
+function withTargetState<T extends SessionSetupTarget>(
+  target: T,
+  policy: "enabled" | "disabled" | "unresolved",
+  effectiveWorkspaceState: "enabled" | "disabled" | "unresolved" = policy,
+): T {
+  return {
+    ...target,
+    state: { ...target.state, policy, effectiveWorkspaceState },
+  };
+}
+
+function replaceTargets(
+  snapshot: SessionSetupSnapshot,
+  targets: readonly SessionSetupTarget[],
+  overrides: Partial<SessionSetupSnapshot> = {},
+): SessionSetupSnapshot {
+  return parseSessionSetupSnapshot({ ...snapshot, targets, ...overrides });
+}
+
+function grantsFor(plan: ReturnType<typeof planSessionSetup>) {
+  return {
+    grants: [
+      ...new Map(
+        plan.actions
+          .flatMap((action) => action.approvals)
+          .map((approval) => [JSON.stringify(approval), approval]),
+      ).values(),
+    ],
+  };
+}
+
+describe("session setup planning and execution", () => {
+  it("plans one selected exposure with complete native scope and activation disclosure", () => {
+    const snapshot = buildSessionSetupSnapshot();
+    const target = snapshot.targets[0]!;
+    const plan = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [targetRef(target)]),
+    );
+
+    expect(plan.blocks).toEqual([]);
+    expect(plan.actions).toHaveLength(1);
+    expect(plan.actions[0]!.targets).toEqual([targetRef(target)]);
+    expect(plan.actions[0]!.mutations).toEqual([
+      expect.objectContaining({
+        kind: "configuration",
+        selectorId: target.control.selector.id,
+        policy: "disabled",
+      }),
+    ]);
+    expect(plan.actions[0]!.approvals).toEqual([
+      { kind: "confirmation", required: true },
+      { kind: "scope-disclosure", scope: { kind: "user" }, required: true },
+    ]);
+    expect(plan.warnings).toEqual(
+      expect.arrayContaining([
+        {
+          kind: "control-scope",
+          target: targetRef(target),
+          scope: { kind: "user" },
+        },
+        {
+          kind: "activation",
+          target: targetRef(target),
+          activation: "new-session",
+        },
+      ]),
+    );
+    expect(plan.verifications.map((item) => item.kind)).toEqual([
+      "native-policy",
+      "effective-workspace-state",
+      "new-session-required",
+    ]);
+    expect(JSON.stringify(plan)).not.toContain("disabled-storage");
+  });
+
+  it("enforces owner gates while preserving independent child policies", () => {
+    const fixture = completeFixture();
+    const plugin = withTargetState(fixture.plugin, "disabled", "disabled");
+    const skill = withTargetState(fixture.skill, "disabled", "disabled");
+    const snapshot = replaceTargets(fixture.snapshot, [
+      plugin,
+      skill,
+      fixture.mcp,
+      fixture.firstApp,
+      fixture.secondApp,
+    ]);
+
+    const blocked = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "enable", [targetRef(skill)]),
+    );
+    expect(blocked.blocks).toEqual([
+      {
+        kind: "owner-gate",
+        target: targetRef(skill),
+        owner: targetRef(plugin),
+      },
+    ]);
+    expect(blocked.actions).toEqual([]);
+
+    const enabled = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "enable", [targetRef(plugin), targetRef(skill)]),
+    );
+    const pluginAction = enabled.actions.find((action) =>
+      action.targets.some((target) => target.targetId === plugin.id),
+    )!;
+    const skillAction = enabled.actions.find((action) =>
+      action.targets.some((target) => target.targetId === skill.id),
+    )!;
+    expect(skillAction.dependsOn).toEqual([pluginAction.id]);
+
+    const disabledChild = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [targetRef(skill)]),
+    );
+    expect(disabledChild.blocks).toEqual([]);
+    expect(disabledChild.actions[0]!.mutations[0]).toEqual(
+      expect.objectContaining({
+        selectorId: skill.control.selector.id,
+        policy: "disabled",
+      }),
+    );
+
+    const wholePlugin = planSessionSetup(
+      fixture.snapshot,
+      setupIntent(fixture.snapshot, "disable", [targetRef(fixture.plugin)]),
+    );
+    expect(wholePlugin.targets.map((target) => target.id)).toEqual(
+      expect.arrayContaining([
+        fixture.plugin.id,
+        fixture.skill.id,
+        fixture.mcp.id,
+        fixture.firstApp.id,
+        fixture.secondApp.id,
+      ]),
+    );
+    expect(wholePlugin.actions.flatMap((action) => action.mutations)).toEqual([
+      expect.objectContaining({
+        selectorId: fixture.plugin.control.selector.id,
+      }),
+    ]);
+  });
+
+  it("discloses shared connector collateral and schedules hard dependencies safely", () => {
+    const fixture = completeFixture();
+    const blocked = planSessionSetup(
+      fixture.snapshot,
+      setupIntent(fixture.snapshot, "disable", [targetRef(fixture.firstApp)]),
+    );
+    expect(blocked.blocks.map((block) => block.kind)).toContain(
+      "hard-dependency",
+    );
+    expect(blocked.targets.map((target) => target.id)).toEqual(
+      expect.arrayContaining([fixture.firstApp.id, fixture.secondApp.id]),
+    );
+
+    const ordered = planSessionSetup(
+      fixture.snapshot,
+      setupIntent(fixture.snapshot, "disable", [
+        targetRef(fixture.mcp),
+        targetRef(fixture.firstApp),
+      ]),
+    );
+    expect(ordered.blocks).toEqual([]);
+    const mcpAction = ordered.actions.find((action) =>
+      action.targets.some((target) => target.targetId === fixture.mcp.id),
+    )!;
+    const appAction = ordered.actions.find((action) =>
+      action.targets.some((target) => target.targetId === fixture.firstApp.id),
+    )!;
+    expect(appAction.dependsOn).toEqual([mcpAction.id]);
+    expect(
+      appAction.mutations.filter(
+        (mutation) =>
+          mutation.selectorId === fixture.firstApp.control.selector.id,
+      ),
+    ).toHaveLength(1);
+
+    const appPath = fixture.firstApp.control.layers[0]!.canonicalPath;
+    const mcp = {
+      ...fixture.mcp,
+      control: {
+        ...fixture.mcp.control,
+        layers: fixture.mcp.control.layers.map((layer) => ({
+          ...layer,
+          canonicalPath: appPath,
+        })),
+        availability: {
+          enable: {
+            kind: "available" as const,
+            controlScope: { kind: "user" as const },
+            authority: {
+              kind: "configuration" as const,
+              source: fixture.mcp.source,
+              layerSourceId: fixture.mcp.source.sourceId,
+              layerCanonicalPath: appPath,
+            },
+          },
+          disable: {
+            kind: "available" as const,
+            controlScope: { kind: "user" as const },
+            authority: {
+              kind: "configuration" as const,
+              source: fixture.mcp.source,
+              layerSourceId: fixture.mcp.source.sourceId,
+              layerCanonicalPath: appPath,
+            },
+          },
+        },
+      },
+    } satisfies McpRegistration;
+    const atomicSnapshot = replaceTargets(fixture.snapshot, [
+      fixture.plugin,
+      fixture.skill,
+      mcp,
+      fixture.firstApp,
+      fixture.secondApp,
+    ]);
+    const atomic = planSessionSetup(
+      atomicSnapshot,
+      setupIntent(atomicSnapshot, "disable", [
+        targetRef(mcp),
+        targetRef(fixture.firstApp),
+      ]),
+    );
+    expect(atomic.actions).toHaveLength(1);
+    expect(atomic.actions[0]!.mutations).toHaveLength(2);
+    expect(atomic.actions[0]!.dependsOn).toEqual([]);
+
+    const ownerSnapshot = replaceTargets(fixture.snapshot, [
+      withTargetState(fixture.plugin, "disabled", "disabled"),
+      fixture.skill,
+      withTargetState(fixture.mcp, "enabled", "disabled"),
+      withTargetState(fixture.firstApp, "disabled", "disabled"),
+      withTargetState(fixture.secondApp, "disabled", "disabled"),
+    ]);
+    const unsafeOwnerEnable = planSessionSetup(
+      ownerSnapshot,
+      setupIntent(ownerSnapshot, "enable", [targetRef(fixture.plugin)]),
+    );
+    expect(unsafeOwnerEnable.blocks.map((block) => block.kind)).toContain(
+      "hard-dependency",
+    );
+  });
+
+  it("blocks ambiguous names, incomplete sources, and protected configuration", () => {
+    const initial = buildSessionSetupSnapshot();
+    const first = initial.targets[0] as SkillHarnessExposure;
+    const secondInstallation = buildInstallation({
+      id: "installation-2" as never,
+      exposedTo: ["codex"],
+    });
+    const secondSource = {
+      sourceId: "fixture-source-2",
+      path: "/fixtures/config-2.toml",
+    };
+    const second = {
+      ...first,
+      id: "setup-target-2",
+      installationId: secondInstallation.id,
+      source: secondSource,
+      control: {
+        ...first.control,
+        selector: {
+          kind: "skill-path" as const,
+          id: "selector-skill-2",
+          path: "/fixtures/skills/example-skill-2",
+          authority: "exact-target" as const,
+          governedTargetIds: ["setup-target-2"] as [string],
+        },
+        layers: [
+          {
+            ...first.control.layers[0]!,
+            source: secondSource,
+            canonicalPath: secondSource.path,
+            protection: {
+              ...first.control.layers[0]!.protection,
+              git: { kind: "protected" as const, worktreeRoot: "/fixtures" },
+            },
+          },
+        ],
+        availability: {
+          enable: {
+            kind: "available" as const,
+            controlScope: { kind: "user" as const },
+            authority: {
+              kind: "configuration" as const,
+              source: secondSource,
+              layerSourceId: secondSource.sourceId,
+              layerCanonicalPath: secondSource.path,
+            },
+          },
+          disable: {
+            kind: "available" as const,
+            controlScope: { kind: "user" as const },
+            authority: {
+              kind: "configuration" as const,
+              source: secondSource,
+              layerSourceId: secondSource.sourceId,
+              layerCanonicalPath: secondSource.path,
+            },
+          },
+        },
+      },
+    } satisfies SkillHarnessExposure;
+    const snapshot = buildSessionSetupSnapshot({
+      targets: [first, second],
+      sources: [
+        initial.sources[0]!,
+        {
+          source: secondSource,
+          profileId: initial.profiles[0]!.id,
+          harnessId: "codex",
+          kind: "skill-exposure",
+          scope: { kind: "user" },
+          status: "incomplete",
+          reason: "fixture discovery is partial",
+          targetIds: [second.id],
+          collateralTargetIds: [second.id],
+        },
+      ],
+      legacyInventory: buildInventory({
+        installations: [
+          initial.legacyInventory.installations[0]!,
+          secondInstallation,
+        ],
+      }),
+    });
+    const plan = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [targetRef(second)]),
+    );
+    expect(plan.blocks.map((block) => block.kind)).toEqual(
+      expect.arrayContaining([
+        "selector-collision",
+        "source-incomplete",
+        "protected",
+      ]),
+    );
+    expect(plan.actions).toEqual([]);
+  });
+
+  it("fresh-scans, verifies saved and effective state, and audits attempted writes", async () => {
+    const initial = buildSessionSetupSnapshot();
+    const target = initial.targets[0]!;
+    const final = replaceTargets(
+      initial,
+      [withTargetState(target, "disabled", "disabled")],
+      { id: "setup-snapshot-final" },
+    );
+    const plan = planSessionSetup(
+      initial,
+      setupIntent(initial, "disable", [targetRef(target)]),
+    );
+    let scans = 0;
+    let commits = 0;
+    const audits: unknown[] = [];
+    const report = await executeSessionSetup(plan, grantsFor(plan), {
+      scan: async () => (scans++ === 0 ? initial : final),
+      replan: planSessionSetup,
+      configurationWriter: {
+        async prepare() {
+          return { token: "prepared", status: "changed" };
+        },
+        async commit() {
+          commits += 1;
+        },
+        async discard() {},
+      },
+      processRunner: {
+        async run() {
+          throw new Error("unexpected command");
+        },
+      },
+      inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+      auditWriter: {
+        async write(record) {
+          audits.push(record);
+        },
+      },
+      now: () => new Date("2026-09-20T12:00:00.000Z"),
+    });
+
+    expect(commits).toBe(1);
+    expect(audits).toHaveLength(1);
+    expect(report.status).toBe("succeeded");
+    expect(report.targetResults).toEqual([
+      { target: targetRef(target), status: "disabled" },
+    ]);
+    expect(report.verificationResults).toEqual([
+      { verificationId: `policy:${target.id}`, status: "passed" },
+      { verificationId: `effective:${target.id}`, status: "passed" },
+      { verificationId: `activation:${target.id}`, status: "passed" },
+    ]);
+  });
+
+  it("rejects stale or unapproved authority without writes or audit state", async () => {
+    const initial = buildSessionSetupSnapshot();
+    const target = initial.targets[0]!;
+    const plan = planSessionSetup(
+      initial,
+      setupIntent(initial, "disable", [targetRef(target)]),
+    );
+    const stale = replaceTargets(initial, initial.targets, {
+      id: "new-snapshot",
+      semanticFingerprint: {
+        algorithm: "sha256",
+        digest: "1".repeat(64),
+      },
+    });
+    let prepares = 0;
+    let audits = 0;
+    const dependencies = {
+      replan: planSessionSetup,
+      configurationWriter: {
+        async prepare() {
+          prepares += 1;
+          return { token: "prepared", status: "changed" as const };
+        },
+        async commit() {},
+        async discard() {},
+      },
+      processRunner: {
+        async run() {
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+      inspectGitProtection: async () => ({ kind: "outside-worktree" }) as const,
+      auditWriter: {
+        async write() {
+          audits += 1;
+        },
+      },
+      now: () => new Date("2026-09-20T12:00:00.000Z"),
+    };
+    const staleReport = await executeSessionSetup(plan, grantsFor(plan), {
+      ...dependencies,
+      scan: async () => stale,
+    });
+    expect(staleReport.status).toBe("blocked");
+    expect(prepares).toBe(0);
+    expect(audits).toBe(0);
+
+    let scans = 0;
+    const unapproved = await executeSessionSetup(
+      plan,
+      { grants: [] },
+      {
+        ...dependencies,
+        scan: async () => {
+          scans += 1;
+          return initial;
+        },
+      },
+    );
+    expect(scans).toBe(2);
+    expect(unapproved.status).toBe("blocked");
+    expect(prepares).toBe(0);
+    expect(audits).toBe(0);
+
+    await expect(
+      executeSessionSetup(
+        plan,
+        {
+          grants: [
+            ...grantsFor(plan).grants,
+            {
+              kind: "confirmation",
+              required: true,
+              secret: "SECRET_APPROVAL",
+            } as never,
+          ],
+        },
+        { ...dependencies, scan: async () => initial },
+      ),
+    ).rejects.toThrow("invalid grant");
+    expect(prepares).toBe(0);
+    expect(audits).toBe(0);
+  });
+
+  it("continues independent commands, blocks dependents, and never falls back", async () => {
+    const fixture = completeFixture();
+    const byId = new Map(
+      fixture.snapshot.targets.map((target) => [target.id, target]),
+    );
+    const commandTarget = <T extends SessionSetupTarget>(
+      target: T,
+      executable: string,
+    ): T => {
+      const effects = target.control.selector.governedTargetIds.map((id) =>
+        targetRef(byId.get(id)!),
+      ) as [ReturnType<typeof targetRef>, ...ReturnType<typeof targetRef>[]];
+      return {
+        ...target,
+        control: {
+          ...target.control,
+          availability: {
+            ...target.control.availability,
+            disable: {
+              kind: "available" as const,
+              controlScope: { kind: "user" as const },
+              authority: {
+                kind: "native-command" as const,
+                executable,
+                arguments: ["disable", target.control.selector.id],
+                source: target.source,
+                scope: { kind: "user" as const },
+                effects: [
+                  {
+                    selectorId: target.control.selector.id,
+                    targets: effects,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      } as T;
+    };
+    const skill = commandTarget(fixture.skill, "independent-command");
+    const mcp = commandTarget(fixture.mcp, "failing-command");
+    const firstApp = commandTarget(fixture.firstApp, "dependent-command");
+    const snapshot = replaceTargets(fixture.snapshot, [
+      fixture.plugin,
+      skill,
+      mcp,
+      firstApp,
+      fixture.secondApp,
+    ]);
+    const plan = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [
+        targetRef(skill),
+        targetRef(mcp),
+        targetRef(firstApp),
+      ]),
+    );
+    const final = replaceTargets(
+      snapshot,
+      [
+        fixture.plugin,
+        withTargetState(skill, "disabled", "disabled"),
+        mcp,
+        firstApp,
+        fixture.secondApp,
+      ],
+      { id: "command-final" },
+    );
+    const commands: string[] = [];
+    let scans = 0;
+    let writerCalls = 0;
+    const audits: unknown[] = [];
+    const secret = "SECRET_COMMAND_STDERR";
+    const report = await executeSessionSetup(plan, grantsFor(plan), {
+      scan: async () => (scans++ === 0 ? snapshot : final),
+      replan: planSessionSetup,
+      configurationWriter: {
+        async prepare() {
+          writerCalls += 1;
+          throw new Error("configuration fallback must not run");
+        },
+        async commit() {},
+        async discard() {},
+      },
+      processRunner: {
+        async run(request) {
+          commands.push(request.command.executable);
+          return request.command.executable === "failing-command"
+            ? { exitCode: 1, stdout: secret, stderr: secret }
+            : { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+      inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+      auditWriter: {
+        async write(record) {
+          audits.push(record);
+        },
+      },
+      now: () => new Date("2026-09-20T12:00:00.000Z"),
+    });
+
+    expect(commands).toEqual(
+      expect.arrayContaining(["independent-command", "failing-command"]),
+    );
+    expect(commands).not.toContain("dependent-command");
+    expect(writerCalls).toBe(0);
+    expect(audits).toHaveLength(1);
+    expect(report.status).toBe("partial");
+    expect(report.targetResults).toEqual(
+      expect.arrayContaining([
+        { target: targetRef(skill), status: "disabled" },
+        expect.objectContaining({
+          target: targetRef(mcp),
+          status: "failed",
+        }),
+        expect.objectContaining({
+          target: targetRef(firstApp),
+          status: "blocked",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(report)).not.toContain(secret);
+    expect(JSON.stringify(audits)).not.toContain(secret);
+  });
+
+  it("reports successful mutations as unverified when the final scan fails", async () => {
+    const snapshot = buildSessionSetupSnapshot();
+    const target = snapshot.targets[0]!;
+    const plan = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [targetRef(target)]),
+    );
+    let scans = 0;
+    const audits: unknown[] = [];
+    const report = await executeSessionSetup(plan, grantsFor(plan), {
+      scan: async () => {
+        if (scans++ === 0) return snapshot;
+        throw new Error("SECRET_RESCAN_FAILURE");
+      },
+      replan: planSessionSetup,
+      configurationWriter: {
+        async prepare() {
+          return { token: "prepared", status: "changed" };
+        },
+        async commit() {},
+        async discard() {},
+      },
+      processRunner: {
+        async run() {
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+      inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+      auditWriter: {
+        async write(record) {
+          audits.push(record);
+        },
+      },
+      now: () => new Date("2026-09-20T12:00:00.000Z"),
+    });
+    expect(report.status).toBe("partial");
+    expect(report.finalSnapshotId).toBeNull();
+    expect(report.targetResults).toEqual([
+      expect.objectContaining({
+        target: targetRef(target),
+        status: "unverified",
+      }),
+    ]);
+    expect(
+      report.verificationResults.every((item) => item.status === "skipped"),
+    ).toBe(true);
+    expect(audits).toHaveLength(1);
+    expect(JSON.stringify(report)).not.toContain("SECRET_RESCAN_FAILURE");
+  });
+
+  it("distinguishes unchanged policy and rejects runtime Git protection", async () => {
+    const initial = buildSessionSetupSnapshot();
+    const target = initial.targets[0]!;
+    const unchangedSnapshot = replaceTargets(initial, [
+      withTargetState(target, "disabled", "disabled"),
+    ]);
+    const unchangedPlan = planSessionSetup(
+      unchangedSnapshot,
+      setupIntent(unchangedSnapshot, "disable", [targetRef(target)]),
+    );
+    let prepares = 0;
+    let commits = 0;
+    let audits = 0;
+    const unchanged = await executeSessionSetup(
+      unchangedPlan,
+      grantsFor(unchangedPlan),
+      {
+        scan: async () => unchangedSnapshot,
+        replan: planSessionSetup,
+        configurationWriter: {
+          async prepare() {
+            prepares += 1;
+            return { token: "unchanged", status: "unchanged" };
+          },
+          async commit() {
+            commits += 1;
+          },
+          async discard() {},
+        },
+        processRunner: {
+          async run() {
+            throw new Error("unexpected command");
+          },
+        },
+        inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+        auditWriter: {
+          async write() {
+            audits += 1;
+          },
+        },
+        now: () => new Date("2026-09-20T12:00:00.000Z"),
+      },
+    );
+    expect(unchanged.status).toBe("unchanged");
+    expect(prepares).toBe(0);
+    expect(commits).toBe(0);
+    expect(audits).toBe(0);
+
+    const protectedPlan = planSessionSetup(
+      initial,
+      setupIntent(initial, "disable", [targetRef(target)]),
+    );
+    let discarded = 0;
+    const protectedReport = await executeSessionSetup(
+      protectedPlan,
+      grantsFor(protectedPlan),
+      {
+        scan: async () => initial,
+        replan: planSessionSetup,
+        configurationWriter: {
+          async prepare() {
+            return { token: "protected", status: "changed" };
+          },
+          async commit() {
+            commits += 1;
+          },
+          async discard() {
+            discarded += 1;
+          },
+        },
+        processRunner: {
+          async run() {
+            throw new Error("unexpected command");
+          },
+        },
+        inspectGitProtection: async () => ({
+          kind: "protected",
+          worktreeRoot: "/fixtures/worktree",
+        }),
+        auditWriter: {
+          async write() {
+            audits += 1;
+          },
+        },
+        now: () => new Date("2026-09-20T12:00:00.000Z"),
+      },
+    );
+    expect(protectedReport.status).toBe("failed");
+    expect(protectedReport.targetResults[0]!.status).toBe("failed");
+    expect(discarded).toBe(1);
+    expect(commits).toBe(0);
+    expect(audits).toBe(0);
+  });
+
+  it("uses the shared checked writer for preservation, races, links, and missing parents", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-setup-writer-"));
+    const path = join(root, "settings.json");
+    const original =
+      '{\n  "secret": "SECRET_SENTINEL",\n  "enabled": true\n}\n';
+    await writeFile(path, original);
+    const digest = (value: string) => ({
+      algorithm: "sha256" as const,
+      digest: createHash("sha256").update(value).digest("hex"),
+    });
+    const mutation = planSessionSetup(
+      buildSessionSetupSnapshot(),
+      buildSessionSetupIntent(),
+    ).actions[0]!.mutations[0] as Extract<
+      SetupMutation,
+      { kind: "configuration" }
+    >;
+    const editor = {
+      edit(document: string) {
+        const value = JSON.parse(document) as Record<string, unknown>;
+        value.enabled = false;
+        return `${JSON.stringify(value, null, 2)}\n`;
+      },
+    };
+    const request = {
+      path,
+      format: "json" as const,
+      exists: true,
+      expectedPreimage: digest(original),
+      selectors: [buildSessionSetupTarget().control.selector] as const,
+      mutations: [mutation] as const,
+    };
+    const writer = createSessionSetupConfigurationWriter(editor);
+    const prepared = await writer.prepare(request);
+    await writer.commit(prepared);
+    const saved = await readFile(path, "utf8");
+    expect(saved).toContain("SECRET_SENTINEL");
+    expect(JSON.parse(saved)).toEqual({
+      secret: "SECRET_SENTINEL",
+      enabled: false,
+    });
+
+    const raceWriter = createSessionSetupConfigurationWriter({
+      edit(document: string) {
+        const value = JSON.parse(document) as Record<string, unknown>;
+        value.race = true;
+        return `${JSON.stringify(value, null, 2)}\n`;
+      },
+    });
+    const raceRequest = {
+      ...request,
+      expectedPreimage: digest(saved),
+    };
+    const raced = await raceWriter.prepare(raceRequest);
+    await writeFile(path, `${saved} `);
+    await expect(raceWriter.commit(raced)).rejects.toThrow(
+      "changed before mutation",
+    );
+
+    await writeFile(path, saved);
+    const hardLink = join(root, "hard-link.json");
+    await link(path, hardLink);
+    await expect(
+      createSessionSetupConfigurationWriter(editor).prepare({
+        ...request,
+        expectedPreimage: digest(saved),
+      }),
+    ).rejects.toThrow("single-link regular file");
+
+    const safeMissing = createSessionSetupConfigurationWriter({
+      edit() {
+        return '{"created":true}\n';
+      },
+    });
+    const missingPath = join(root, "created.json");
+    const missing = await safeMissing.prepare({
+      path: missingPath,
+      format: "json",
+      exists: false,
+      expectedPreimage: null,
+      selectors: request.selectors,
+      mutations: [mutation],
+    });
+    await safeMissing.commit(missing);
+    expect(await readFile(missingPath, "utf8")).toBe('{"created":true}\n');
+
+    if (process.platform !== "win32") {
+      const symbolic = join(root, "symbolic.json");
+      await symlink(path, symbolic, "file");
+      await expect(
+        createSessionSetupConfigurationWriter(editor).prepare({
+          ...request,
+          path: symbolic,
+          expectedPreimage: digest(saved),
+        }),
+      ).rejects.toThrow("single-link regular file");
+
+      const realParent = join(root, "real-parent");
+      const linkedParent = join(root, "linked-parent");
+      const realDirectory = await mkdtemp(`${realParent}-`);
+      await symlink(realDirectory, linkedParent, "dir");
+      const unsafe = createSessionSetupConfigurationWriter({
+        edit() {
+          return '{"changed":true}\n';
+        },
+      });
+      const pending = await unsafe.prepare({
+        path: join(linkedParent, "new.json"),
+        format: "json",
+        exists: false,
+        expectedPreimage: null,
+        selectors: request.selectors,
+        mutations: [mutation],
+      });
+      await expect(unsafe.commit(pending)).rejects.toThrow("parent is unsafe");
+    }
   });
 });

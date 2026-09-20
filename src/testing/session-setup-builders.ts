@@ -219,7 +219,14 @@ export function buildSessionSetupPlan(
           },
         ],
         dependsOn: [],
-        approvals: [{ kind: "confirmation", required: true }],
+        approvals: [
+          { kind: "confirmation", required: true },
+          {
+            kind: "scope-disclosure",
+            scope: { kind: "user" },
+            required: true,
+          },
+        ],
       },
     ],
     blocks: [],

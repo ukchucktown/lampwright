@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import { parse as parseToml } from "@iarna/toml";
 import {
@@ -13,6 +14,69 @@ import {
 } from "jsonc-parser";
 
 import type { NativeConfigurationMutation } from "../availability/types.js";
+import type {
+  SessionSetupConfigurationRequest,
+  SessionSetupConfigurationWriter,
+} from "../session-setup/types.js";
+
+interface NativeDocumentEvidence {
+  readonly path: string;
+  readonly format: "toml" | "json" | "jsonc";
+  readonly exists: boolean;
+  readonly expectedPreimageHash: {
+    readonly algorithm: "sha256";
+    readonly digest: string;
+  } | null;
+}
+
+export interface SessionSetupConfigurationEditor {
+  edit(document: string, request: SessionSetupConfigurationRequest): string;
+}
+
+/**
+ * Creates a Session setup writer on the same checked preimage and file-commit
+ * primitives used by legacy native Availability.
+ */
+export function createSessionSetupConfigurationWriter(
+  editor: SessionSetupConfigurationEditor,
+): SessionSetupConfigurationWriter {
+  let sequence = 0;
+  const pending = new Map<
+    string,
+    { readonly evidence: NativeDocumentEvidence; readonly postimage: Buffer }
+  >();
+  return {
+    async prepare(request) {
+      const evidence: NativeDocumentEvidence = {
+        path: request.path,
+        format: request.format,
+        exists: request.exists,
+        expectedPreimageHash: request.expectedPreimage,
+      };
+      const prepared = await prepareNativeDocument(evidence, (document) =>
+        editor.edit(document, request),
+      );
+      const token = `session-setup-write-${++sequence}`;
+      if (prepared.changed)
+        pending.set(token, { evidence, postimage: prepared.postimage });
+      return {
+        token,
+        status: prepared.changed ? "changed" : "unchanged",
+      };
+    },
+    async commit(prepared) {
+      if (prepared.status === "unchanged") return;
+      const value = pending.get(prepared.token);
+      if (!value)
+        throw new Error("prepared native configuration is unavailable");
+      pending.delete(prepared.token);
+      await commitNativeDocument(value.evidence, value.postimage);
+    },
+    async discard(prepared) {
+      pending.delete(prepared.token);
+    },
+  };
+}
 
 export async function prepareAvailabilityMutation(
   mutation: NativeConfigurationMutation,
@@ -36,26 +100,49 @@ export async function prepareAvailabilityMutations(
     )
       throw new Error("grouped native mutations do not share one preimage");
   }
-  const preimage = await readRegularFile(mutation.path);
-  if (mutation.exists) {
-    if (preimage === null || mutation.expectedPreimageHash === null)
-      throw new Error("native configuration disappeared since planning");
-    if (digest(preimage) !== mutation.expectedPreimageHash.digest.toLowerCase())
-      throw new Error("native configuration changed since planning");
-  } else if (preimage !== null || mutation.expectedPreimageHash !== null) {
-    throw new Error("native configuration became occupied since planning");
-  }
-  let text = preimage?.toString("utf8") ?? emptyDocument(mutation);
-  for (const candidate of mutations) text = mutate(text, candidate);
-  return Buffer.from(text, "utf8");
+  const prepared = await prepareNativeDocument(mutation, (document) => {
+    let text = document;
+    for (const candidate of mutations) text = mutate(text, candidate);
+    return text;
+  });
+  return prepared.postimage;
 }
 
 export async function commitAvailabilityMutation(
   mutation: NativeConfigurationMutation,
   postimage: Buffer,
 ): Promise<void> {
-  if (!mutation.exists) {
-    const handle = await open(mutation.path, "wx");
+  await commitNativeDocument(mutation, postimage);
+}
+
+async function prepareNativeDocument(
+  evidence: NativeDocumentEvidence,
+  edit: (document: string) => string,
+): Promise<{ readonly postimage: Buffer; readonly changed: boolean }> {
+  const preimage = await readRegularFile(evidence.path);
+  if (evidence.exists) {
+    if (preimage === null || evidence.expectedPreimageHash === null)
+      throw new Error("native configuration disappeared since planning");
+    if (digest(preimage) !== evidence.expectedPreimageHash.digest.toLowerCase())
+      throw new Error("native configuration changed since planning");
+  } else if (preimage !== null || evidence.expectedPreimageHash !== null) {
+    throw new Error("native configuration became occupied since planning");
+  }
+  const original = preimage?.toString("utf8") ?? emptyDocument(evidence.format);
+  const updated = edit(original);
+  return {
+    postimage: Buffer.from(updated, "utf8"),
+    changed: updated !== original,
+  };
+}
+
+async function commitNativeDocument(
+  evidence: NativeDocumentEvidence,
+  postimage: Buffer,
+): Promise<void> {
+  if (!evidence.exists) {
+    await requireSafeParent(evidence.path);
+    const handle = await open(evidence.path, "wx");
     try {
       await writeComplete(handle, postimage);
       await handle.sync();
@@ -64,21 +151,21 @@ export async function commitAvailabilityMutation(
     }
     return;
   }
-  const before = await lstat(mutation.path);
+  const before = await lstat(evidence.path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1)
     throw new Error("native configuration is not a single-link regular file");
   const handle = await open(
-    mutation.path,
+    evidence.path,
     constants.O_RDWR | (constants.O_NOFOLLOW ?? 0),
   );
   try {
     const opened = await handle.stat();
     requireSameFile(before, opened);
-    await requirePathStillOpenedFile(mutation.path, opened);
+    await requirePathStillOpenedFile(evidence.path, opened);
     const current = await handle.readFile();
     if (
-      mutation.expectedPreimageHash === null ||
-      digest(current) !== mutation.expectedPreimageHash.digest.toLowerCase()
+      evidence.expectedPreimageHash === null ||
+      digest(current) !== evidence.expectedPreimageHash.digest.toLowerCase()
     )
       throw new Error("native configuration changed before mutation");
     await writeComplete(handle, postimage);
@@ -341,8 +428,8 @@ function objectValue(value: unknown, key: string): unknown {
     ? (value as Record<string, unknown>)[key]
     : undefined;
 }
-function emptyDocument(mutation: NativeConfigurationMutation): string {
-  return mutation.format === "toml" ? "" : "{}\n";
+function emptyDocument(format: NativeDocumentEvidence["format"]): string {
+  return format === "toml" ? "" : "{}\n";
 }
 async function readRegularFile(path: string): Promise<Buffer | null> {
   let before: Stats;
@@ -389,6 +476,11 @@ async function requirePathStillOpenedFile(
     current.nlink !== 1
   )
     throw new Error("native configuration changed before mutation");
+}
+async function requireSafeParent(path: string): Promise<void> {
+  const parent = await lstat(dirname(path));
+  if (!parent.isDirectory() || parent.isSymbolicLink())
+    throw new Error("native configuration parent is unsafe");
 }
 async function writeComplete(
   handle: Awaited<ReturnType<typeof open>>,

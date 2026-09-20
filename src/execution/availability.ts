@@ -21,6 +21,7 @@ import {
 } from "./availability-documents.js";
 import type { Approvals, ExecutionModuleOptions } from "./types.js";
 import { ExecutionModuleError } from "./types.js";
+import { selectReadyDependencyActions } from "./dependency-scheduler.js";
 
 export async function executeAvailabilityPlan(
   planInput: AvailabilityPlan,
@@ -113,11 +114,12 @@ async function executeActions(
   const results = new Map<string, AvailabilityActionResult>();
   const remaining = new Set(plan.actions.map((action) => action.id));
   while (remaining.size > 0) {
-    const action = plan.actions.find(
-      (candidate) =>
-        remaining.has(candidate.id) &&
-        candidate.dependsOn.every((id) => results.has(id)),
-    );
+    const action = selectReadyDependencyActions(
+      plan.actions,
+      remaining,
+      new Set(results.keys()),
+      1,
+    )[0];
     if (action === undefined)
       throw new ExecutionModuleError(
         "invalid-options",
