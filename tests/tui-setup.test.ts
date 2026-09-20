@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { plan, TuiController, renderTui } from "../src/index.js";
+import {
+  plan,
+  planSessionSetup,
+  TuiController,
+  renderTui,
+} from "../src/index.js";
 import type { DisabledEntry } from "../src/disabled-storage/types.js";
 import type { TuiState } from "../src/tui/types.js";
-import { mouseAction, parseRawTuiAction } from "../src/tui/terminal.js";
+import {
+  mouseAction,
+  parseLineTuiAction,
+  parseRawTuiAction,
+} from "../src/tui/terminal.js";
 import { createSetupSections } from "../src/tui/setup.js";
 import {
   buildInventory,
@@ -64,6 +73,28 @@ function twoHarnessSnapshot() {
         harnessId: "claude-code" as const,
         targetIds: ["claude-target"],
         collateralTargetIds: ["claude-target"],
+      },
+    ],
+  } as typeof snapshot;
+}
+
+function mixedStateSnapshot() {
+  const snapshot = buildSessionSetupSnapshot();
+  const enabled = snapshot.targets[0]!;
+  const disabled = {
+    ...enabled,
+    id: "disabled-setup-target",
+    name: "disabled-skill",
+    state: { ...enabled.state, effectiveWorkspaceState: "disabled" as const },
+  };
+  return {
+    ...snapshot,
+    targets: [enabled, disabled],
+    sources: [
+      {
+        ...snapshot.sources[0]!,
+        targetIds: [enabled.id, disabled.id],
+        collateralTargetIds: [enabled.id, disabled.id],
       },
     ],
   } as typeof snapshot;
@@ -398,5 +429,117 @@ describe("Session setup terminal area", () => {
         controller.state.model.sectionIndex
       ]!.entries.some((entry) => entry.rowKind === "suspended-skill"),
     ).toBe(false);
+  });
+
+  it("opens setup disable and enable reviews from raw and line terminals in both views", async () => {
+    const cases = [
+      { view: "inventory" as const, input: "d", raw: true, action: "disable" },
+      { view: "inventory" as const, input: "e", raw: true, action: "enable" },
+      {
+        view: "inventory" as const,
+        input: "disable",
+        raw: false,
+        action: "disable",
+      },
+      {
+        view: "inventory" as const,
+        input: "enable",
+        raw: false,
+        action: "enable",
+      },
+      { view: "disabled" as const, input: "d", raw: true, action: "disable" },
+      { view: "disabled" as const, input: "e", raw: true, action: "enable" },
+      {
+        view: "disabled" as const,
+        input: "disable",
+        raw: false,
+        action: "disable",
+      },
+      {
+        view: "disabled" as const,
+        input: "enable",
+        raw: false,
+        action: "enable",
+      },
+    ];
+    for (const item of cases) {
+      const planner = vi.fn(
+        (
+          _snapshot: Parameters<typeof planSessionSetup>[0],
+          _intent: Parameters<typeof planSessionSetup>[1],
+        ) => {
+          void _snapshot;
+          void _intent;
+          return buildSessionSetupPlan();
+        },
+      );
+      const controller = new TuiController({
+        scan: async () => buildInventory(),
+        plan,
+        execute: vi.fn(),
+        scanSessionSetup: async () => mixedStateSnapshot(),
+        planSessionSetup: planner,
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "switch-area", area: "setup" });
+      if (item.view === "disabled")
+        await controller.dispatch({ kind: "switch-view", view: "disabled" });
+      await controller.dispatch({ kind: "focus", pane: "entries" });
+      await controller.dispatch({ kind: "move", delta: 1 });
+      const action = item.raw
+        ? parseRawTuiAction(controller.state, item.input, { name: item.input })
+        : parseLineTuiAction(controller.state, item.input);
+      await controller.dispatch(action);
+      expect(controller.state.screen).toBe("setup-plan");
+      expect(planner).toHaveBeenCalledOnce();
+      expect(planner.mock.calls[0]![1]).toMatchObject({
+        action: item.action,
+        targets: [
+          {
+            targetId:
+              item.view === "inventory"
+                ? "setup-target-1"
+                : "disabled-setup-target",
+          },
+        ],
+      });
+    }
+  });
+
+  it("plans unsupported setup controls as blocks without executing them", async () => {
+    const target = buildSessionSetupTarget({
+      control: {
+        ...buildSessionSetupTarget().control,
+        availability: {
+          disable: { kind: "unavailable", reason: "fixture control" },
+          enable: { kind: "unavailable", reason: "fixture control" },
+        },
+      },
+    });
+    const snapshot = buildSessionSetupSnapshot({ targets: [target] });
+    const planner = vi.fn(planSessionSetup);
+    const executeSessionSetup = vi.fn();
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => snapshot,
+      planSessionSetup: planner,
+      executeSessionSetup,
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(
+      controller.state.model.sections[controller.state.model.sectionIndex]!
+        .entries[controller.state.model.entryIndex]!.selectable,
+    ).toBe(true);
+    await controller.dispatch({ kind: "disable-review" });
+    expect(controller.state.screen).toBe("setup-plan");
+    expect(renderTui(controller.state)).toContain("unsupported-control");
+    await controller.dispatch({ kind: "confirm" });
+    expect(executeSessionSetup).not.toHaveBeenCalled();
   });
 });
