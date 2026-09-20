@@ -167,6 +167,8 @@ async function scanCodexSessionSetup(
   }
 
   const pluginTargets = new Map<string, string>();
+  const pluginMcpIds = new Map<string, string[]>();
+  const requiredApps = new Map<string, string[]>();
   for (const plugin of inventory.plugins) {
     if (
       plugin.adapterId !== CODEX_PLUGIN_ADAPTER_ID ||
@@ -350,6 +352,7 @@ async function scanCodexSessionSetup(
         serverKey,
         requiredAppBindingId: null,
       });
+      pluginMcpIds.set(plugin.id, [...(pluginMcpIds.get(plugin.id) ?? []), id]);
     }
     for (const [alias, raw] of entries(descriptor.apps)) {
       const connectorId = stringAt(raw, ["id"]);
@@ -391,6 +394,42 @@ async function scanCodexSessionSetup(
         connectorId,
         requiredByTargetIds: [],
       });
+      if (objectAt(raw, ["required"]) === true)
+        requiredApps.set(plugin.id, [
+          ...(requiredApps.get(plugin.id) ?? []),
+          id,
+        ]);
+    }
+  }
+
+  const dependencies: {
+    kind: "hard";
+    dependent: import("../session-setup/types.js").SessionSetupTargetRef;
+    required: import("../session-setup/types.js").SessionSetupTargetRef;
+    reason: string;
+  }[] = [];
+  const byId = new Map(targets.map((target) => [target.id, target]));
+  for (const [pluginId, appIds] of requiredApps) {
+    const appId = appIds[0];
+    if (!appId) continue;
+    const app = byId.get(appId);
+    if (!app || app.kind !== "app-binding") continue;
+    for (const mcpId of pluginMcpIds.get(pluginId) ?? []) {
+      const mcp = byId.get(mcpId);
+      if (!mcp || mcp.kind !== "mcp-registration") continue;
+      const index = targets.findIndex((target) => target.id === mcp.id);
+      targets[index] = { ...mcp, requiredAppBindingId: app.id };
+      const appIndex = targets.findIndex((target) => target.id === app.id);
+      targets[appIndex] = {
+        ...app,
+        requiredByTargetIds: [...app.requiredByTargetIds, mcp.id].sort(),
+      };
+      dependencies.push({
+        kind: "hard",
+        dependent: mcpRef(mcp),
+        required: appRef(app),
+        reason: "the installed Plugin declares this App Binding as required",
+      });
     }
   }
 
@@ -423,7 +462,7 @@ async function scanCodexSessionSetup(
     targets: completeTargets,
     sources: completeSources,
     profiles: [codexProfile],
-    dependencies: [],
+    dependencies,
     legacyInventory: inventory,
   };
   const fingerprint = createHash("sha256")
@@ -681,6 +720,25 @@ function stateFromExposure(status: string): SetupConfiguredState {
 }
 function stateFromPlugin(status: string): SetupConfiguredState {
   return stateFromExposure(status);
+}
+function mcpRef(
+  target: Extract<SessionSetupTarget, { kind: "mcp-registration" }>,
+) {
+  return {
+    kind: "mcp-registration" as const,
+    targetId: target.id,
+    declarationSourceId: target.declarationSource.sourceId,
+    serverKey: target.serverKey,
+  };
+}
+function appRef(target: Extract<SessionSetupTarget, { kind: "app-binding" }>) {
+  return {
+    kind: "app-binding" as const,
+    targetId: target.id,
+    declarationSourceId: target.declarationSource.sourceId,
+    alias: target.alias,
+    connectorId: target.connectorId,
+  };
 }
 function ownerForInstallation(
   owner: import("../model/types.js").Ownership,
