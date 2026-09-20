@@ -414,6 +414,34 @@ describe("Session setup terminal area", () => {
     expect(entries[heading + 2]!.selectable).toBe(false);
   });
 
+  it("distinguishes colliding setup names with stable owner suffixes", () => {
+    const base = buildSessionSetupTarget();
+    const first = {
+      ...base,
+      id: "first-mcp",
+      kind: "mcp-registration" as const,
+      name: "docs",
+      declarationSource: base.source,
+      serverKey: "docs-first",
+      requiredAppBindingId: null,
+    };
+    const second = {
+      ...first,
+      id: "second-mcp",
+      serverKey: "docs-second",
+      owner: { kind: "manager" as const, managerId: "team-tools" },
+    };
+    const snapshot = {
+      ...buildSessionSetupSnapshot(),
+      targets: [first, second],
+    } as ReturnType<typeof buildSessionSetupSnapshot>;
+    const names = createSetupSections(snapshot, "inventory")[0]!.entries.map(
+      (entry) => entry.name,
+    );
+    expect(names).toContain("docs · standalone");
+    expect(names).toContain("docs · manager:team-tools");
+  });
+
   it("routes a suspended Codex setup row to its lifecycle Disabled entry", async () => {
     const planSessionSetup = vi.fn();
     const executeSessionSetup = vi.fn();

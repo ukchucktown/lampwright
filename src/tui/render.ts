@@ -171,14 +171,18 @@ function setupReportBodyLines(
   return [
     style.title(`Session setup result: ${state.report.status}`),
     ...state.report.actionResults.map((result) =>
-      style.muted(`Action ${result.actionId}: ${result.status}`),
+      style.muted(
+        `Action ${result.actionId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`,
+      ),
     ),
     ...state.report.targetResults.map(
       (result) =>
-        `${result.status === "failed" || result.status === "blocked" || result.status === "unverified" ? style.error("!") : style.success("✓")} ${result.target.targetId}: ${result.status}`,
+        `${result.status === "failed" || result.status === "blocked" || result.status === "unverified" ? style.error("!") : style.success("✓")} ${result.target.targetId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`,
     ),
     ...state.report.verificationResults.map((result) =>
-      style.muted(`Verification ${result.verificationId}: ${result.status}`),
+      style.muted(
+        `Verification ${result.verificationId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`,
+      ),
     ),
     style.muted(
       `Final snapshot: ${state.report.finalSnapshotId ?? "unverified"}`,

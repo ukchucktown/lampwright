@@ -140,14 +140,15 @@ function heading(kind: SessionSetupTarget["kind"]): string {
 function entry(target: SessionSetupTarget, duplicate = false): TuiEntry {
   const child =
     target.kind === "skill-exposure" && target.owner.kind === "plugin";
+  const owner = ownerLabel(target.owner);
   return {
     key: `setup:${target.id}`,
     ...(child ? { rowKind: "plugin-skill" as const } : {}),
-    name: duplicate ? `${target.name} · ${target.owner.kind}` : target.name,
+    name: duplicate ? `${target.name} · ${owner}` : target.name,
     description: [
       `Type: ${target.kind}`,
       `Source: ${target.source.path ?? target.source.sourceId}`,
-      `Owner: ${target.owner.kind}`,
+      `Owner: ${owner}`,
       `Policy: ${target.state.policy}`,
       `Effective state: ${target.state.effectiveWorkspaceState}`,
       `Scope: ${target.definitionScope.kind}`,
@@ -156,11 +157,25 @@ function entry(target: SessionSetupTarget, duplicate = false): TuiEntry {
     ].join("\n"),
     exposedTo: [target.harnessId],
     paths: target.source.path === null ? [] : [target.source.path],
-    owner: target.owner.kind,
+    owner,
     note: `${target.kind} · ${target.state.effectiveWorkspaceState}`,
     target: null,
     selectable: selectable(target),
   };
+}
+function ownerLabel(owner: SessionSetupTarget["owner"]): string {
+  switch (owner.kind) {
+    case "standalone":
+      return "standalone";
+    case "plugin":
+      return `plugin:${owner.pluginBoundaryId}`;
+    case "manager":
+      return `manager:${owner.managerId}`;
+    case "runtime":
+      return `runtime:${owner.harnessId}`;
+    case "unknown":
+      return "unknown";
+  }
 }
 function selectable(target: SessionSetupTarget): boolean {
   return (
