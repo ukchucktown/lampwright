@@ -133,6 +133,8 @@ export function mouseAction(
     state.screen === "report" ||
     state.screen === "availability-plan" ||
     state.screen === "availability-report" ||
+    state.screen === "setup-plan" ||
+    state.screen === "setup-report" ||
     state.screen === "update-plan" ||
     state.screen === "update-report"
   )
