@@ -90,9 +90,11 @@ function renderSetupPlan(
     setupPlanBodyLines(state, style),
     [
       style.muted(
-        state.plan.blocks.length || state.plan.errors.length
-          ? "esc cancel"
-          : "y confirm · esc cancel",
+        state.plan.blocks.some((block) => block.kind === "owner-gate")
+          ? "o owner review · esc cancel"
+          : state.plan.blocks.length || state.plan.errors.length
+            ? "esc cancel"
+            : "y confirm · esc cancel",
       ),
     ],
     state.scrollOffset,
@@ -109,15 +111,35 @@ function setupPlanBodyLines(
       `Harness: ${state.plan.intent.harnessId} · Workspace: ${state.plan.intent.workspace.path}`,
     ),
     ...state.plan.targets.map((target) =>
-      style.info(`${target.name} · ${target.kind}`),
+      style.info(
+        `${target.name} · ${target.kind} · policy ${target.state.policy} · effective ${target.state.effectiveWorkspaceState}`,
+      ),
     ),
-    ...state.plan.blocks.map((block) => style.error(`Blocked: ${block.kind}`)),
+    ...state.plan.actions.flatMap((action) =>
+      [
+        `Dependencies: ${action.dependsOn.join(", ") || "none"}`,
+        `Approvals: ${action.approvals.map((approval) => approval.kind).join(", ") || "none"}`,
+      ].map(style.muted),
+    ),
+    ...state.plan.blocks.map((block) =>
+      style.error(
+        `Blocked: ${block.kind}${"reason" in block ? ` — ${block.reason}` : ""}`,
+      ),
+    ),
     ...state.plan.warnings.map((warning) =>
-      style.warning(`Warning: ${warning.kind}`),
+      style.warning(
+        `Warning: ${warning.kind}${"scope" in warning ? ` — ${warning.scope.kind}` : ""}${"activation" in warning ? ` — ${warning.activation}` : ""}`,
+      ),
     ),
-    ...state.plan.errors.map((error) => style.error(`Error: ${error.kind}`)),
+    ...state.plan.errors.map((error) =>
+      style.error(
+        `Error: ${error.kind}${"reason" in error ? ` — ${error.reason}` : ""}`,
+      ),
+    ),
     ...state.plan.verifications.map((item) =>
-      style.muted(`Verify: ${item.kind}`),
+      style.muted(
+        `Verify: ${item.kind}${"expected" in item ? ` — ${item.expected}` : ""}`,
+      ),
     ),
   ];
 }
