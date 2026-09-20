@@ -238,4 +238,43 @@ describe("Session setup terminal area", () => {
     );
     expect(controller.state.model.selected.size).toBe(0);
   });
+
+  it("keeps all harnesses visible when setup scanning throws", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => {
+        throw new Error("fixture failure");
+      },
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    const output = renderTui(controller.state);
+    expect(output).toContain("Codex");
+    expect(output).toContain("Claude Code");
+    expect(output).toContain("Gemini CLI");
+    expect(output).toContain("sources are unavailable");
+  });
+
+  it("renders setup target details without claiming account or live state", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => buildSessionSetupSnapshot(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "select" });
+    const output = renderTui(controller.state);
+    expect(output).toContain("Source:");
+    expect(output).toContain("Owner:");
+    expect(output).toContain("Policy:");
+    expect(output).toContain("Effective");
+    expect(output).toContain("Account: unknown");
+    expect(output).toContain("Live session: unknown");
+  });
 });
