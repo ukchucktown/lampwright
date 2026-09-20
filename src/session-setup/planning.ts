@@ -406,10 +406,13 @@ function addSelectorBlocks(
         candidate.id !== target.id &&
         candidate.control.selector.kind === "mcp-server-key" &&
         target.control.selector.kind === "mcp-server-key" &&
-        candidate.control.selector.policyOwner.kind === "plugin" &&
-        target.control.selector.policyOwner.kind === "plugin" &&
-        candidate.control.selector.policyOwner.pluginId ===
-          target.control.selector.policyOwner.pluginId &&
+        candidate.harnessId === target.harnessId &&
+        candidate.workspace.path === target.workspace.path &&
+        (target.harnessId === "claude-code" ||
+          (candidate.control.selector.policyOwner.kind === "plugin" &&
+            target.control.selector.policyOwner.kind === "plugin" &&
+            candidate.control.selector.policyOwner.pluginId ===
+              target.control.selector.policyOwner.pluginId)) &&
         candidate.serverKey === target.serverKey,
     )
   )

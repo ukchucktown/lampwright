@@ -213,6 +213,35 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
                                 "const": "plugin-id"
                               },
                               "id": { "type": "string", "minLength": 1 },
@@ -1503,6 +1532,35 @@
                               "kind",
                               "id",
                               "path",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
                               "authority",
                               "governedTargetIds"
                             ],
@@ -2820,6 +2878,35 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
                                 "const": "plugin-id"
                               },
                               "id": { "type": "string", "minLength": 1 },
@@ -4087,6 +4174,35 @@
                               "kind",
                               "id",
                               "path",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
                               "authority",
                               "governedTargetIds"
                             ],
@@ -13127,6 +13243,35 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
                                 "const": "plugin-id"
                               },
                               "id": { "type": "string", "minLength": 1 },
@@ -14417,6 +14562,35 @@
                               "kind",
                               "id",
                               "path",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
                               "authority",
                               "governedTargetIds"
                             ],
@@ -15734,6 +15908,35 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
                                 "const": "plugin-id"
                               },
                               "id": { "type": "string", "minLength": 1 },
@@ -17001,6 +17204,35 @@
                               "kind",
                               "id",
                               "path",
+                              "authority",
+                              "governedTargetIds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "skill-name"
+                              },
+                              "id": { "type": "string", "minLength": 1 },
+                              "name": { "type": "string", "minLength": 1 },
+                              "authority": {
+                                "type": "string",
+                                "const": "exact-target"
+                              },
+                              "governedTargetIds": {
+                                "type": "array",
+                                "prefixItems": [
+                                  { "type": "string", "minLength": 1 }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "name",
                               "authority",
                               "governedTargetIds"
                             ],
@@ -20658,6 +20890,35 @@
                                 "properties": {
                                   "kind": {
                                     "type": "string",
+                                    "const": "skill-name"
+                                  },
+                                  "id": { "type": "string", "minLength": 1 },
+                                  "name": { "type": "string", "minLength": 1 },
+                                  "authority": {
+                                    "type": "string",
+                                    "const": "exact-target"
+                                  },
+                                  "governedTargetIds": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      { "type": "string", "minLength": 1 }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id",
+                                  "name",
+                                  "authority",
+                                  "governedTargetIds"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
                                     "const": "plugin-id"
                                   },
                                   "id": { "type": "string", "minLength": 1 },
@@ -21999,6 +22260,35 @@
                                   "kind",
                                   "id",
                                   "path",
+                                  "authority",
+                                  "governedTargetIds"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "skill-name"
+                                  },
+                                  "id": { "type": "string", "minLength": 1 },
+                                  "name": { "type": "string", "minLength": 1 },
+                                  "authority": {
+                                    "type": "string",
+                                    "const": "exact-target"
+                                  },
+                                  "governedTargetIds": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      { "type": "string", "minLength": 1 }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id",
+                                  "name",
                                   "authority",
                                   "governedTargetIds"
                                 ],
@@ -23367,6 +23657,35 @@
                                 "properties": {
                                   "kind": {
                                     "type": "string",
+                                    "const": "skill-name"
+                                  },
+                                  "id": { "type": "string", "minLength": 1 },
+                                  "name": { "type": "string", "minLength": 1 },
+                                  "authority": {
+                                    "type": "string",
+                                    "const": "exact-target"
+                                  },
+                                  "governedTargetIds": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      { "type": "string", "minLength": 1 }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id",
+                                  "name",
+                                  "authority",
+                                  "governedTargetIds"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
                                     "const": "plugin-id"
                                   },
                                   "id": { "type": "string", "minLength": 1 },
@@ -24685,6 +25004,35 @@
                                   "kind",
                                   "id",
                                   "path",
+                                  "authority",
+                                  "governedTargetIds"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "skill-name"
+                                  },
+                                  "id": { "type": "string", "minLength": 1 },
+                                  "name": { "type": "string", "minLength": 1 },
+                                  "authority": {
+                                    "type": "string",
+                                    "const": "exact-target"
+                                  },
+                                  "governedTargetIds": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      { "type": "string", "minLength": 1 }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id",
+                                  "name",
                                   "authority",
                                   "governedTargetIds"
                                 ],

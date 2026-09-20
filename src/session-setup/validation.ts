@@ -77,6 +77,13 @@ const selector = z.discriminatedUnion("kind", [
     governedTargetIds: z.tuple([text]),
   }),
   z.strictObject({
+    kind: z.literal("skill-name"),
+    id: text,
+    name: text,
+    authority: z.literal("exact-target"),
+    governedTargetIds: z.tuple([text]),
+  }),
+  z.strictObject({
     kind: z.literal("plugin-id"),
     id: text,
     pluginId: text,
@@ -605,7 +612,11 @@ function scopeMatchesTarget(
 }
 function selectorMatchesTarget(target: SessionSetupTarget): boolean {
   if (target.kind === "skill-exposure")
-    return target.control.selector.kind === "skill-path";
+    return (
+      target.control.selector.kind === "skill-path" ||
+      (target.control.selector.kind === "skill-name" &&
+        target.control.selector.name === target.name)
+    );
   if (target.kind === "plugin")
     return (
       target.control.selector.kind === "plugin-id" &&
