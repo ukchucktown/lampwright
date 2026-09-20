@@ -280,10 +280,13 @@ describe("Codex Session setup Inventory", () => {
         agentHomeDirectories: { codex },
       },
       commandRunner: {
-        run: async () => ({
-          exitCode: 0,
-          stdout: JSON.stringify({ installed: [], available: [] }),
-        }),
+        run: async (command) =>
+          command.executable === "codex"
+            ? {
+                exitCode: 0,
+                stdout: JSON.stringify({ installed: [], available: [] }),
+              }
+            : { exitCode: 0, stdout: "" },
       },
     });
     const snapshot = await scanner.scanSessionSetup({
@@ -829,10 +832,13 @@ describe("Codex Session setup Inventory", () => {
         agentHomeDirectories: { codex },
       },
       commandRunner: {
-        run: async () => ({
-          exitCode: 0,
-          stdout: JSON.stringify({ installed: [], available: [] }),
-        }),
+        run: async (command) =>
+          command.executable === "codex"
+            ? {
+                exitCode: 0,
+                stdout: JSON.stringify({ installed: [], available: [] }),
+              }
+            : { exitCode: 0, stdout: "" },
       },
     });
     const trusted = await scanner.scanSessionSetup({
@@ -887,10 +893,142 @@ describe("Codex Session setup Inventory", () => {
           },
         ],
       });
-      expect(plan.actions).toEqual([]);
-      expect(
-        plan.blocks.some((block) => block.kind === "unsupported-control"),
-      ).toBe(true);
+      if (trust === false) {
+        expect(plan.blocks).toEqual([]);
+        expect(plan.actions).toHaveLength(1);
+        expect(plan.actions[0]?.approvals).toContainEqual({
+          kind: "scope-disclosure",
+          scope: { kind: "user" },
+          required: true,
+        });
+      } else {
+        expect(plan.actions).toEqual([]);
+        expect(
+          plan.blocks.some((block) => block.kind === "unsupported-control"),
+        ).toBe(true);
+      }
+    }
+
+    await mkdir(join(workspace, ".git"), { recursive: true });
+    const protectedScanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async (command) =>
+          command.executable === "codex"
+            ? {
+                exitCode: 0,
+                stdout: JSON.stringify({ installed: [], available: [] }),
+              }
+            : { exitCode: 1, stdout: "" },
+      },
+    });
+    const protectedSnapshot = await protectedScanner.scanSessionSetup({
+      workspace: { path: workspace },
+      workspaceTrusted: true,
+    });
+    const protectedTarget = protectedSnapshot.targets.find(
+      (item) =>
+        item.kind === "mcp-registration" &&
+        item.definitionScope.kind === "user",
+    )!;
+    if (protectedTarget.kind !== "mcp-registration")
+      throw new Error("expected the user MCP declaration");
+    const protectedPlan = planSessionSetup(protectedSnapshot, {
+      schemaVersion: 1,
+      kind: "session-setup-intent",
+      action: "disable",
+      harnessId: "codex",
+      workspace: { path: workspace },
+      targets: [
+        {
+          kind: "mcp-registration",
+          targetId: protectedTarget.id,
+          declarationSourceId: protectedTarget.declarationSource.sourceId,
+          serverKey: protectedTarget.serverKey,
+        },
+      ],
+    });
+    expect(protectedPlan.blocks.map((block) => block.kind)).toContain(
+      "protected",
+    );
+  });
+
+  it("falls back to user MCP policy when an empty trusted project layer is protected or unsafe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const codex = join(root, "codex");
+    await write(
+      join(codex, "config.toml"),
+      "[mcp_servers.user]\nenabled = true\n",
+    );
+    for (const [label, setup] of [
+      [
+        "protected",
+        async (workspace: string) =>
+          mkdir(join(workspace, ".git"), { recursive: true }),
+      ],
+      [
+        "unsafe",
+        async (workspace: string) => {
+          const source = join(root, "unsafe-project.toml");
+          await write(source, "# no MCP declaration\n");
+          await mkdir(join(workspace, ".codex"), { recursive: true });
+          await link(source, join(workspace, ".codex", "config.toml"));
+        },
+      ],
+    ] as const) {
+      const workspace = join(root, label);
+      const scanner = createSessionSetupScanner({
+        now: () => new Date("2026-09-20T00:00:00.000Z"),
+        environment: {
+          homeDirectory: home,
+          workspaceDirectory: workspace,
+          agentHomeDirectories: { codex },
+        },
+        commandRunner: {
+          run: async () => ({
+            exitCode: 0,
+            stdout: JSON.stringify({ installed: [], available: [] }),
+          }),
+        },
+      });
+      await setup(workspace);
+      const snapshot = await scanner.scanSessionSetup({
+        workspace: { path: workspace },
+        workspaceTrusted: true,
+      });
+      const target = snapshot.targets.find(
+        (item) => item.kind === "mcp-registration",
+      )!;
+      if (target.kind !== "mcp-registration")
+        throw new Error("expected the user MCP declaration");
+      const plan = planSessionSetup(snapshot, {
+        schemaVersion: 1,
+        kind: "session-setup-intent",
+        action: "disable",
+        harnessId: "codex",
+        workspace: { path: workspace },
+        targets: [
+          {
+            kind: "mcp-registration",
+            targetId: target.id,
+            declarationSourceId: target.declarationSource.sourceId,
+            serverKey: target.serverKey,
+          },
+        ],
+      });
+      expect(plan.blocks, label).toEqual([]);
+      expect(plan.actions[0]?.approvals, label).toContainEqual({
+        kind: "scope-disclosure",
+        scope: { kind: "user" },
+        required: true,
+      });
     }
   });
 });

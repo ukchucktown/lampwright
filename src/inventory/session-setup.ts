@@ -314,8 +314,11 @@ async function scanCodexSessionSetup(
         serverKey,
       ]);
       const projectDefines = projectValue !== undefined;
+      const projectContributes = projectApplies !== false && projectDefines;
       const useWorkspaceAuthority =
-        declarationDocument.scope.kind === "user" && projectApplies === true;
+        declarationDocument.scope.kind === "user" &&
+        projectApplies === true &&
+        (projectDefines || isSafeWritable(projectDocument));
       const authorityDocument = useWorkspaceAuthority
         ? projectDocument
         : declarationDocument;
@@ -351,7 +354,7 @@ async function scanCodexSessionSetup(
           serverKey,
           configurationSources.get(pathKey(authorityDocument.path)) ?? source,
           authorityDocument,
-          projectApplies === true || !projectDefines,
+          !projectContributes || projectApplies === true,
           configurationDocuments.map((item) =>
             layer(configurationSources.get(pathKey(item.path)) ?? source, item),
           ),
@@ -610,6 +613,15 @@ async function readDocument(
     }
   }
   return { path, scope, evidence: read.evidence, value, unsafe };
+}
+function isSafeWritable(document: Document): boolean {
+  const protection = document.evidence.protection;
+  return (
+    !document.unsafe &&
+    protection.git.kind !== "protected" &&
+    protection.system.kind === "none" &&
+    protection.filesystem.kind === "writable"
+  );
 }
 function layer(
   source: SetupSourceRef,
