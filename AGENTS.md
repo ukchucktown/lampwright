@@ -141,3 +141,12 @@ A change is complete only when:
 - Safety invariants remain covered.
 - Public interfaces and JSON shapes are documented.
 - The worktree contains no temporary scripts, fixtures outside their intended locations, generated secrets, or unrelated edits.
+
+<!-- agent-skills:sdlc:start -->
+## Coordinated feature workflow
+
+Use the installed `sdlc-*` skills for coordinated GitHub features. Read
+`docs/agents/sdlc.md` for this repository's branch, label, validation, and
+merge settings. Keep ordinary issue and pull request work on the repository's
+existing workflow.
+<!-- agent-skills:sdlc:end -->
