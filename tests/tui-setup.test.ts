@@ -174,4 +174,43 @@ describe("Session setup terminal area", () => {
     await controller.dispatch({ kind: "apply-search" });
     expect(controller.state.screen).toBe("search");
   });
+
+  it("restores independent harness and view browse models without setup Trash", async () => {
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      scanSessionSetup: async () => twoHarnessSnapshot(),
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "resize-panes", delta: 9 });
+    await controller.dispatch({ kind: "resize-detail", delta: 2 });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "toggle-select" });
+    if (controller.state.screen !== "browse") throw new Error();
+    const codex = controller.state.model;
+    await controller.dispatch({ kind: "focus", pane: "sections" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "resize-panes", delta: -4 });
+    if (controller.state.screen !== "browse") throw new Error();
+    const claude = controller.state.model;
+    await controller.dispatch({ kind: "switch-view", view: "disabled" });
+    if (controller.state.screen !== "browse") throw new Error();
+    const disabled = controller.state.model;
+    expect(controller.state.view).not.toBe("trash");
+    await controller.dispatch({ kind: "switch-view", view: "inventory" });
+    await controller.dispatch({ kind: "focus", pane: "sections" });
+    await controller.dispatch({ kind: "move", delta: -1 });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.model.leftPercent).toBe(codex.leftPercent);
+    expect(controller.state.model.selected).toEqual(codex.selected);
+    await controller.dispatch({ kind: "move", delta: 1 });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.model.leftPercent).toBe(claude.leftPercent);
+    await controller.dispatch({ kind: "switch-view", view: "disabled" });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.model.leftPercent).toBe(disabled.leftPercent);
+  });
 });
