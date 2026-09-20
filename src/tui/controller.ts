@@ -1526,39 +1526,32 @@ export class TuiController {
           : await this.dependencies.scanSessionSetup();
       if (snapshot === undefined) throw new Error();
       const view = state.browse.view === "disabled" ? "disabled" : "inventory";
+      const inventoryHarnessStates = refreshedSetupHarnessModels(
+        state.browse,
+        snapshot,
+        state.browse.disabledEntries ?? [],
+        "inventory",
+      );
+      const disabledHarnessStates = refreshedSetupHarnessModels(
+        state.browse,
+        snapshot,
+        state.browse.disabledEntries ?? [],
+        "disabled",
+      );
+      const activeHarness = setupHarness(state.browse.model) ?? "codex";
       const inventoryView = {
         inventory: snapshot.legacyInventory,
         setupInventory: snapshot,
         area: "setup" as const,
         view: "inventory" as const,
-        model: preserveBrowseModel(
-          state.browse.view === "inventory"
-            ? state.browse.model
-            : (state.browse.viewSnapshots?.inventory?.model ??
-                state.browse.model),
-          createSetupSections(
-            snapshot,
-            "inventory",
-            state.browse.disabledEntries,
-          ),
-        ),
+        model: inventoryHarnessStates[activeHarness]!,
       };
       const disabledView = {
         inventory: snapshot.legacyInventory,
         setupInventory: snapshot,
         area: "setup" as const,
         view: "disabled" as const,
-        model: preserveBrowseModel(
-          state.browse.view === "disabled"
-            ? state.browse.model
-            : (state.browse.viewSnapshots?.disabled?.model ??
-                state.browse.model),
-          createSetupSections(
-            snapshot,
-            "disabled",
-            state.browse.disabledEntries,
-          ),
-        ),
+        model: disabledHarnessStates[activeHarness]!,
       };
       this.stateValue = {
         screen: "browse",
@@ -1570,9 +1563,10 @@ export class TuiController {
         ...(state.browse.operations === undefined
           ? {}
           : { operations: state.browse.operations }),
-        ...(state.browse.setupHarnessStates === undefined
-          ? {}
-          : { setupHarnessStates: state.browse.setupHarnessStates }),
+        setupHarnessStates: {
+          inventory: inventoryHarnessStates,
+          disabled: disabledHarnessStates,
+        },
       };
     } catch {
       this.stateValue = {
