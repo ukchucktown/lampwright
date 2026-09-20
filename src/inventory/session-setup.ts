@@ -440,7 +440,14 @@ async function scanCodexSessionSetup(
           false,
           ownerDisabled,
         ),
-        control: appControl(connectorId, source, userDocument),
+        control: appControl(
+          connectorId,
+          source,
+          userDocument,
+          !descriptor.sources.some(
+            (item) => item.kind === "app-binding" && item.status !== "success",
+          ),
+        ),
         declarationSource,
         alias,
         connectorId,
@@ -695,6 +702,7 @@ function appControl(
   connectorId: string,
   source: SetupSourceRef,
   document: Document,
+  collateralComplete = true,
 ): SetupNativeControl {
   return configurationControl(
     {
@@ -703,7 +711,7 @@ function appControl(
       connectorId,
       authority: "shared-connector",
       governedTargetIds: ["pending"],
-      collateralComplete: true,
+      collateralComplete,
     },
     source,
     document,
@@ -1070,7 +1078,12 @@ function completeSelectors(
         selector: {
           ...target.control.selector,
           governedTargetIds: governedTargetIds as [string, ...string[]],
-          collateralComplete: true,
+          collateralComplete: (
+            target.control.selector as Extract<
+              SetupNativeControl["selector"],
+              { readonly kind: "app-connector-id" }
+            >
+          ).collateralComplete,
         },
       },
     } as SessionSetupTarget;
