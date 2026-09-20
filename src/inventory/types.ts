@@ -5,6 +5,7 @@ import type {
   SourceReference,
 } from "../model/types.js";
 import type { AdapterCatalog } from "../adapter/types.js";
+import type { CodexInstalledOwnerStatus } from "./codex-plugins.js";
 
 interface DiscoveryRootBase {
   readonly path: string;
@@ -63,6 +64,10 @@ export interface InventoryScannerOptions {
   /** Already validated and trusted compiled adapter declarations. */
   readonly adapterCatalog?: AdapterCatalog;
   readonly executablePresent?: (executable: string) => Promise<boolean>;
+  /** Internal observer for consumers that need the bounded Codex owner result. */
+  readonly onCodexInstalledOwnerStatus?: (
+    status: CodexInstalledOwnerStatus,
+  ) => void;
 }
 
 export interface InventoryScanEnvironment {

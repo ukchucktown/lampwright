@@ -115,10 +115,14 @@ type ListState =
   | { readonly kind: "valid"; readonly entries: readonly CodexPluginEntry[] }
   | { readonly kind: "manager-unavailable" | "invalid-output" };
 
+export type CodexInstalledOwnerStatus = "success" | "unavailable" | "invalid";
+
 export interface CodexPluginsScanResult {
   readonly installations: readonly Installation[];
   readonly plugins: readonly PluginBoundary[];
   readonly otherFindings: readonly NonInstallationFinding[];
+  /** Outcome of the one authoritative installed-owner query for this scan. */
+  readonly installedOwnerStatus: CodexInstalledOwnerStatus;
 }
 
 export async function scanCodexPlugins(
@@ -176,6 +180,12 @@ export async function scanCodexPlugins(
     ].sort((left, right) =>
       compareText(left.location.path, right.location.path),
     ),
+    installedOwnerStatus:
+      listState.kind === "valid"
+        ? "success"
+        : listState.kind === "manager-unavailable"
+          ? "unavailable"
+          : "invalid",
   };
 }
 

@@ -1,4 +1,12 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  link,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -290,6 +298,278 @@ describe("Codex Session setup Inventory", () => {
     ).toBe(true);
   });
 
+  it("reports the single installed-owner query as success, unavailable, or invalid", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    for (const [label, result, status] of [
+      [
+        "zero",
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({ installed: [], available: [] }),
+        },
+        "success",
+      ],
+      ["missing", { exitCode: 1, stdout: "" }, "unavailable"],
+      ["invalid", { exitCode: 0, stdout: "not json" }, "invalid"],
+    ] as const) {
+      let calls = 0;
+      const scanner = createSessionSetupScanner({
+        now: () => new Date("2026-09-20T00:00:00.000Z"),
+        environment: {
+          homeDirectory: home,
+          workspaceDirectory: workspace,
+          agentHomeDirectories: { codex },
+        },
+        commandRunner: { run: async () => ((calls += 1), result) },
+      });
+      const snapshot = await scanner.scanSessionSetup({
+        workspace: { path: workspace },
+      });
+      expect(calls, label).toBe(1);
+      expect(snapshot.sources).toContainEqual(
+        expect.objectContaining({
+          source: { sourceId: "codex:installed-owner", path: null },
+          kind: "plugin",
+          status,
+          targetIds: [],
+        }),
+      );
+    }
+  });
+
+  it("keeps linked, hard-linked, and duplicate-key descriptors non-actionable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const pluginRoot = join(
+      codex,
+      "plugins",
+      "cache",
+      "market",
+      "safe",
+      "1.0.0",
+    );
+    await writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), {
+      name: "safe",
+      version: "1.0.0",
+    });
+    const descriptor = join(pluginRoot, ".mcp.json");
+    const external = join(root, "external.json");
+    const installed = () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        installed: [
+          {
+            pluginId: "safe@market",
+            name: "safe",
+            marketplaceName: "market",
+            version: "1.0.0",
+            installed: true,
+            enabled: true,
+            source: { source: "git", url: "https://example.test/safe" },
+            installPolicy: "AVAILABLE",
+            authPolicy: "ON_USE",
+          },
+        ],
+        available: [],
+      }),
+    });
+    for (const [label, setup] of [
+      [
+        "hard link",
+        async () => {
+          await write(external, '{"server":{"command":"safe"}}\n');
+          await link(external, descriptor);
+        },
+      ],
+      [
+        "duplicate key",
+        async () => {
+          await write(
+            descriptor,
+            '{"server":{"command":"first"},"server":{"command":"second"}}\n',
+          );
+        },
+      ],
+      ...(process.platform === "win32"
+        ? []
+        : ([
+            [
+              "symbolic link",
+              async () => {
+                await write(external, '{"server":{"command":"safe"}}\n');
+                await symlink(external, descriptor, "file");
+              },
+            ],
+          ] as const)),
+    ] as const) {
+      await rm(descriptor, { force: true });
+      await setup();
+      const scanner = createSessionSetupScanner({
+        now: () => new Date("2026-09-20T00:00:00.000Z"),
+        environment: {
+          homeDirectory: home,
+          workspaceDirectory: workspace,
+          agentHomeDirectories: { codex },
+        },
+        commandRunner: { run: async () => installed() },
+      });
+      const snapshot = await scanner.scanSessionSetup({
+        workspace: { path: workspace },
+      });
+      expect(
+        snapshot.targets.filter((target) => target.kind === "mcp-registration"),
+        label,
+      ).toEqual([]);
+      expect(snapshot.sources).toContainEqual(
+        expect.objectContaining({
+          kind: "mcp-registration",
+          status: label === "duplicate key" ? "invalid" : "incomplete",
+        }),
+      );
+    }
+  });
+
+  it("discovers inline, referenced, default, and overlay declarations without merging colliding owners", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const plugin = (name: string) =>
+      join(codex, "plugins", "cache", "market", name, "1.0.0");
+    await writeJson(join(plugin("inline"), ".codex-plugin", "plugin.json"), {
+      name: "inline",
+      version: "1.0.0",
+      mcpServers: { same: { command: "inline" } },
+    });
+    await writeJson(
+      join(plugin("referenced"), ".codex-plugin", "plugin.json"),
+      {
+        name: "referenced",
+        version: "1.0.0",
+        apps: "./apps.json",
+      },
+    );
+    await writeJson(join(plugin("referenced"), "apps.json"), {
+      apps: {
+        same: { id: "shared" },
+        requiredOne: { id: "required-one", required: true },
+        requiredTwo: { id: "required-two", required: true },
+      },
+    });
+    await writeJson(join(plugin("referenced"), ".mcp.json"), {
+      same: { command: "default" },
+    });
+    await writeJson(join(plugin("overlay"), "plugin.json"), {
+      $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+      name: "overlay",
+      version: "1.0.0",
+    });
+    await writeJson(join(plugin("overlay"), ".codex-plugin", "plugin.json"), {
+      apps: "./overlay-apps.json",
+      mcpServers: { same: { command: "overlay" } },
+    });
+    await writeJson(join(plugin("overlay"), "overlay-apps.json"), {
+      apps: { same: { id: "shared" } },
+    });
+    await write(
+      join(codex, "config.toml"),
+      '[plugins."overlay@market"]\nenabled = false\n',
+    );
+    const entries = ["inline", "referenced", "overlay"].map((name) => ({
+      pluginId: `${name}@market`,
+      name,
+      marketplaceName: "market",
+      version: "1.0.0",
+      installed: true,
+      enabled: name !== "overlay",
+      source: { source: "git", url: `https://example.test/${name}` },
+      installPolicy: "AVAILABLE",
+      authPolicy: "ON_USE",
+    }));
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ installed: entries, available: [] }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    const mcps = snapshot.targets.filter(
+      (target) => target.kind === "mcp-registration",
+    );
+    const pluginBoundary = (pluginId: string) => {
+      const target = snapshot.targets.find(
+        (item) =>
+          item.kind === "plugin" && item.pluginId === `${pluginId}@market`,
+      );
+      if (!target || target.kind !== "plugin")
+        throw new Error("expected the installed Plugin boundary");
+      return target.pluginBoundaryId;
+    };
+    expect(
+      snapshot.targets.find(
+        (target) =>
+          target.kind === "plugin" && target.pluginId === "overlay@market",
+      )?.state.effectiveWorkspaceState,
+    ).toBe("disabled");
+    expect(mcps.filter((target) => target.name === "same")).toHaveLength(3);
+    expect(
+      new Set(
+        mcps
+          .filter((target) => target.name === "same")
+          .map((target) =>
+            target.owner.kind === "plugin"
+              ? target.owner.pluginBoundaryId
+              : null,
+          ),
+      ).size,
+    ).toBe(3);
+    expect(
+      mcps.find(
+        (target) =>
+          target.owner.kind === "plugin" &&
+          target.owner.pluginBoundaryId === pluginBoundary("overlay"),
+      )?.state.effectiveWorkspaceState,
+    ).toBe("disabled");
+    const shared = snapshot.targets.filter(
+      (target) =>
+        target.kind === "app-binding" && target.connectorId === "shared",
+    );
+    expect(shared).toHaveLength(2);
+    expect(
+      shared.every(
+        (target) => target.control.selector.governedTargetIds.length === 2,
+      ),
+    ).toBe(true);
+    const referencedMcp = mcps.find(
+      (target) =>
+        target.owner.kind === "plugin" &&
+        target.owner.pluginBoundaryId === pluginBoundary("referenced"),
+    )!;
+    expect(
+      snapshot.dependencies.filter(
+        (dependency) => dependency.dependent.targetId === referencedMcp.id,
+      ),
+    ).toHaveLength(2);
+  });
+
   it("keeps a missing installed-owner descriptor non-actionable", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
@@ -343,7 +623,10 @@ describe("Codex Session setup Inventory", () => {
     });
     expect(snapshot.sources).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "mcp-registration", status: "invalid" }),
+        expect.objectContaining({
+          kind: "mcp-registration",
+          status: "invalid",
+        }),
       ]),
     );
     expect(
@@ -399,6 +682,10 @@ describe("Codex Session setup Inventory", () => {
     const run = async (action: "enable" | "disable") => {
       const current = await scan();
       const target = current.targets.find((item) => item.id === project!.id)!;
+      if (target.kind !== "mcp-registration")
+        throw new Error(
+          "expected the selected target to remain an MCP registration",
+        );
       const plan = planSessionSetup(current, {
         schemaVersion: 1,
         kind: "session-setup-intent",
@@ -425,7 +712,7 @@ describe("Codex Session setup Inventory", () => {
           processRunner: {
             run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
           },
-          inspectGitProtection: async () => ({ kind: "unprotected" }),
+          inspectGitProtection: async () => ({ kind: "outside-worktree" }),
           auditWriter: { write: async () => undefined },
           now: () => new Date("2026-09-20T00:00:00.000Z"),
         },

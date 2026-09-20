@@ -38,6 +38,7 @@ import type {
   InventoryCommandRunner,
   InventoryScannerOptions,
 } from "./types.js";
+import type { CodexInstalledOwnerStatus } from "./codex-plugins.js";
 
 const codexProfile = recoveredSourceProfiles.find(
   (profile) => profile.id === "codex-0.154.0",
@@ -48,9 +49,15 @@ export interface CodexSessionSetupScanRequest extends SessionSetupScanRequest {
   readonly workspaceTrusted?: boolean | null;
 }
 
+export interface CodexSessionSetupScanner extends SessionSetupScanner {
+  scanSessionSetup(
+    request?: CodexSessionSetupScanRequest,
+  ): Promise<SessionSetupSnapshot>;
+}
+
 export function createSessionSetupScanner(
   options: InventoryScannerOptions,
-): SessionSetupScanner {
+): CodexSessionSetupScanner {
   return {
     scanSessionSetup: (request = {}) => scanCodexSessionSetup(request, options),
   };
@@ -77,9 +84,14 @@ async function scanCodexSessionSetup(
       request.workspace ?? { path: options.environment.workspaceDirectory }
     ).path,
   };
+  let installedOwnerStatus: CodexInstalledOwnerStatus | undefined;
   const inventory = await createInventoryScanner({
     ...options,
     environment,
+    onCodexInstalledOwnerStatus: (status) => {
+      installedOwnerStatus = status;
+      options.onCodexInstalledOwnerStatus?.(status);
+    },
   }).scan(request.roots === undefined ? {} : { roots: request.roots });
   if (request.harnessId !== undefined && request.harnessId !== "codex")
     throw new Error(
@@ -220,6 +232,19 @@ async function scanCodexSessionSetup(
       childTargetIds: [],
     });
   }
+  const ownerStatus = installedOwnerStatus ?? "unavailable";
+  addSource(
+    "plugin",
+    { kind: "user" },
+    "codex:installed-owner",
+    [...pluginTargets.values()].sort(),
+    ownerStatus,
+    ownerStatus === "success"
+      ? null
+      : ownerStatus === "unavailable"
+        ? "the authoritative Codex installed-owner command is unavailable"
+        : "the authoritative Codex installed-owner command returned invalid output",
+  );
   const childIds = new Map<string, string[]>();
   for (const installation of inventory.installations) {
     if (
