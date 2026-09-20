@@ -78,6 +78,10 @@ async function scanCodexSessionSetup(
   request: CodexSessionSetupScanRequest,
   options: InventoryScannerOptions,
 ): Promise<SessionSetupSnapshot> {
+  if (request.harnessId !== undefined && request.harnessId !== "codex")
+    throw new Error(
+      "the Codex session-setup scanner accepts only the Codex harness",
+    );
   const environment = {
     ...options.environment,
     workspaceDirectory: (
@@ -93,10 +97,6 @@ async function scanCodexSessionSetup(
       options.onCodexInstalledOwnerStatus?.(status);
     },
   }).scan(request.roots === undefined ? {} : { roots: request.roots });
-  if (request.harnessId !== undefined && request.harnessId !== "codex")
-    throw new Error(
-      "the Codex session-setup scanner accepts only the Codex harness",
-    );
   const workspace = request.workspace ?? {
     path: environment.workspaceDirectory,
   };
@@ -376,15 +376,28 @@ async function scanCodexSessionSetup(
         source,
         owner: { kind: "standalone" },
         definitionScope: declarationDocument.scope,
-        state: stateFromEnabled(
-          objectAt(
-            projectApplies === true && projectDefines
-              ? projectValue
-              : declarationValue,
-            ["enabled"],
-          ),
-          projectApplies === "unresolved" && projectDefines,
-        ),
+        state:
+          declarationDocument.scope.kind === "workspace" &&
+          projectApplies === false
+            ? {
+                ...stateFromEnabled(objectAt(declarationValue, ["enabled"])),
+                effectiveWorkspaceState: stateFromEnabled(
+                  objectAt(userDocument.value, [
+                    "mcp_servers",
+                    serverKey,
+                    "enabled",
+                  ]),
+                ).policy,
+              }
+            : stateFromEnabled(
+                objectAt(
+                  projectApplies === true && projectDefines
+                    ? projectValue
+                    : declarationValue,
+                  ["enabled"],
+                ),
+                projectApplies === "unresolved" && projectDefines,
+              ),
         control: mcpControl(
           serverKey,
           configurationSources.get(pathKey(authorityDocument.path)) ?? source,
@@ -673,11 +686,27 @@ async function readDocument(
   if (read.text !== null && !unsafe) {
     try {
       value = record(parseToml(read.text)) ?? {};
+      if (!validCodexPolicyShapes(value)) unsafe = true;
     } catch {
       unsafe = true;
     }
   }
   return { path, scope, evidence: read.evidence, value, unsafe };
+}
+function validCodexPolicyShapes(value: Record<string, unknown>): boolean {
+  for (const key of ["mcp_servers", "plugins", "apps"] as const) {
+    const group = value[key];
+    if (group === undefined) continue;
+    const entries = record(group);
+    if (entries === null) return false;
+    for (const entry of Object.values(entries)) {
+      const policy = record(entry);
+      if (policy === null) return false;
+      if (policy.enabled !== undefined && typeof policy.enabled !== "boolean")
+        return false;
+    }
+  }
+  return true;
 }
 function isSafeWritable(document: Document): boolean {
   const protection = document.evidence.protection;

@@ -155,10 +155,7 @@ function setCodexTomlEnabled(
       if (
         lines
           .slice(index + 1, end)
-          .some(
-            (candidate) =>
-              candidate.trim() === `path = ${JSON.stringify(skillPath)}`,
-          )
+          .some((candidate) => tomlPathValue(candidate) === skillPath)
       )
         candidates.push(index);
     }
@@ -190,6 +187,10 @@ function setCodexTomlEnabled(
     );
   else lines.splice(start + 1, 0, `enabled = ${enabled}`);
   return lines.join(eol);
+}
+function tomlPathValue(line: string): string | null {
+  const match = line.match(/^\s*path\s*=\s*(['"])(.*?)\1(?:\s*#.*)?\s*$/u);
+  return match?.[2] ?? null;
 }
 
 function sameTomlTablePath(line: string, path: readonly string[]): boolean {
