@@ -329,12 +329,12 @@ describe("Codex Session setup Inventory", () => {
       const snapshot = await scanner.scanSessionSetup({
         workspace: { path: workspace },
       });
-        expect(snapshot.sources).toContainEqual(
-          expect.objectContaining({
-            source: expect.objectContaining({ path: config }),
-            status: "invalid",
-          }),
-        );
+      expect(snapshot.sources).toContainEqual(
+        expect.objectContaining({
+          source: expect.objectContaining({ path: config }),
+          status: "invalid",
+        }),
+      );
       expect(await readFile(config, "utf8")).toBe(original);
     }
   });
@@ -1130,6 +1130,39 @@ describe("Codex Session setup Inventory", () => {
       const target = snapshot.targets.find(
         (item) => item.kind === "mcp-registration",
       )!;
+      const userTarget = snapshot.targets.find(
+        (item) =>
+          item.kind === "mcp-registration" &&
+          item.definitionScope.kind === "user",
+      );
+      const projectTarget = snapshot.targets.find(
+        (item) =>
+          item.kind === "mcp-registration" &&
+          item.definitionScope.kind === "workspace",
+      );
+      if (
+        !userTarget ||
+        userTarget.kind !== "mcp-registration" ||
+        !projectTarget ||
+        projectTarget.kind !== "mcp-registration"
+      )
+        throw new Error("expected both layered MCP declarations");
+      if (trust === null) {
+        expect(userTarget.state.effectiveWorkspaceState).toBe("unresolved");
+        expect(projectTarget.state.effectiveWorkspaceState).toBe("unresolved");
+      } else {
+        expect(userTarget.state).toMatchObject({
+          policy: "enabled",
+          effectiveWorkspaceState: "enabled",
+        });
+        expect(projectTarget.state).toMatchObject({
+          policy: "disabled",
+          effectiveWorkspaceState: "enabled",
+        });
+        expect(projectTarget.control.availability.disable).toMatchObject({
+          kind: "unavailable",
+        });
+      }
       expect(target.control.layers).toHaveLength(2);
       expect(target.control.layers.map((layer) => layer.applies)).toEqual([
         true,
@@ -1159,6 +1192,7 @@ describe("Codex Session setup Inventory", () => {
           required: true,
         });
       } else {
+        expect(target.state.effectiveWorkspaceState).toBe("unresolved");
         expect(plan.actions).toEqual([]);
         expect(
           plan.blocks.some((block) => block.kind === "unsupported-control"),
@@ -1292,6 +1326,78 @@ describe("Codex Session setup Inventory", () => {
           scope: { kind: "user" },
           required: true,
         });
+      }
+    }
+  });
+
+  it("blocks malformed contributing project policy unless the workspace is explicitly untrusted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    await write(
+      join(codex, "config.toml"),
+      "[mcp_servers.user]\nenabled = true\n",
+    );
+    await write(
+      join(workspace, ".codex", "config.toml"),
+      "mcp_servers = true\n",
+    );
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ installed: [], available: [] }),
+        }),
+      },
+    });
+    for (const trust of [true, null, false] as const) {
+      const snapshot = await scanner.scanSessionSetup({
+        workspace: { path: workspace },
+        workspaceTrusted: trust,
+      });
+      const target = snapshot.targets.find(
+        (item) => item.kind === "mcp-registration",
+      )!;
+      if (target.kind !== "mcp-registration")
+        throw new Error("expected user MCP");
+      const plan = planSessionSetup(snapshot, {
+        schemaVersion: 1,
+        kind: "session-setup-intent",
+        action: "disable",
+        harnessId: "codex",
+        workspace: { path: workspace },
+        targets: [
+          {
+            kind: "mcp-registration",
+            targetId: target.id,
+            declarationSourceId: target.declarationSource.sourceId,
+            serverKey: target.serverKey,
+          },
+        ],
+      });
+      if (trust === false) {
+        expect(
+          plan.blocks.some((block) => block.kind === "source-invalid"),
+        ).toBe(false);
+        expect(plan.actions).toHaveLength(1);
+        expect(plan.actions[0]?.approvals).toContainEqual({
+          kind: "scope-disclosure",
+          scope: { kind: "user" },
+          required: true,
+        });
+      } else {
+        expect(plan.actions).toEqual([]);
+        expect(plan.blocks).toContainEqual(
+          expect.objectContaining({ kind: "source-invalid" }),
+        );
       }
     }
   });

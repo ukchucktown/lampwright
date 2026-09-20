@@ -367,6 +367,33 @@ async function scanCodexSessionSetup(
         null,
         declarationDocument.path,
       );
+      const declarationState = stateFromEnabled(
+        objectAt(declarationValue, ["enabled"]),
+      );
+      const effectiveState =
+        (declarationDocument.unsafe &&
+          declarationDocument.scope.kind === "user") ||
+        (projectDocument.unsafe && projectApplies !== false)
+          ? "unresolved"
+          : declarationDocument.scope.kind === "workspace" &&
+              projectApplies === false
+            ? stateFromEnabled(
+                objectAt(userDocument.value, [
+                  "mcp_servers",
+                  serverKey,
+                  "enabled",
+                ]),
+              ).policy
+            : projectApplies === "unresolved" && projectDefines
+              ? "unresolved"
+              : stateFromEnabled(
+                  objectAt(
+                    projectApplies === true && projectDefines
+                      ? projectValue
+                      : declarationValue,
+                    ["enabled"],
+                  ),
+                ).policy;
       targets.push({
         id,
         kind: "mcp-registration",
@@ -376,28 +403,7 @@ async function scanCodexSessionSetup(
         source,
         owner: { kind: "standalone" },
         definitionScope: declarationDocument.scope,
-        state:
-          declarationDocument.scope.kind === "workspace" &&
-          projectApplies === false
-            ? {
-                ...stateFromEnabled(objectAt(declarationValue, ["enabled"])),
-                effectiveWorkspaceState: stateFromEnabled(
-                  objectAt(userDocument.value, [
-                    "mcp_servers",
-                    serverKey,
-                    "enabled",
-                  ]),
-                ).policy,
-              }
-            : stateFromEnabled(
-                objectAt(
-                  projectApplies === true && projectDefines
-                    ? projectValue
-                    : declarationValue,
-                  ["enabled"],
-                ),
-                projectApplies === "unresolved" && projectDefines,
-              ),
+        state: { ...declarationState, effectiveWorkspaceState: effectiveState },
         control: mcpControl(
           serverKey,
           configurationSources.get(pathKey(authorityDocument.path)) ?? source,
