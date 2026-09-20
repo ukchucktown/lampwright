@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { plan, TuiController, renderTui } from "../src/index.js";
 import { mouseAction, parseRawTuiAction } from "../src/tui/terminal.js";
+import { createSetupSections } from "../src/tui/setup.js";
 import {
   buildInventory,
   buildSessionSetupPlan,
   buildSessionSetupReport,
   buildSessionSetupSnapshot,
+  buildSessionSetupTarget,
 } from "../src/testing/index.js";
 
 function twoHarnessSnapshot() {
@@ -276,5 +278,36 @@ describe("Session setup terminal area", () => {
     expect(output).toContain("Effective");
     expect(output).toContain("Account: unknown");
     expect(output).toContain("Live session: unknown");
+  });
+
+  it("projects an owned Skill directly beneath its Plugin heading", () => {
+    const base = buildSessionSetupTarget();
+    const { installationId: _installationId, ...pluginBase } = base;
+    const plugin = {
+      ...pluginBase,
+      id: "plugin-target",
+      kind: "plugin" as const,
+      name: "Example Plugin",
+      pluginBoundaryId: "plugin-boundary",
+      pluginId: "example",
+      childTargetIds: ["owned-skill"],
+    };
+    const child = {
+      ...base,
+      id: "owned-skill",
+      kind: "skill-exposure" as const,
+      name: "Owned Skill",
+      owner: { kind: "plugin" as const, pluginBoundaryId: "plugin-boundary" },
+    };
+    const snapshot = {
+      ...buildSessionSetupSnapshot(),
+      targets: [plugin, child],
+    } as ReturnType<typeof buildSessionSetupSnapshot>;
+    const entries = createSetupSections(snapshot, "inventory")[0]!.entries;
+    const heading = entries.findIndex((entry) => entry.name === "Plugins");
+    expect(entries[heading]!.selectable).toBe(false);
+    expect(entries[heading + 1]!.name).toBe("Example Plugin");
+    expect(entries[heading + 2]!.rowKind).toBe("plugin-skill");
+    expect(entries[heading + 2]!.selectable).toBe(false);
   });
 });
