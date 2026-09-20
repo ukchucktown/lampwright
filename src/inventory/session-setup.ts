@@ -23,7 +23,11 @@ import type {
 import { recoveredSourceProfiles } from "../session-setup/profiles.js";
 import { parseSessionSetupSnapshot } from "../session-setup/validation.js";
 import { readAvailabilityDocument } from "./availability-evidence.js";
-import { hasDuplicateKeys, readStableRegularFile } from "./evidence.js";
+import {
+  hasDuplicateKeys,
+  pathKey,
+  readStableRegularFile,
+} from "./evidence.js";
 import {
   createInventoryScanner,
   defaultInventoryScanEnvironment,
@@ -95,7 +99,12 @@ async function scanCodexSessionSetup(
     true,
     options.commandRunner,
   );
-  const projectApplies = request.workspaceTrusted === true;
+  const projectApplies =
+    request.workspaceTrusted === true
+      ? true
+      : request.workspaceTrusted === false
+        ? false
+        : "unresolved";
   const projectDocument = await readDocument(
     projectPath,
     { kind: "workspace", workspacePath: workspace.path },
@@ -127,6 +136,24 @@ async function scanCodexSessionSetup(
     });
     return source;
   };
+  for (const document of [userDocument, projectDocument])
+    addSource(
+      "mcp-registration",
+      document.scope,
+      `codex:mcp-document:${document.path}`,
+      [],
+      document.unsafe
+        ? "invalid"
+        : document.evidence.exists
+          ? "success"
+          : "incomplete",
+      document.unsafe
+        ? "Codex configuration is unsafe or malformed"
+        : document.evidence.exists
+          ? null
+          : "the Codex configuration is absent",
+      document.path,
+    );
 
   // Standalone Skills use the pre-existing exact path exposure evidence.
   for (const installation of inventory.installations) {
@@ -250,45 +277,62 @@ async function scanCodexSessionSetup(
       };
   }
 
-  for (const document of [userDocument, projectDocument]) {
-    for (const [serverKey, value] of entries(
+  const configurationDocuments =
+    pathKey(userDocument.path) === pathKey(projectDocument.path)
+      ? [userDocument]
+      : [userDocument, projectDocument];
+  const standaloneServers = new Set<string>();
+  for (const document of configurationDocuments)
+    for (const [serverKey] of entries(
       objectAt(document.value, ["mcp_servers"]),
-    )) {
-      const id = stableId("setup-mcp", document.path, serverKey);
-      const source = addSource(
-        "mcp-registration",
-        document.scope,
-        `codex:mcp:${document.path}:${serverKey}`,
-        [id],
-        "success",
-        null,
-        document.path,
-      );
-      targets.push({
-        id,
-        kind: "mcp-registration",
-        harnessId: "codex",
-        workspace,
-        name: serverKey,
-        source,
-        owner: { kind: "standalone" },
-        definitionScope: document.scope,
-        state: stateFromEnabled(
-          objectAt(value, ["enabled"]),
-          document.scope.kind === "workspace" &&
-            request.workspaceTrusted !== true,
-        ),
-        control: mcpControl(
-          serverKey,
-          source,
-          document,
-          projectApplies || document.scope.kind === "user",
-        ),
-        declarationSource: source,
+    ))
+      standaloneServers.add(serverKey);
+  for (const serverKey of [...standaloneServers].sort()) {
+    const userValue = objectAt(userDocument.value, ["mcp_servers", serverKey]);
+    const projectValue = objectAt(projectDocument.value, [
+      "mcp_servers",
+      serverKey,
+    ]);
+    const projectDefines = projectValue !== undefined;
+    const chooseProject =
+      projectApplies === true && (projectDefines || userValue !== undefined);
+    const document = chooseProject ? projectDocument : userDocument;
+    const id = stableId("setup-mcp", document.path, serverKey);
+    const source = addSource(
+      "mcp-registration",
+      document.scope,
+      `codex:mcp:${document.path}:${serverKey}`,
+      [id],
+      "success",
+      null,
+      document.path,
+    );
+    targets.push({
+      id,
+      kind: "mcp-registration",
+      harnessId: "codex",
+      workspace,
+      name: serverKey,
+      source,
+      owner: { kind: "standalone" },
+      definitionScope: document.scope,
+      state: stateFromEnabled(
+        objectAt(chooseProject && projectDefines ? projectValue : userValue, [
+          "enabled",
+        ]),
+        projectApplies === "unresolved" && projectDefines,
+      ),
+      control: mcpControl(
         serverKey,
-        requiredAppBindingId: null,
-      });
-    }
+        source,
+        document,
+        projectApplies === true || !projectDefines,
+        configurationDocuments.map((item) => layer(source, item)),
+      ),
+      declarationSource: source,
+      serverKey,
+      requiredAppBindingId: null,
+    });
   }
 
   // Only paths already recognized as resources of an installed Plugin are read.
@@ -465,7 +509,16 @@ async function scanCodexSessionSetup(
     legacyInventory: inventory,
   };
   const fingerprint = createHash("sha256")
-    .update(stringifyModel(snapshotBase, 0))
+    .update(
+      stringifyModel(
+        {
+          ...snapshotBase,
+          scannedAt: "",
+          legacyInventory: { ...inventory, scannedAt: "" },
+        },
+        0,
+      ),
+    )
     .digest("hex");
   return parseSessionSetupSnapshot({
     ...snapshotBase,
@@ -486,7 +539,7 @@ interface Document {
 async function readDocument(
   path: string,
   scope: SetupScope,
-  applies: boolean,
+  applies: true | false | "unresolved",
   runner: InventoryCommandRunner,
 ): Promise<Document> {
   const read = await readAvailabilityDocument(
@@ -534,6 +587,7 @@ function configurationControl(
   source: SetupSourceRef,
   document: Document,
   available = true,
+  layers: readonly SetupConfigurationLayer[] | null = null,
 ): SetupNativeControl {
   const currentLayer = layer(source, document);
   const operation =
@@ -556,7 +610,7 @@ function configurationControl(
         };
   return {
     selector,
-    layers: [currentLayer],
+    layers: layers ?? [currentLayer],
     availability: { enable: operation, disable: operation },
   };
 }
@@ -582,6 +636,7 @@ function mcpControl(
   source: SetupSourceRef,
   document: Document,
   available: boolean,
+  layers: readonly SetupConfigurationLayer[],
 ): SetupNativeControl {
   return configurationControl(
     {
@@ -595,6 +650,7 @@ function mcpControl(
     source,
     document,
     available,
+    layers,
   );
 }
 function pluginMcpControl(

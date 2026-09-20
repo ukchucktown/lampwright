@@ -268,6 +268,69 @@ describe("Codex Session setup Inventory", () => {
     expect((await run("enable")).status).toBe("succeeded");
     expect(await readFile(projectPath, "utf8")).toContain("enabled = true");
   });
+
+  it("keeps layered MCP evidence and blocks unknown or untrusted project policy", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    await write(
+      join(codex, "config.toml"),
+      "[mcp_servers.shared]\nenabled = true\n",
+    );
+    await write(
+      join(workspace, ".codex", "config.toml"),
+      "[mcp_servers.shared]\nenabled = false\n",
+    );
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ installed: [], available: [] }),
+        }),
+      },
+    });
+    for (const trust of [false, null] as const) {
+      const snapshot = await scanner.scanSessionSetup({
+        workspace: { path: workspace },
+        workspaceTrusted: trust,
+      });
+      const target = snapshot.targets.find(
+        (item) => item.kind === "mcp-registration",
+      )!;
+      expect(target.control.layers).toHaveLength(2);
+      expect(target.control.layers.map((layer) => layer.applies)).toEqual([
+        true,
+        trust === false ? false : "unresolved",
+      ]);
+      const plan = planSessionSetup(snapshot, {
+        schemaVersion: 1,
+        kind: "session-setup-intent",
+        action: "disable",
+        harnessId: "codex",
+        workspace: { path: workspace },
+        targets: [
+          {
+            kind: "mcp-registration",
+            targetId: target.id,
+            declarationSourceId: target.declarationSource.sourceId,
+            serverKey: target.serverKey,
+          },
+        ],
+      });
+      expect(plan.actions).toEqual([]);
+      expect(
+        plan.blocks.some((block) => block.kind === "unsupported-control"),
+      ).toBe(true);
+    }
+  });
 });
 
 async function write(path: string, value: string): Promise<void> {
