@@ -466,17 +466,26 @@ async function scanCodexSessionSetup(
       if (!mcp || mcp.kind !== "mcp-registration") continue;
       const index = targets.findIndex((target) => target.id === mcp.id);
       targets[index] = { ...mcp, requiredAppBindingId: app.id };
-      const appIndex = targets.findIndex((target) => target.id === app.id);
-      targets[appIndex] = {
-        ...app,
-        requiredByTargetIds: [...app.requiredByTargetIds, mcp.id].sort(),
-      };
-      dependencies.push({
-        kind: "hard",
-        dependent: mcpRef(mcp),
-        required: appRef(app),
-        reason: "the installed Plugin declares this App Binding as required",
-      });
+      for (const requiredAppId of appIds) {
+        const requiredApp = byId.get(requiredAppId);
+        if (!requiredApp || requiredApp.kind !== "app-binding") continue;
+        const appIndex = targets.findIndex(
+          (target) => target.id === requiredApp.id,
+        );
+        targets[appIndex] = {
+          ...requiredApp,
+          requiredByTargetIds: [
+            ...requiredApp.requiredByTargetIds,
+            mcp.id,
+          ].sort(),
+        };
+        dependencies.push({
+          kind: "hard",
+          dependent: mcpRef(mcp),
+          required: appRef(requiredApp),
+          reason: "the installed Plugin declares this App Binding as required",
+        });
+      }
     }
   }
 
@@ -858,13 +867,26 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
   for (const resource of plugin.resources.filter(
     (item) =>
       item.kind === "configuration" &&
-      ["mcp-servers", "apps", "plugin-manifest"].includes(item.id),
+      (item.id === "mcp-servers" ||
+        item.id === "apps" ||
+        item.id === "plugin-manifest" ||
+        item.id === "codex-plugin-overlay" ||
+        item.id === "inline-mcp-servers" ||
+        item.id.startsWith("manifest-mcp-servers") ||
+        item.id.startsWith("manifest-apps")),
   )) {
     const kinds = [
-      ...(resource.id === "apps" || resource.id === "plugin-manifest"
+      ...(resource.id === "apps" ||
+      resource.id === "plugin-manifest" ||
+      resource.id === "codex-plugin-overlay" ||
+      resource.id.startsWith("manifest-apps")
         ? (["app-binding"] as const)
         : []),
-      ...(resource.id === "mcp-servers" || resource.id === "plugin-manifest"
+      ...(resource.id === "mcp-servers" ||
+      resource.id === "plugin-manifest" ||
+      resource.id === "codex-plugin-overlay" ||
+      resource.id === "inline-mcp-servers" ||
+      resource.id.startsWith("manifest-mcp-servers")
         ? (["mcp-registration"] as const)
         : []),
     ];
