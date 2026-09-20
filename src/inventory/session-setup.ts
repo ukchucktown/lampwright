@@ -136,25 +136,21 @@ async function scanCodexSessionSetup(
     });
     return source;
   };
+  const configurationSources = new Map<string, SetupSourceRef>();
   for (const [index, document] of [userDocument, projectDocument].entries()) {
     if (index === 1 && pathKey(document.path) === pathKey(userDocument.path))
       continue;
-    addSource(
-      "mcp-registration",
-      document.scope,
-      `codex:mcp-document:${document.path}`,
-      [],
-      document.unsafe
-        ? "invalid"
-        : document.evidence.exists
-          ? "success"
-          : "incomplete",
-      document.unsafe
-        ? "Codex configuration is unsafe or malformed"
-        : document.evidence.exists
-          ? null
-          : "the Codex configuration is absent",
-      document.path,
+    configurationSources.set(
+      pathKey(document.path),
+      addSource(
+        "mcp-registration",
+        document.scope,
+        `codex:mcp-document:${document.path}`,
+        [],
+        document.unsafe ? "invalid" : "success",
+        document.unsafe ? "Codex configuration is unsafe or malformed" : null,
+        document.path,
+      ),
     );
   }
 
@@ -284,58 +280,63 @@ async function scanCodexSessionSetup(
     pathKey(userDocument.path) === pathKey(projectDocument.path)
       ? [userDocument]
       : [userDocument, projectDocument];
-  const standaloneServers = new Set<string>();
-  for (const document of configurationDocuments)
-    for (const [serverKey] of entries(
-      objectAt(document.value, ["mcp_servers"]),
-    ))
-      standaloneServers.add(serverKey);
-  for (const serverKey of [...standaloneServers].sort()) {
-    const userValue = objectAt(userDocument.value, ["mcp_servers", serverKey]);
-    const projectValue = objectAt(projectDocument.value, [
-      "mcp_servers",
-      serverKey,
-    ]);
-    const projectDefines = projectValue !== undefined;
-    const chooseProject =
-      projectApplies === true && (projectDefines || userValue !== undefined);
-    const document = chooseProject ? projectDocument : userDocument;
-    const id = stableId("setup-mcp", document.path, serverKey);
-    const source = addSource(
-      "mcp-registration",
-      document.scope,
-      `codex:mcp:${document.path}:${serverKey}`,
-      [id],
-      "success",
-      null,
-      document.path,
-    );
-    targets.push({
-      id,
-      kind: "mcp-registration",
-      harnessId: "codex",
-      workspace,
-      name: serverKey,
-      source,
-      owner: { kind: "standalone" },
-      definitionScope: document.scope,
-      state: stateFromEnabled(
-        objectAt(chooseProject && projectDefines ? projectValue : userValue, [
-          "enabled",
-        ]),
-        projectApplies === "unresolved" && projectDefines,
-      ),
-      control: mcpControl(
+  for (const declarationDocument of configurationDocuments) {
+    for (const [serverKey, declarationValue] of entries(
+      objectAt(declarationDocument.value, ["mcp_servers"]),
+    )) {
+      const projectValue = objectAt(projectDocument.value, [
+        "mcp_servers",
         serverKey,
+      ]);
+      const projectDefines = projectValue !== undefined;
+      const useWorkspaceAuthority =
+        declarationDocument.scope.kind === "user" && projectApplies === true;
+      const authorityDocument = useWorkspaceAuthority
+        ? projectDocument
+        : declarationDocument;
+      const id = stableId("setup-mcp", declarationDocument.path, serverKey);
+      const source = addSource(
+        "mcp-registration",
+        declarationDocument.scope,
+        `codex:mcp:${declarationDocument.path}:${serverKey}`,
+        [id],
+        "success",
+        null,
+        declarationDocument.path,
+      );
+      targets.push({
+        id,
+        kind: "mcp-registration",
+        harnessId: "codex",
+        workspace,
+        name: serverKey,
         source,
-        document,
-        projectApplies === true || !projectDefines,
-        configurationDocuments.map((item) => layer(source, item)),
-      ),
-      declarationSource: source,
-      serverKey,
-      requiredAppBindingId: null,
-    });
+        owner: { kind: "standalone" },
+        definitionScope: declarationDocument.scope,
+        state: stateFromEnabled(
+          objectAt(
+            projectApplies === true && projectDefines
+              ? projectValue
+              : declarationValue,
+            ["enabled"],
+          ),
+          projectApplies === "unresolved" && projectDefines,
+        ),
+        control: mcpControl(
+          serverKey,
+          configurationSources.get(pathKey(authorityDocument.path)) ?? source,
+          authorityDocument,
+          projectApplies === true || !projectDefines,
+          configurationDocuments.map((item) =>
+            layer(configurationSources.get(pathKey(item.path)) ?? source, item),
+          ),
+          declarationDocument.path,
+        ),
+        declarationSource: source,
+        serverKey,
+        requiredAppBindingId: null,
+      });
+    }
   }
 
   // Only paths already recognized as resources of an installed Plugin are read.
@@ -640,15 +641,16 @@ function mcpControl(
   document: Document,
   available: boolean,
   layers: readonly SetupConfigurationLayer[],
+  declarationPath: string,
 ): SetupNativeControl {
   return configurationControl(
     {
       kind: "mcp-server-key",
-      id: `mcp:${document.path}:${serverKey}`,
+      id: `mcp:${declarationPath}:${serverKey}`,
       serverKey,
       policyOwner: { kind: "standalone" },
       authority: "exact-target",
-      governedTargetIds: [stableId("setup-mcp", document.path, serverKey)],
+      governedTargetIds: [stableId("setup-mcp", declarationPath, serverKey)],
     },
     source,
     document,

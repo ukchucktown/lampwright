@@ -297,6 +297,30 @@ describe("Codex Session setup Inventory", () => {
         }),
       },
     });
+    const trusted = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+      workspaceTrusted: true,
+    });
+    const trustedTargets = trusted.targets.filter(
+      (item) => item.kind === "mcp-registration",
+    );
+    expect(trustedTargets).toHaveLength(2);
+    expect(new Set(trustedTargets.map((item) => item.id)).size).toBe(2);
+    expect(
+      trustedTargets.map((item) => item.definitionScope.kind).sort(),
+    ).toEqual(["user", "workspace"]);
+    expect(
+      trustedTargets.every(
+        (item) => item.state.effectiveWorkspaceState === "disabled",
+      ),
+    ).toBe(true);
+    expect(
+      trustedTargets.every(
+        (item) =>
+          new Set(item.control.layers.map((layer) => layer.source.path))
+            .size === 2,
+      ),
+    ).toBe(true);
     for (const trust of [false, null] as const) {
       const snapshot = await scanner.scanSessionSetup({
         workspace: { path: workspace },
