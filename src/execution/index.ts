@@ -11,6 +11,7 @@ export {
   createFileExecutionAuditWriter,
   createFilePackageTrustStore,
   createFileUpdateExecutionAuditWriter,
+  createFileSessionSetupExecutionAuditWriter,
 } from "./state.js";
 export { ExecutionModuleError } from "./types.js";
 export type * from "./types.js";

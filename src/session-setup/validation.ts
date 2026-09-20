@@ -317,7 +317,7 @@ const mutation = z.discriminatedUnion("kind", [
     policy: z.enum(["enabled", "disabled"]),
   }),
 ]);
-const approval = z.discriminatedUnion("kind", [
+export const sessionSetupApprovalSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("confirmation"),
     required: z.literal(true),
@@ -335,7 +335,7 @@ const action = z.strictObject({
   operation: z.enum(["enable", "disable"]),
   mutations: z.array(mutation).min(1),
   dependsOn: z.array(text),
-  approvals: z.array(approval),
+  approvals: z.array(sessionSetupApprovalSchema),
 });
 const block = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -480,11 +480,28 @@ export const sessionSetupReportSchema = z.strictObject({
   finalSnapshotId: text.nullable(),
   rescanError: error.nullable(),
 });
+export const sessionSetupConfirmationRequiredSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  kind: z.literal("session-setup-confirmation-required"),
+  operation: z.enum(["enable", "disable"]),
+  plan: sessionSetupPlanSchema,
+});
+export const sessionSetupErrorSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  kind: z.literal("session-setup-error"),
+  code: text,
+  message: text,
+});
+export const sessionSetupApprovalsSchema = z.strictObject({
+  grants: z.array(sessionSetupApprovalSchema),
+});
 export const sessionSetupPublicValueSchema = z.discriminatedUnion("kind", [
   sessionSetupSnapshotSchema,
   sessionSetupIntentSchema,
   sessionSetupPlanSchema,
   sessionSetupReportSchema,
+  sessionSetupConfirmationRequiredSchema,
+  sessionSetupErrorSchema,
 ]);
 
 export class SessionSetupValidationError extends Error {
@@ -1569,6 +1586,14 @@ export function parseSessionSetupReport(input: unknown): SessionSetupReport {
     ]);
   return value;
 }
+export function parseSessionSetupApprovals(
+  input: unknown,
+): import("./types.js").SessionSetupApprovals {
+  return parse<import("./types.js").SessionSetupApprovals>(
+    sessionSetupApprovalsSchema,
+    input,
+  );
+}
 export function parseSessionSetupSourceProfile(
   input: unknown,
 ): SessionSetupSourceProfile {
@@ -1585,6 +1610,8 @@ export function parseSessionSetupPublicValue(
           "session-setup-intent",
           "session-setup-plan",
           "session-setup-report",
+          "session-setup-confirmation-required",
+          "session-setup-error",
         ]),
       })
       .passthrough(),
@@ -1599,6 +1626,12 @@ export function parseSessionSetupPublicValue(
       return parseSessionSetupPlan(input);
     case "session-setup-report":
       return parseSessionSetupReport(input);
+    case "session-setup-confirmation-required":
+    case "session-setup-error":
+      return parse<SessionSetupPublicValue>(
+        sessionSetupPublicValueSchema,
+        input,
+      );
   }
 }
 export function sessionSetupJsonSchema(): Record<string, unknown> {

@@ -486,4 +486,16 @@ export type SessionSetupPublicValue =
   | SessionSetupSnapshot
   | SessionSetupIntent
   | SessionSetupPlan
-  | SessionSetupReport;
+  | SessionSetupReport
+  | {
+      readonly schemaVersion: 1;
+      readonly kind: "session-setup-confirmation-required";
+      readonly operation: SessionSetupAction;
+      readonly plan: SessionSetupPlan;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly kind: "session-setup-error";
+      readonly code: string;
+      readonly message: string;
+    };

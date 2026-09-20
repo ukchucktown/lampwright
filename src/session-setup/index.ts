@@ -4,6 +4,7 @@ export { planSessionSetup } from "./planning.js";
 export { executeSessionSetup } from "./execution.js";
 export {
   parseSessionSetupIntent,
+  parseSessionSetupApprovals,
   parseSessionSetupPlan,
   parseSessionSetupPublicValue,
   parseSessionSetupReport,
@@ -12,6 +13,10 @@ export {
   sessionSetupJsonSchema,
   SessionSetupValidationError,
   sessionSetupIntentSchema,
+  sessionSetupApprovalSchema,
+  sessionSetupApprovalsSchema,
+  sessionSetupConfirmationRequiredSchema,
+  sessionSetupErrorSchema,
   sessionSetupPlanSchema,
   sessionSetupPublicValueSchema,
   sessionSetupReportSchema,
