@@ -425,13 +425,18 @@ function addConfigurationBlocks(
   const layer = target.control.layers.find(
     (candidate) =>
       candidate.source.sourceId === authority.layerSourceId &&
-      candidate.canonicalPath === authority.layerCanonicalPath,
+      (candidate.canonicalPath ?? candidate.source.path) ===
+        authority.layerCanonicalPath,
   );
-  if (!layer || layer.canonicalPath === null) {
+  if (
+    !layer ||
+    (layer.exists && layer.canonicalPath === null) ||
+    (!layer.exists && layer.source.path === null)
+  ) {
     blocks.push({
       kind: "unresolved",
       target: ref,
-      reason: "configuration authority has no canonical writable layer",
+      reason: "configuration authority has no safe writable layer",
     });
     return;
   }
@@ -615,7 +620,7 @@ function cyclicTargets(
 
 function mutationGroupKey(mutation: SetupMutation): string {
   return mutation.kind === "configuration"
-    ? `configuration:${mutation.authority.layerCanonicalPath ?? "missing"}`
+    ? `configuration:${mutation.authority.layerCanonicalPath}`
     : `native-command:${stringifyModel(mutation.authority, 0)}`;
 }
 

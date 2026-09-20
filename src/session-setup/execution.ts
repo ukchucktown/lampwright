@@ -347,9 +347,14 @@ function configurationRequest(
     const layer = target?.control.layers.find(
       (candidate) =>
         candidate.source.sourceId === mutation.authority.layerSourceId &&
-        candidate.canonicalPath === mutation.authority.layerCanonicalPath,
+        (candidate.canonicalPath ?? candidate.source.path) ===
+          mutation.authority.layerCanonicalPath,
     );
-    if (!layer || layer.canonicalPath === null)
+    if (
+      !layer ||
+      (layer.exists && layer.canonicalPath === null) ||
+      (!layer.exists && layer.source.path === null)
+    )
       throw new Error("missing configuration layer");
     return layer;
   });
@@ -357,7 +362,8 @@ function configurationRequest(
   if (
     layers.some(
       (layer) =>
-        layer.canonicalPath !== first.canonicalPath ||
+        (layer.canonicalPath ?? layer.source.path) !==
+          (first.canonicalPath ?? first.source.path) ||
         layer.format !== first.format ||
         layer.exists !== first.exists ||
         stringifyModel(layer.expectedPreimage, 0) !==
@@ -372,7 +378,7 @@ function configurationRequest(
       )!.control.selector,
   );
   return {
-    path: first.canonicalPath!,
+    path: first.canonicalPath ?? first.source.path!,
     format: first.format,
     exists: first.exists,
     expectedPreimage: first.expectedPreimage,

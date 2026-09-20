@@ -799,7 +799,7 @@ function validateTargets(
           !target.control.layers.some(
             (item) =>
               item.source.sourceId === configurationAuthority.layerSourceId &&
-              item.canonicalPath ===
+              (item.canonicalPath ?? item.source.path) ===
                 configurationAuthority.layerCanonicalPath &&
               sameSource(item.source, configurationAuthority.source),
           )

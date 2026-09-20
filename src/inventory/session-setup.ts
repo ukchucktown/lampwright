@@ -696,7 +696,8 @@ function configurationControl(
             kind: "configuration" as const,
             source,
             layerSourceId: source.sourceId,
-            layerCanonicalPath: currentLayer.canonicalPath,
+            layerCanonicalPath:
+              currentLayer.canonicalPath ?? currentLayer.source.path,
           },
         }
       : {
@@ -888,7 +889,8 @@ function configurationOperation(
   const layer = layers.find(
     (candidate) =>
       writablePaths.includes(candidate.source.path ?? "") &&
-      candidate.canonicalPath !== null &&
+      (candidate.canonicalPath !== null ||
+        (!candidate.exists && candidate.source.path !== null)) &&
       candidate.protection.git.kind !== "protected" &&
       candidate.protection.system.kind === "none" &&
       candidate.protection.filesystem.kind === "writable",
@@ -905,7 +907,7 @@ function configurationOperation(
           kind: "configuration" as const,
           source: layer.source,
           layerSourceId: layer.source.sourceId,
-          layerCanonicalPath: layer.canonicalPath!,
+          layerCanonicalPath: layer.canonicalPath ?? layer.source.path,
         },
       };
 }
