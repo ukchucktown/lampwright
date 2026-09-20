@@ -218,7 +218,9 @@ describe("Gemini CLI Session setup adapter", () => {
     const extensionValue = JSON.parse(await readFile(extensionPolicy, "utf8"));
     expect(extensionValue.sibling).toEqual({ overrides: ["!/keep/*"] });
     expect(extensionValue.bundle.overrides).toContain("!/other/*");
-    expect(extensionValue.bundle.overrides.at(-1)).toContain(fixture.workspace);
+    expect(
+      extensionValue.bundle.overrides.at(-1).replaceAll("\\", "/"),
+    ).toContain(fixture.workspace.replaceAll("\\", "/"));
     expect(extensionValue.bundle.overrides.at(-1)).not.toMatch(/^!/u);
     expect(JSON.parse(await readFile(mcpPolicy, "utf8"))).toEqual({
       sibling: { enabled: false, keep: true },
