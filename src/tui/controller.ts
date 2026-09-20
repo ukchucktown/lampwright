@@ -1522,6 +1522,15 @@ export class TuiController {
         screen: "browse",
         ...(view === "disabled" ? disabledView : inventoryView),
         viewSnapshots: { inventory: inventoryView, disabled: disabledView },
+        ...(state.browse.disabledEntries === undefined
+          ? {}
+          : { disabledEntries: state.browse.disabledEntries }),
+        ...(state.browse.operations === undefined
+          ? {}
+          : { operations: state.browse.operations }),
+        ...(state.browse.setupHarnessStates === undefined
+          ? {}
+          : { setupHarnessStates: state.browse.setupHarnessStates }),
       };
     } catch {
       this.stateValue = {

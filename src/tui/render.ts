@@ -92,7 +92,7 @@ function renderSetupReport(
   state: Extract<TuiState, { screen: "setup-report" }>,
   style: TuiPaint,
 ): string {
-  return `${[style.title(`Session setup result: ${state.report.status}`), ...state.report.targetResults.map((result) => `${result.status === "failed" || result.status === "blocked" || result.status === "unverified" ? style.error("!") : style.success("✓")} ${result.target.targetId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`), state.report.rescanError === null ? "" : style.warning(`Rescan: ${state.report.rescanError.message}`), style.muted("enter/esc refresh · q quit")].filter(Boolean).join("\n")}\n`;
+  return `${[style.title(`Session setup result: ${state.report.status}`), ...state.report.targetResults.map((result) => `${result.status === "failed" || result.status === "blocked" || result.status === "unverified" ? style.error("!") : style.success("✓")} ${result.target.targetId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`), state.report.rescanError === null ? "" : style.warning(`Rescan: ${state.report.rescanError.message}`), state.refreshError === undefined ? "" : style.warning(state.refreshError), style.muted("enter/esc refresh · q quit")].filter(Boolean).join("\n")}\n`;
 }
 
 function renderTrashReport(

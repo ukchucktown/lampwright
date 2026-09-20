@@ -407,7 +407,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "fallback" };
     if (
       (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
+        state.screen === "update-report" ||
+        state.screen === "setup-report") &&
       (value === "back" || value === "cancel")
     )
       return { kind: "cancel" };
