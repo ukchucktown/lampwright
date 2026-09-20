@@ -343,6 +343,12 @@ function addSourceBlocks(
   const sourceIds = new Set([target.source.sourceId]);
   if (availability.kind === "available")
     sourceIds.add(availability.authority.source.sourceId);
+  // A contributing layer is evidence for the selected native policy even when
+  // the chosen mutation is written to another layer.  An unresolved workspace
+  // layer must therefore fail closed; an explicitly untrusted layer does not
+  // apply and can safely be ignored for a user-scoped action.
+  for (const layer of target.control.layers)
+    if (layer.applies !== false) sourceIds.add(layer.source.sourceId);
   for (const sourceId of sourceIds) {
     const source = snapshot.sources.find(
       (candidate) => candidate.source.sourceId === sourceId,

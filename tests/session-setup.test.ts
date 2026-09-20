@@ -360,6 +360,43 @@ describe("session setup contracts", () => {
     ).toThrow(SessionSetupValidationError);
   });
 
+  it("rejects MCP selector owners that disagree with their declaration owner", () => {
+    const { snapshot, mcp } = completeFixture();
+    const standalone = {
+      ...mcp,
+      owner: { kind: "standalone" as const },
+      control: {
+        ...mcp.control,
+        selector: {
+          ...mcp.control.selector,
+          policyOwner: { kind: "plugin" as const, pluginId: "example-plugin" },
+        },
+      },
+    };
+    expect(() =>
+      replaceTargets(snapshot, [
+        ...snapshot.targets.filter((target) => target.id !== mcp.id),
+        standalone,
+      ]),
+    ).toThrow(SessionSetupValidationError);
+    const mismatchedPlugin = {
+      ...mcp,
+      control: {
+        ...mcp.control,
+        selector: {
+          ...mcp.control.selector,
+          policyOwner: { kind: "plugin" as const, pluginId: "another-plugin" },
+        },
+      },
+    };
+    expect(() =>
+      replaceTargets(snapshot, [
+        ...snapshot.targets.filter((target) => target.id !== mcp.id),
+        mismatchedPlugin,
+      ]),
+    ).toThrow(SessionSetupValidationError);
+  });
+
   it("parses all target kinds, shared connector collateral, owner gates, and dependencies", () => {
     const { snapshot, skill, plugin, mcp, firstApp, secondApp } =
       completeFixture();

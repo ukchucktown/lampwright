@@ -70,6 +70,50 @@ describe("Codex Session setup Inventory", () => {
     );
   });
 
+  it("matches quoted Skill paths without changing comments or unrelated tables", () => {
+    const edit = createCodexSessionSetupConfigurationEditor();
+    const request = (path: string): SessionSetupConfigurationRequest => ({
+      path: "/fixture/config.toml",
+      format: "toml",
+      exists: true,
+      expectedPreimage: null,
+      selectors: [
+        {
+          kind: "skill-path",
+          id: `skill:${path}`,
+          path,
+          authority: "exact-target",
+          governedTargetIds: ["one"],
+        },
+      ],
+      mutations: [
+        {
+          kind: "configuration",
+          authority: {
+            kind: "configuration",
+            source: { sourceId: "fixture", path: "/fixture/config.toml" },
+            layerSourceId: "fixture",
+            layerCanonicalPath: "/fixture/config.toml",
+          },
+          selectorId: `skill:${path}`,
+          policy: "disabled",
+        },
+      ],
+    });
+    expect(
+      edit.edit(
+        "[[skills.config]]\npath = '/skills/one' # stable\nenabled = true # target\n",
+        request("/skills/one"),
+      ),
+    ).toContain("enabled = false # target");
+    expect(
+      edit.edit(
+        '[[skills.config]]\npath = "C:\\\\skills\\\\one"\nenabled = true\n',
+        request("C:\\skills\\one"),
+      ),
+    ).toContain("enabled = false");
+  });
+
   it("uses installed owner evidence and projects standalone, Plugin, MCP, and shared App policies", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
@@ -713,6 +757,173 @@ describe("Codex Session setup Inventory", () => {
     );
   });
 
+  it("keeps same-key Plugin declarations distinct and blocks their ambiguous selector", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const pluginRoot = join(
+      codex,
+      "plugins",
+      "cache",
+      "market",
+      "dupe",
+      "1.0.0",
+    );
+    await writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), {
+      name: "dupe",
+      version: "1.0.0",
+      mcpServers: { shared: { command: "inline" } },
+    });
+    await writeJson(join(pluginRoot, ".mcp.json"), {
+      shared: { command: "default" },
+    });
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            installed: [
+              {
+                pluginId: "dupe@market",
+                name: "dupe",
+                marketplaceName: "market",
+                version: "1.0.0",
+                installed: true,
+                enabled: true,
+                source: { source: "git", url: "https://example.test/dupe" },
+                installPolicy: "AVAILABLE",
+                authPolicy: "ON_USE",
+              },
+            ],
+            available: [],
+          }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    const targets = snapshot.targets.filter(
+      (
+        target,
+      ): target is import("../src/session-setup/types.js").McpRegistration =>
+        target.kind === "mcp-registration" && target.serverKey === "shared",
+    );
+    expect(targets).toHaveLength(2);
+    expect(
+      new Set(targets.map((target) => target.declarationSource.path)).size,
+    ).toBe(2);
+    for (const target of targets) {
+      const plan = planSessionSetup(snapshot, {
+        schemaVersion: 1,
+        kind: "session-setup-intent",
+        action: "disable",
+        harnessId: "codex",
+        workspace: { path: workspace },
+        targets: [
+          {
+            kind: "mcp-registration",
+            targetId: target.id,
+            declarationSourceId: target.declarationSource.sourceId,
+            serverKey: target.serverKey,
+          },
+        ],
+      });
+      expect(plan.actions).toEqual([]);
+      expect(plan.blocks).toContainEqual(
+        expect.objectContaining({ kind: "selector-collision" }),
+      );
+    }
+  });
+
+  it("keeps a valid App visible but blocks it when another owner has incomplete App collateral", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const plugin = (name: string) =>
+      join(codex, "plugins", "cache", "market", name, "1.0.0");
+    await writeJson(join(plugin("valid"), ".codex-plugin", "plugin.json"), {
+      name: "valid",
+      version: "1.0.0",
+      apps: "./apps.json",
+    });
+    await writeJson(join(plugin("valid"), "apps.json"), {
+      apps: { usable: { id: "connector" } },
+    });
+    await writeJson(join(plugin("broken"), ".codex-plugin", "plugin.json"), {
+      name: "broken",
+      version: "1.0.0",
+      apps: "./apps.json",
+    });
+    await writeJson(join(plugin("broken"), "apps.json"), {
+      apps: { bad: { id: 42 } },
+    });
+    const installed = ["valid", "broken"].map((name) => ({
+      pluginId: `${name}@market`,
+      name,
+      marketplaceName: "market",
+      version: "1.0.0",
+      installed: true,
+      enabled: true,
+      source: { source: "git", url: `https://example.test/${name}` },
+      installPolicy: "AVAILABLE",
+      authPolicy: "ON_USE",
+    }));
+    const scanner = createSessionSetupScanner({
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+      environment: {
+        homeDirectory: home,
+        workspaceDirectory: workspace,
+        agentHomeDirectories: { codex },
+      },
+      commandRunner: {
+        run: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ installed, available: [] }),
+        }),
+      },
+    });
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    const target = snapshot.targets.find(
+      (item) => item.kind === "app-binding" && item.alias === "usable",
+    );
+    expect(target).toBeDefined();
+    if (!target || target.kind !== "app-binding")
+      throw new Error("expected valid App Binding");
+    const plan = planSessionSetup(snapshot, {
+      schemaVersion: 1,
+      kind: "session-setup-intent",
+      action: "disable",
+      harnessId: "codex",
+      workspace: { path: workspace },
+      targets: [
+        {
+          kind: "app-binding",
+          targetId: target.id,
+          declarationSourceId: target.declarationSource.sourceId,
+          alias: target.alias,
+          connectorId: target.connectorId,
+        },
+      ],
+    });
+    expect(plan.actions).toEqual([]);
+    expect(plan.blocks).toContainEqual(
+      expect.objectContaining({ kind: "source-incomplete" }),
+    );
+  });
+
   it("prefers a trusted workspace MCP policy and executes both native directions", async () => {
     const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
     temporary.push(root);
@@ -1023,12 +1234,19 @@ describe("Codex Session setup Inventory", () => {
           },
         ],
       });
-      expect(plan.blocks, label).toEqual([]);
-      expect(plan.actions[0]?.approvals, label).toContainEqual({
-        kind: "scope-disclosure",
-        scope: { kind: "user" },
-        required: true,
-      });
+      if (label === "unsafe") {
+        expect(plan.actions).toEqual([]);
+        expect(plan.blocks).toContainEqual(
+          expect.objectContaining({ kind: "source-invalid" }),
+        );
+      } else {
+        expect(plan.blocks, label).toEqual([]);
+        expect(plan.actions[0]?.approvals, label).toContainEqual({
+          kind: "scope-disclosure",
+          scope: { kind: "user" },
+          required: true,
+        });
+      }
     }
   });
 });
