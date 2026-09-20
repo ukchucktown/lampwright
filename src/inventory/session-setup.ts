@@ -346,6 +346,7 @@ async function scanCodexSessionSetup(
   )) {
     const descriptor = await pluginDescriptor(plugin);
     const owner = { kind: "plugin" as const, pluginBoundaryId: plugin.id };
+    const ownerDisabled = plugin.availability.status === "disabled";
     for (const result of descriptor.sources)
       addSource(
         result.kind,
@@ -374,7 +375,7 @@ async function scanCodexSessionSetup(
         [],
         "success",
         null,
-        descriptor.path,
+        descriptor.mcpPath,
       );
       targets.push({
         id,
@@ -393,6 +394,8 @@ async function scanCodexSessionSetup(
             serverKey,
             "enabled",
           ]),
+          false,
+          ownerDisabled,
         ),
         control: pluginMcpControl(plugin, serverKey, source, userDocument),
         declarationSource,
@@ -421,7 +424,7 @@ async function scanCodexSessionSetup(
         [],
         "success",
         null,
-        descriptor.path,
+        descriptor.appPath,
       );
       targets.push({
         id,
@@ -434,6 +437,8 @@ async function scanCodexSessionSetup(
         definitionScope: { kind: "user" },
         state: stateFromEnabled(
           objectAt(userDocument.value, ["apps", connectorId, "enabled"]),
+          false,
+          ownerDisabled,
         ),
         control: appControl(connectorId, source, userDocument),
         declarationSource,
@@ -771,6 +776,7 @@ function unavailablePathControl(
 function stateFromEnabled(
   value: unknown,
   effectiveUnresolved = false,
+  ownerDisabled = false,
 ): SetupConfiguredState {
   const policy =
     value === false
@@ -780,7 +786,11 @@ function stateFromEnabled(
         : "unresolved";
   return {
     policy,
-    effectiveWorkspaceState: effectiveUnresolved ? "unresolved" : policy,
+    effectiveWorkspaceState: ownerDisabled
+      ? "disabled"
+      : effectiveUnresolved
+        ? "unresolved"
+        : policy,
     accountState: "unknown",
     liveSessionState: "unknown",
   };
@@ -855,14 +865,16 @@ function entries(value: unknown): readonly [string, Record<string, unknown>][] {
 async function pluginDescriptor(plugin: PluginBoundary): Promise<{
   readonly mcp: Record<string, unknown>;
   readonly apps: Record<string, unknown>;
-  readonly path: string | null;
+  readonly mcpPath: string | null;
+  readonly appPath: string | null;
   readonly sources: readonly DescriptorSourceResult[];
 }> {
   const combined: {
     mcp: Record<string, unknown>;
     apps: Record<string, unknown>;
   } = { mcp: {}, apps: {} };
-  let descriptorPath: string | null = null;
+  let mcpPath: string | null = null;
+  let appPath: string | null = null;
   const sources: DescriptorSourceResult[] = [];
   for (const resource of plugin.resources.filter(
     (item) =>
@@ -908,7 +920,8 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
         reason: read.kind === "valid" ? null : read.reason,
       });
     if (read.kind !== "valid" || read.value === null) continue;
-    descriptorPath ??= path;
+    if (kinds.includes("mcp-registration")) mcpPath ??= path;
+    if (kinds.includes("app-binding")) appPath ??= path;
     if (resource.id === "mcp-servers") {
       Object.assign(
         combined.mcp,
@@ -921,7 +934,7 @@ async function pluginDescriptor(plugin: PluginBoundary): Promise<{
       Object.assign(combined.apps, record(read.value.apps) ?? {});
     }
   }
-  return { ...combined, path: descriptorPath, sources };
+  return { ...combined, mcpPath, appPath, sources };
 }
 interface DescriptorSourceResult {
   readonly kind: "mcp-registration" | "app-binding";
