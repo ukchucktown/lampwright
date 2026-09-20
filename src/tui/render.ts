@@ -121,6 +121,15 @@ function setupPlanBodyLines(
     ),
   ];
 }
+export function setupPlanScrollMetrics(
+  state: Extract<TuiState, { screen: "setup-plan" }>,
+) {
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    setupPlanBodyLines(state, createPaint(plainTuiTheme)).length,
+    1,
+  );
+}
 function renderSetupReport(
   state: Extract<TuiState, { screen: "setup-report" }>,
   style: TuiPaint,
@@ -157,6 +166,15 @@ function setupReportBodyLines(
       : style.warning(`Rescan: ${state.report.rescanError.message}`),
     state.refreshError === undefined ? "" : style.warning(state.refreshError),
   ].filter(Boolean);
+}
+export function setupReportScrollMetrics(
+  state: Extract<TuiState, { screen: "setup-report" }>,
+) {
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    setupReportBodyLines(state, createPaint(plainTuiTheme)).length,
+    1,
+  );
 }
 
 function renderTrashReport(
