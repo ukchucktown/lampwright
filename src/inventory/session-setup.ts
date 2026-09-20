@@ -466,7 +466,14 @@ async function scanCodexSessionSetup(
           false,
           ownerDisabled,
         ),
-        control: pluginMcpControl(plugin, serverKey, id, source, userDocument),
+        control: pluginMcpControl(
+          plugin,
+          serverKey,
+          declaration.path,
+          id,
+          source,
+          userDocument,
+        ),
         declarationSource,
         serverKey,
         requiredAppBindingId: null,
@@ -571,8 +578,24 @@ async function scanCodexSessionSetup(
     }
   }
 
+  const appDiscoveryIncomplete = sources.some(
+    (source) =>
+      source.source.sourceId.includes("plugin-descriptor") &&
+      source.kind === "app-binding" &&
+      source.status !== "success",
+  );
   const completeTargets = completeSelectors(targets);
   const completeSources = sources.map((source) => {
+    if (
+      appDiscoveryIncomplete &&
+      source.kind === "app-binding" &&
+      source.source.sourceId.includes("codex:app-policy:")
+    )
+      return {
+        ...source,
+        status: "incomplete" as const,
+        reason: "installed-owner App descriptor collateral is incomplete",
+      };
     if (source.kind !== "app-binding" || source.targetIds.length !== 1)
       return source;
     const target = completeTargets.find(
@@ -785,6 +808,7 @@ function mcpControl(
 function pluginMcpControl(
   plugin: PluginBoundary,
   serverKey: string,
+  declarationPath: string,
   targetId: string,
   source: SetupSourceRef,
   document: Document,
@@ -792,7 +816,7 @@ function pluginMcpControl(
   return configurationControl(
     {
       kind: "mcp-server-key",
-      id: `plugin-mcp:${plugin.id}:${serverKey}`,
+      id: `plugin-mcp:${plugin.id}:${declarationPath}:${serverKey}`,
       serverKey,
       policyOwner: { kind: "plugin", pluginId: plugin.pluginId },
       authority: "exact-target",

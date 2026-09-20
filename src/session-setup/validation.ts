@@ -598,8 +598,9 @@ function selectorMatchesTarget(target: SessionSetupTarget): boolean {
     return (
       target.control.selector.kind === "mcp-server-key" &&
       target.control.selector.serverKey === target.serverKey &&
-      (target.owner.kind !== "plugin" ||
-        target.control.selector.policyOwner.kind === "plugin")
+      (target.owner.kind === "plugin"
+        ? target.control.selector.policyOwner.kind === "plugin"
+        : target.control.selector.policyOwner.kind === "standalone")
     );
   return (
     target.control.selector.kind === "app-connector-id" &&
@@ -689,6 +690,29 @@ function validateTargets(
         path: ["targets", i, "control", "selector"],
         message: "selector does not match native target identity",
       });
+    if (
+      target.kind === "mcp-registration" &&
+      target.owner.kind === "plugin" &&
+      target.control.selector.kind === "mcp-server-key" &&
+      target.control.selector.policyOwner.kind === "plugin"
+    ) {
+      const pluginBoundaryId = target.owner.pluginBoundaryId;
+      const policyPluginId = target.control.selector.policyOwner.pluginId;
+      const owner = targets.find(
+        (candidate) =>
+          candidate.kind === "plugin" &&
+          candidate.pluginBoundaryId === pluginBoundaryId,
+      );
+      if (
+        !owner ||
+        owner.kind !== "plugin" ||
+        policyPluginId !== owner.pluginId
+      )
+        issues.push({
+          path: ["targets", i, "control", "selector"],
+          message: "Plugin MCP selector does not match its owning Plugin",
+        });
+    }
     for (const [scopeValue, scopePath] of [
       [target.definitionScope, ["targets", i, "definitionScope"]],
       ...target.control.layers.map(
