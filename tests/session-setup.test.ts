@@ -1513,6 +1513,19 @@ describe("session setup planning and execution", () => {
     await safeMissing.commit(missing);
     expect(await readFile(missingPath, "utf8")).toBe('{"created":true}\n');
 
+    const occupiedPath = join(root, "occupied.json");
+    const occupied = await safeMissing.prepare({
+      path: occupiedPath,
+      format: "json",
+      exists: false,
+      expectedPreimage: null,
+      selectors: request.selectors,
+      mutations: [mutation],
+    });
+    await writeFile(occupiedPath, '{"external":true}\n');
+    await expect(safeMissing.commit(occupied)).rejects.toThrow("EEXIST");
+    expect(await readFile(occupiedPath, "utf8")).toBe('{"external":true}\n');
+
     if (process.platform !== "win32") {
       const symbolic = join(root, "symbolic.json");
       await symlink(path, symbolic, "file");
