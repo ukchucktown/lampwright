@@ -13,6 +13,12 @@ IDs and pass normal runtime validation.
 
 ## Boundary validation
 
+The accepted [Session setup contracts](./session-setup.md#shared-contracts-and-compatibility)
+add separately versioned snapshots, plans, and reports for explicit native
+availability. Existing v1 values below keep their shape and meaning. The new
+schema must preserve exact Harness Exposure, Plugin, MCP Registration, and App
+Binding identities without an MCP deletion or credential mutation variant.
+
 Use the parser matching the external value being accepted:
 
 ```ts

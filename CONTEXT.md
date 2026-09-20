@@ -1,6 +1,8 @@
-# Skill Cleanup
+# Skill lifecycle and session availability
 
 This context describes how `lampwright` identifies AI agent skills, attributes lifecycle ownership, controls their availability, and removes installed capabilities without damaging unrelated tools or project source.
+
+It also describes native availability for the capabilities that a selected harness can use in a future session.
 
 ## Installed capabilities
 
@@ -31,6 +33,14 @@ _Avoid_: Installed skill, managed skill
 A Skill or plugin definition found in source code, a vendored dependency, or a cache without evidence that it is an active Installation.
 _Avoid_: Installation
 
+**MCP Registration**:
+A declaration that supplies an MCP server to one harness from an exact source and definition scope, with an Owner when a package supplies it. The declaration does not prove a live server connection.
+_Avoid_: Skill, server process
+
+**App Binding**:
+A declaration that associates an installed Plugin with an app connector through an exact alias and connector identity. A binding does not prove account authorization or an MCP Registration.
+_Avoid_: Connection, MCP server
+
 ## Ownership
 
 **Owner**:
@@ -51,7 +61,7 @@ _Avoid_: Plugin, manager
 ## Cleanup
 
 **Inventory**:
-A live, disposable snapshot of discovered Installations, ownership evidence, dependencies, and protection status.
+A live, disposable snapshot of discovered capabilities, ownership evidence, dependencies, and protection status.
 _Avoid_: Registry, database
 
 **Removal Target**:
@@ -66,6 +76,13 @@ A selected Logical Skill, individual Installation, declared Installation Group, 
 **Availability Plan**:
 The ordered, reviewable set of actions, warnings, blocked operations, and verification checks required to disable or enable one or more Availability Targets.
 
+**Session Setup Target**:
+A selected Skill Harness Exposure, complete Plugin, MCP Registration, or App Binding whose native availability the user intends to change for a harness. Its actual Control Scope can extend beyond the selected workspace.
+_Avoid_: Availability Target, active session
+
+**Session Setup Plan**:
+The reviewable native availability changes, complete scope effects, blocks, and verification expectations for exact Session Setup Targets.
+
 **Update Target**:
 A selected Logical Skill, individual Installation, declared Installation Group, or complete Plugin boundary that the user intends the current Owner to update.
 
@@ -77,7 +94,7 @@ An Owner-controlled refresh of an existing Installation or complete Plugin bound
 _Avoid_: Reinstall, sync, upgrade
 
 **Native Disable**:
-A reversible change through a harness-supported control that keeps the Installation or complete Plugin at its original location.
+A reversible change through a harness-supported control that preserves a capability's definition and installed content.
 _Avoid_: Remove, uninstall
 
 **Suspended Disable**:
@@ -89,7 +106,7 @@ Inert, non-expiring recoverable storage for complete artifact sets displaced by 
 _Avoid_: Quarantine, Trash
 
 **Enable**:
-The reversal of Native Disable or Suspended Disable that makes the affected Harness Exposures available again.
+The reversal of Native Disable or Suspended Disable that makes the selected capability available within its approved scope.
 _Avoid_: Restore, install
 
 **Managed Removal**:
@@ -116,7 +133,7 @@ _Avoid_: Remove, force
 ## Relationships and protection
 
 **Hard Dependency**:
-A structured declaration that another installed capability requires a Removal Target. Hard Dependencies block removal unless explicitly overridden.
+A structured declaration that one installed capability requires another. Hard Dependencies block removal or disablement unless the relevant operation permits an explicit override.
 
 **Soft Reference**:
 Heuristic evidence that another Skill mentions, links to, or may invoke a Removal Target. Soft References warn but do not block.
@@ -126,6 +143,12 @@ An artifact inside a Git worktree that Git does not classify as ignored. Git-pro
 
 **Scope**:
 The availability boundary of an Installation, such as user-wide, workspace-local, or agent-specific.
+
+**Definition Scope**:
+The boundary in which a capability declaration belongs, independently of the control that governs its availability.
+
+**Control Scope**:
+The complete boundary affected by a native availability policy. A user-wide Control Scope can govern declarations from several workspaces or owners.
 
 **Installation Group**:
 A navigational batch-selection group made only from declared Manager, source, and Scope evidence. It is not a Skill Identity claim and does not merge its member Skills. Structural grouping is deferred until separately justified.

@@ -8,6 +8,18 @@ passes the exact action approval requirements to Execution.
 
 ## Layout
 
+The accepted [Session setup extension](./session-setup.md#tui-integration)
+adds a `Skills & plugins | Session setup` area row. The layout below remains
+the Skills & plugins contract. Setup delivery adds a harness list, typed
+capability rows, and Inventory/Disabled views through the same pane components.
+It preserves the current theme and lifecycle selection behavior.
+
+`ctrl-o` changes areas and `ctrl-t` changes views within an area. Each setup
+harness and view owns its selection and position. Setup `d` and `e` open native
+availability reviews. Enter never invokes removal in that area. The linked
+design defines the exact key behavior, source warnings, scope review, owner
+routes, wireframe, and report refresh requirements.
+
 The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl-t` cycles the
 three views and each header label is clickable. Each view retains its own
 cursor, panes, scrolling, search, and additive selection through search,

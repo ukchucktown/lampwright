@@ -5,6 +5,12 @@ materialize for reversible Skill and complete-Plugin availability. It is the
 source of truth for issues #72, #73, and #91. Presentation code does not read or
 interpret these files.
 
+The accepted [Session setup profiles](./session-setup-controls.md) extend native
+availability to an explicitly selected harness, MCP Registrations, and App
+Bindings. They retain the evidence and protection rules here. A setup action
+does not change the legacy all-exposure Availability intent or gain filesystem
+suspension authority. Profile qualification precedes production support.
+
 ## Canonical Inventory contract
 
 An Installation contains one Harness Exposure value for every harness that can

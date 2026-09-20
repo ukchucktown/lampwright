@@ -61,3 +61,18 @@ Issue #15 prepares a release but explicitly does not publish to npm or make the 
 
 1. [#121 Specify Update outcome clarity and TUI response time](https://github.com/ukchucktown/lampwright/issues/121) defines the accepted corrections after Update acceptance testing.
 2. [#122 Report successful mixed Update outcomes](https://github.com/ukchucktown/lampwright/issues/122), [#123 bound Git-protection process count](https://github.com/ukchucktown/lampwright/issues/123), and [#124 retain the Update hint in narrow TUI headers](https://github.com/ukchucktown/lampwright/issues/124) depend on #121 and can proceed independently.
+
+## Pre-session availability
+
+[#148 Session setup across coding harnesses](https://github.com/ukchucktown/lampwright/issues/148) replaces the obsolete MCP integration effort in #135–#147. The accepted [Session setup contract](./session-setup.md), [native source profiles](./session-setup-controls.md), and [ADR 0015](./adr/0015-scope-session-setup-to-native-availability.md) define the next increment. Application support remains pending.
+
+1. [#149 Session setup contracts and native source profiles](https://github.com/ukchucktown/lampwright/issues/149) defines the new types, schema, source fixtures, and reuse boundaries after this design is in the implementation base.
+2. [#150 Scoped native availability planning and execution](https://github.com/ukchucktown/lampwright/issues/150) depends on #149.
+3. [#151 Codex Session setup discovery and availability controls](https://github.com/ukchucktown/lampwright/issues/151) depends on #150.
+4. [#152 Session setup CLI selection and versioned JSON](https://github.com/ukchucktown/lampwright/issues/152) depends on #151.
+5. [#153 Session setup area in the existing terminal UI](https://github.com/ukchucktown/lampwright/issues/153) depends on #152 and delivers the first complete Codex journey.
+6. [#154 Claude Code Session setup adapter](https://github.com/ukchucktown/lampwright/issues/154) depends on #153.
+7. [#155 Gemini CLI Session setup adapter](https://github.com/ukchucktown/lampwright/issues/155) depends on #154.
+8. [#156 Cross-platform Session setup acceptance and operator guidance](https://github.com/ukchucktown/lampwright/issues/156) depends on #153–#155 and closes the increment.
+
+The sequence keeps one implementation issue active at a time. It adds native Enable and Disable controls in a separate Session setup area and preserves the current Skills & plugins lifecycle views. It does not authorize permanent MCP deletion, account disconnection, publication, or a release.
