@@ -1,15 +1,45 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { plan, TuiController, renderTui } from "../src/index.js";
+import type { DisabledEntry } from "../src/disabled-storage/types.js";
+import type { TuiState } from "../src/tui/types.js";
 import { mouseAction, parseRawTuiAction } from "../src/tui/terminal.js";
 import { createSetupSections } from "../src/tui/setup.js";
 import {
   buildInventory,
+  buildInstallation,
   buildSessionSetupPlan,
   buildSessionSetupReport,
   buildSessionSetupSnapshot,
   buildSessionSetupTarget,
 } from "../src/testing/index.js";
+
+function codexSuspendedEntry(): DisabledEntry {
+  const installation = buildInstallation({
+    id: "suspended-installation",
+    exposedTo: ["codex"],
+    harnessExposures: [
+      {
+        harnessId: "codex",
+        status: "disabled",
+        control: { kind: "unsupported", reason: "fixture" },
+      },
+    ],
+  });
+  return {
+    schemaVersion: 1,
+    id: "suspended-entry" as DisabledEntry["id"],
+    suspendedAt: "2026-08-21T12:00:00.000Z",
+    originalLocation: installation.location,
+    integrity: { algorithm: "sha256", digest: "c".repeat(64) },
+    skillIdentity: installation.identity,
+    installationIds: [installation.id],
+    ownership: installation.ownership,
+    harnessExposures: installation.harnessExposures,
+    operation: { id: "suspended", displayNames: ["Suspended Skill"] },
+    restoration: { mode: null, modifiedAt: null },
+  };
+}
 
 function twoHarnessSnapshot() {
   const snapshot = buildSessionSetupSnapshot();
@@ -156,8 +186,9 @@ describe("Session setup terminal area", () => {
     ).toBe(true);
     await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "apply-search" });
-    if (controller.state.screen !== "browse") throw new Error();
-    expect(controller.state.model.selected.size).toBe(1);
+    const browse = controller.state as TuiState;
+    if (browse.screen !== "browse") throw new Error();
+    expect(browse.model.selected.size).toBe(1);
   });
 
   it("does not apply invalid or empty-match setup expressions", async () => {
@@ -282,9 +313,8 @@ describe("Session setup terminal area", () => {
 
   it("projects an owned Skill directly beneath its Plugin heading", () => {
     const base = buildSessionSetupTarget();
-    const { installationId: _installationId, ...pluginBase } = base;
     const plugin = {
-      ...pluginBase,
+      ...base,
       id: "plugin-target",
       kind: "plugin" as const,
       name: "Example Plugin",
@@ -309,5 +339,64 @@ describe("Session setup terminal area", () => {
     expect(entries[heading + 1]!.name).toBe("Example Plugin");
     expect(entries[heading + 2]!.rowKind).toBe("plugin-skill");
     expect(entries[heading + 2]!.selectable).toBe(false);
+  });
+
+  it("routes a suspended Codex setup row to its lifecycle Disabled entry", async () => {
+    const planSessionSetup = vi.fn();
+    const executeSessionSetup = vi.fn();
+    const controller = new TuiController({
+      scan: async () => buildInventory(),
+      plan,
+      execute: vi.fn(),
+      listDisabled: async () => [codexSuspendedEntry()],
+      scanSessionSetup: async () => twoHarnessSnapshot(),
+      planSessionSetup,
+      executeSessionSetup,
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "switch-view", view: "disabled" });
+    if (controller.state.screen !== "browse") throw new Error();
+    const suspendedSection = controller.state.model.sections.findIndex(
+      (section) =>
+        section.entries.some((entry) => entry.rowKind === "suspended-skill"),
+    );
+    await controller.dispatch({
+      kind: "point-section",
+      index: suspendedSection,
+    });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    if (controller.state.screen !== "browse") throw new Error();
+    const suspendedEntry = controller.state.model.sections[
+      controller.state.model.sectionIndex
+    ]!.entries.findIndex((entry) => entry.rowKind === "suspended-skill");
+    await controller.dispatch({ kind: "point-entry", index: suspendedEntry });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(
+      controller.state.model.sections[controller.state.model.sectionIndex]!
+        .entries[controller.state.model.entryIndex]!.lifecycleDisabledKey,
+    ).toBe("disabled-entry:suspended-entry");
+    await controller.dispatch({ kind: "select" });
+
+    expect(controller.state.screen).toBe("browse");
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(controller.state.area ?? "skills").toBe("skills");
+    expect(controller.state.view).toBe("disabled");
+    expect(
+      controller.state.model.sections[controller.state.model.sectionIndex]!
+        .entries[controller.state.model.entryIndex]!.key,
+    ).toBe("disabled-entry:suspended-entry");
+    expect(planSessionSetup).not.toHaveBeenCalled();
+    expect(executeSessionSetup).not.toHaveBeenCalled();
+
+    await controller.dispatch({ kind: "switch-area", area: "setup" });
+    await controller.dispatch({ kind: "focus", pane: "sections" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    if (controller.state.screen !== "browse") throw new Error();
+    expect(
+      controller.state.model.sections[
+        controller.state.model.sectionIndex
+      ]!.entries.some((entry) => entry.rowKind === "suspended-skill"),
+    ).toBe(false);
   });
 });

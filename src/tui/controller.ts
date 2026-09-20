@@ -1182,6 +1182,12 @@ export class TuiController {
               ? "Session setup is unavailable in this host."
               : null),
         },
+        ...(state.disabledEntries === undefined
+          ? {}
+          : { disabledEntries: state.disabledEntries }),
+        ...(state.operations === undefined
+          ? {}
+          : { operations: state.operations }),
         areaSnapshots: saved,
       };
       return;
