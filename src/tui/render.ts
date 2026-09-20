@@ -1972,14 +1972,20 @@ export function renderBrowseLines(
       : null;
   const trashCount = state.operations?.size ?? 0;
   const globalControls = [
-    { text: "ctrl-o", paint: style.title },
-    { text: " area · ", paint: style.muted },
-    { text: "ctrl-t", paint: style.title },
-    { text: " view · ", paint: style.muted },
     { text: "esc", paint: style.title },
     { text: isTrash ? " Inventory · " : " back · ", paint: style.muted },
     { text: "q", paint: style.title },
     { text: " quit", paint: style.muted },
+  ] as const;
+  const paneControls = [
+    { text: "click", paint: style.title },
+    { text: " focus · ", paint: style.muted },
+    { text: "tab/shift+tab", paint: style.title },
+    { text: " pane · ", paint: style.muted },
+    { text: "shift+←→", paint: style.title },
+    { text: " width · ", paint: style.muted },
+    { text: "shift+↑↓", paint: style.title },
+    { text: " height", paint: style.muted },
   ] as const;
   const navigationControls = [
     { text: "↑↓/wheel", paint: style.title },
@@ -2009,10 +2015,10 @@ export function renderBrowseLines(
     { text: " select view", paint: style.muted },
   ] as const;
   out.push(
-    `${style.title("Lampwright")} ${state.area === "setup" ? style.muted("Skills & plugins") : style.selected("Skills & plugins")} ${style.muted("|")} ${state.area === "setup" ? style.selected("Session setup") : style.muted("Session setup")}`,
+    `${style.title("Lampwright")} ${state.area === "setup" ? style.muted("Skills & plugins") : style.selected("Skills & plugins")} ${style.muted("|")} ${state.area === "setup" ? style.selected("Session setup") : style.muted("Session setup")}  ${style.title("ctrl-o")} ${style.muted("area")}`,
   );
   out.push(
-    `${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? ` · ${setupHarness} · Workspace: ${state.setupInventory?.workspace.path ?? "unknown"}` : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`}  ${
+    `${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? ` · ${setupHarness} · Workspace: ${state.setupInventory?.workspace.path ?? "unknown"}` : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${style.title("ctrl-t")} ${style.muted("view")}`}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -2075,6 +2081,7 @@ export function renderBrowseLines(
             style.muted,
           ),
   );
+  out.push(fitStyledSegments(paneControls, usable, style.muted));
   out.push(
     isTrash
       ? fitStyledSegments(
