@@ -179,6 +179,9 @@ Options:
   --trust-adapter <id>:<sha256>       Approve exact local adapter content
   --trust-package npx:<pkg>@<version>:<adapter-sha256>
                                       Approve exact ephemeral package use
+  --session-setup                    Scan native session-setup targets
+  --harness <id>                     Limit Session setup to one harness
+  --workspace <path>                 Set Session setup or TUI workspace context
   -h, --help                          Show help
   -v, --version                       Show version
 `;
@@ -819,8 +822,11 @@ async function sessionSetup(
     workspace: snapshot.workspace,
     targets,
   });
-  if (args.dryRun || plan.blocks.length > 0)
-    return result(plan, plan.blocks.length === 0 ? 0 : 3);
+  if (args.dryRun || plan.blocks.length > 0 || plan.errors.length > 0)
+    return result(
+      plan,
+      plan.blocks.length === 0 && plan.errors.length === 0 ? 0 : 3,
+    );
   if (!args.yes)
     return result(
       {
@@ -1485,7 +1491,14 @@ function human(output: unknown): string {
       ? output.sources.filter(isRecord)
       : [];
     const unavailable = sources.filter((source) => source.status !== "success");
-    return `Session setup: ${Array.isArray(output.targets) ? output.targets.length : 0} target(s) in ${String(isRecord(output.workspace) ? output.workspace.path : "unknown workspace")}; ${unavailable.length} source(s) unavailable, invalid, or incomplete.\n`;
+    const lines = [
+      `Session setup: ${Array.isArray(output.targets) ? output.targets.length : 0} target(s) in ${String(isRecord(output.workspace) ? output.workspace.path : "unknown workspace")}; ${unavailable.length} source(s) unavailable, invalid, or incomplete.`,
+    ];
+    for (const source of unavailable)
+      lines.push(
+        `- Source ${String(isRecord(source.source) ? source.source.sourceId : "unknown")}: ${String(source.status)}${source.reason === null || source.reason === undefined ? "" : `; ${String(source.reason)}`}.`,
+      );
+    return `${lines.join("\n")}\n`;
   }
   if (output.kind === "session-setup-plan")
     return humanSessionSetupPlan(output);
@@ -1832,6 +1845,11 @@ function humanSessionSetupPlan(plan: unknown): string {
   const lines = [
     `Session setup plan: ${targets.length} target(s), ${Array.isArray(plan.actions) ? plan.actions.length : 0} native action(s), ${blocks.length} block(s).`,
   ];
+  const errors = Array.isArray(plan.errors) ? plan.errors.filter(isRecord) : [];
+  for (const error of errors)
+    lines.push(
+      `- Planning error: ${String(error.kind)}${typeof error.reason === "string" ? `; ${error.reason}` : ""}.`,
+    );
   for (const target of targets) {
     const source = isRecord(target.source) ? target.source : null;
     lines.push(
@@ -1886,7 +1904,7 @@ function humanSessionSetupPlan(plan: unknown): string {
   for (const block of blocks) {
     if (block.kind === "owner-gate")
       lines.push(
-        "- Block: the selected target needs its owner enabled. Select that owner explicitly for a separate setup review.",
+        `- Block: the selected target needs its owner enabled. Select ${isRecord(block.owner) ? `setup:${String(block.owner.targetId)}` : "the owner"} explicitly for a separate setup review.`,
       );
     else if (
       ["source-unavailable", "source-invalid", "source-incomplete"].includes(

@@ -704,6 +704,22 @@ describe("session setup contracts", () => {
     expect(validate(buildSessionSetupPlan())).toBe(true);
     expect(validate(buildSessionSetupIntent())).toBe(true);
     expect(validate(buildSessionSetupReport())).toBe(true);
+    expect(
+      validate({
+        schemaVersion: 1,
+        kind: "session-setup-confirmation-required",
+        operation: "disable",
+        plan: buildSessionSetupPlan(),
+      }),
+    ).toBe(true);
+    expect(
+      validate({
+        schemaVersion: 1,
+        kind: "session-setup-error",
+        code: "invalid-usage",
+        message: "invalid setup selector",
+      }),
+    ).toBe(true);
   });
 });
 

@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { formatCliOutput, runCli } from "../src/cli.js";
 import {
+  buildSessionSetupPlan,
   buildSessionSetupReport,
   buildSessionSetupSnapshot,
 } from "../src/testing/index.js";
+import { targetRef } from "../src/testing/session-setup-builders.js";
 import { parseSessionSetupPublicValue } from "../src/session-setup/index.js";
 import type {
   SessionSetupPlan,
@@ -164,6 +166,60 @@ describe("Session setup CLI", () => {
       );
       expect(result.exitCode).toBe(exitCode);
     }
+  });
+
+  it("renders setup source status, exact owner alternatives, and planner errors", async () => {
+    const snapshot = buildSessionSetupSnapshot();
+    const scan = formatCliOutput(
+      {
+        ...snapshot,
+        sources: [
+          {
+            ...snapshot.sources[0]!,
+            status: "unavailable",
+            reason: "native configuration is absent",
+          },
+        ],
+      },
+      false,
+    );
+    expect(scan).toContain(
+      "fixture-source: unavailable; native configuration is absent",
+    );
+    const target = snapshot.targets[0]!;
+    const plan = buildSessionSetupPlan({
+      blocks: [
+        {
+          kind: "owner-gate",
+          target: targetRef(target),
+          owner: targetRef(target),
+        },
+      ],
+      errors: [{ kind: "planner", reason: "native evidence changed" }],
+    });
+    const human = formatCliOutput(plan, false);
+    expect(human).toContain("setup:setup-target-1");
+    expect(human).toContain("Planning error: planner; native evidence changed");
+  });
+
+  it("does not confirm or execute a plan with planner errors", async () => {
+    const executeSessionSetup = vi.fn();
+    const result = await runCli(
+      ["disable", "setup:setup-target-1", "--harness", "codex", "--yes"],
+      {
+        scanSessionSetup: async () => buildSessionSetupSnapshot(),
+        planSessionSetup: () =>
+          buildSessionSetupPlan({
+            errors: [{ kind: "planner", reason: "native evidence changed" }],
+          }),
+        executeSessionSetup,
+      },
+    );
+    expect(result).toMatchObject({
+      exitCode: 3,
+      output: { kind: "session-setup-plan" },
+    });
+    expect(executeSessionSetup).not.toHaveBeenCalled();
   });
 
   it("publishes and parses setup confirmation and error envelopes", async () => {
