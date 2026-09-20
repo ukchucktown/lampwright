@@ -367,12 +367,16 @@ async function scanCodexSessionSetup(
         null,
         declarationDocument.path,
       );
-      const declarationState = stateFromEnabled(
-        objectAt(declarationValue, ["enabled"]),
+      const configuredState = stateFromEnabled(
+        objectAt(
+          projectApplies === true && projectDefines
+            ? projectValue
+            : declarationValue,
+          ["enabled"],
+        ),
       );
       const effectiveState =
-        (declarationDocument.unsafe &&
-          declarationDocument.scope.kind === "user") ||
+        userDocument.unsafe ||
         (projectDocument.unsafe && projectApplies !== false)
           ? "unresolved"
           : declarationDocument.scope.kind === "workspace" &&
@@ -403,7 +407,7 @@ async function scanCodexSessionSetup(
         source,
         owner: { kind: "standalone" },
         definitionScope: declarationDocument.scope,
-        state: { ...declarationState, effectiveWorkspaceState: effectiveState },
+        state: { ...configuredState, effectiveWorkspaceState: effectiveState },
         control: mcpControl(
           serverKey,
           configurationSources.get(pathKey(authorityDocument.path)) ?? source,

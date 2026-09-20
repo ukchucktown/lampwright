@@ -1482,7 +1482,8 @@ export function parseSessionSetupPlan(input: unknown): SessionSetupPlan {
           target.control.layers.some(
             (layer) =>
               layer.source.sourceId === mutation.authority.layerSourceId &&
-              layer.canonicalPath === mutation.authority.layerCanonicalPath &&
+              (layer.canonicalPath ?? layer.source.path) ===
+                mutation.authority.layerCanonicalPath &&
               sameSource(layer.source, mutation.authority.source),
           ),
         )

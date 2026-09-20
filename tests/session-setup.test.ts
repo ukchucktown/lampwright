@@ -745,6 +745,73 @@ function grantsFor(plan: ReturnType<typeof planSessionSetup>) {
 }
 
 describe("session setup planning and execution", () => {
+  it("keeps distinct missing configuration documents in separate actions", () => {
+    const fixture = completeFixture();
+    const withMissingDocument = <T extends SessionSetupTarget>(
+      target: T,
+    ): T => {
+      const source = target.control.layers[0]!.source;
+      const layer = {
+        ...target.control.layers[0]!,
+        exists: false,
+        canonicalPath: null,
+        expectedPreimage: null,
+        integrity: "missing" as const,
+        protection: {
+          git: { kind: "outside-worktree" as const },
+          system: { kind: "none" as const },
+          filesystem: { kind: "writable" as const },
+        },
+      };
+      const operation = {
+        kind: "available" as const,
+        controlScope: { kind: "user" as const },
+        authority: {
+          kind: "configuration" as const,
+          source,
+          layerSourceId: source.sourceId,
+          layerCanonicalPath: source.path,
+        },
+      };
+      return {
+        ...target,
+        control: {
+          ...target.control,
+          layers: [layer],
+          availability: { enable: operation, disable: operation },
+        },
+      };
+    };
+    const plugin = withMissingDocument(fixture.plugin);
+    const skill = withMissingDocument(fixture.skill);
+    const snapshot = replaceTargets(fixture.snapshot, [
+      plugin,
+      skill,
+      fixture.mcp,
+      fixture.firstApp,
+      fixture.secondApp,
+    ]);
+
+    const plan = planSessionSetup(
+      snapshot,
+      setupIntent(snapshot, "disable", [targetRef(plugin), targetRef(skill)]),
+    );
+
+    expect(plan.blocks).toEqual([]);
+    expect(plan.actions).toHaveLength(2);
+    expect(
+      plan.actions.map(
+        (action) =>
+          (
+            action.mutations[0] as Extract<
+              SetupMutation,
+              { kind: "configuration" }
+            >
+          ).authority.layerCanonicalPath,
+      ),
+    ).toEqual([plugin.source.path, skill.source.path].sort());
+  });
+
   it("plans one selected exposure with complete native scope and activation disclosure", () => {
     const snapshot = buildSessionSetupSnapshot();
     const target = snapshot.targets[0]!;

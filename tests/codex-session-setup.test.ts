@@ -3,6 +3,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -337,6 +338,65 @@ describe("Codex Session setup Inventory", () => {
       );
       expect(await readFile(config, "utf8")).toBe(original);
     }
+  });
+
+  it("keeps Plugin MCP and App targets visible with unavailable malformed policies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lampwright-codex-setup-"));
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const pluginRoot = join(
+      codex,
+      "plugins",
+      "cache",
+      "market",
+      "owner",
+      "1.0.0",
+    );
+    await writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), {
+      name: "owner",
+      version: "1.0.0",
+      mcpServers: { service: { command: "service" } },
+      apps: { binding: { id: "connector" } },
+    });
+    const config = join(codex, "config.toml");
+    const original =
+      '[plugins."owner@market".mcp_servers.service]\nenabled = "yes"\n\n[apps.connector]\nenabled = "yes"\ncredential = "SECRET_SENTINEL"\n';
+    await write(config, original);
+    const scanner = codexScanner(home, workspace, codex, [
+      {
+        pluginId: "owner@market",
+        name: "owner",
+        marketplaceName: "market",
+        version: "1.0.0",
+        installed: true,
+        enabled: true,
+        source: { source: "git", url: "https://example.test/owner" },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_USE",
+      },
+    ]);
+
+    const snapshot = await scanner.scanSessionSetup({
+      workspace: { path: workspace },
+    });
+    const affected = snapshot.targets.filter(
+      (target) =>
+        target.kind === "mcp-registration" || target.kind === "app-binding",
+    );
+    expect(affected.map((target) => target.kind).sort()).toEqual([
+      "app-binding",
+      "mcp-registration",
+    ]);
+    expect(
+      affected.every(
+        (target) =>
+          target.control.availability.enable.kind === "unavailable" &&
+          target.control.availability.disable.kind === "unavailable",
+      ),
+    ).toBe(true);
+    expect(await readFile(config, "utf8")).toBe(original);
   });
 
   it("does not turn cache-only Plugin material into setup targets", async () => {
@@ -1116,6 +1176,9 @@ describe("Codex Session setup Inventory", () => {
       ),
     ).toBe(true);
     expect(
+      trustedTargets.every((item) => item.state.policy === "disabled"),
+    ).toBe(true);
+    expect(
       trustedTargets.every(
         (item) =>
           new Set(item.control.layers.map((layer) => layer.source.path))
@@ -1147,6 +1210,8 @@ describe("Codex Session setup Inventory", () => {
         projectTarget.kind !== "mcp-registration"
       )
         throw new Error("expected both layered MCP declarations");
+      expect(userTarget.state.policy).toBe("enabled");
+      expect(projectTarget.state.policy).toBe("disabled");
       if (trust === null) {
         expect(userTarget.state.effectiveWorkspaceState).toBe("unresolved");
         expect(projectTarget.state.effectiveWorkspaceState).toBe("unresolved");
@@ -1401,7 +1466,181 @@ describe("Codex Session setup Inventory", () => {
       }
     }
   });
+
+  it("creates a trusted missing workspace document as a standalone MCP override", async () => {
+    const root = await mkdtemp(
+      join(await realpath(tmpdir()), "lampwright-codex-setup-"),
+    );
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const project = join(workspace, ".codex", "config.toml");
+    await write(
+      join(codex, "config.toml"),
+      "[mcp_servers.user]\nenabled = true\n",
+    );
+    await mkdir(dirname(project), { recursive: true });
+    const scanner = codexScanner(home, workspace, codex, []);
+    const scan = () =>
+      scanner.scanSessionSetup({
+        workspace: { path: workspace },
+        workspaceTrusted: true,
+      });
+    const snapshot = await scan();
+    const target = snapshot.targets.find(
+      (item) =>
+        item.kind === "mcp-registration" &&
+        item.definitionScope.kind === "user",
+    );
+    if (!target || target.kind !== "mcp-registration")
+      throw new Error("expected user MCP");
+    const plan = disableMcp(snapshot, workspace, target);
+    expect(plan.blocks).toEqual([]);
+    expect(plan.actions[0]?.approvals).toContainEqual({
+      kind: "scope-disclosure",
+      scope: { kind: "workspace", workspacePath: workspace },
+      required: true,
+    });
+    const report = await executeCodexPlan(plan, scan);
+    expect(report.status, JSON.stringify(report, null, 2)).toBe("succeeded");
+    expect(await readFile(project, "utf8")).toContain("enabled = false");
+    const final = await scan();
+    expect(
+      final.targets.find((item) => item.id === target.id)?.state
+        .effectiveWorkspaceState,
+    ).toBe("disabled");
+  });
+
+  it("creates a missing safe user document for an installed Plugin MCP", async () => {
+    const root = await mkdtemp(
+      join(await realpath(tmpdir()), "lampwright-codex-setup-"),
+    );
+    temporary.push(root);
+    const home = join(root, "home");
+    const workspace = join(root, "workspace");
+    const codex = join(root, "codex");
+    const pluginRoot = join(
+      codex,
+      "plugins",
+      "cache",
+      "market",
+      "owner",
+      "1.0.0",
+    );
+    await writeJson(join(pluginRoot, ".codex-plugin", "plugin.json"), {
+      name: "owner",
+      version: "1.0.0",
+      mcpServers: { service: { command: "service" } },
+    });
+    await mkdir(codex, { recursive: true });
+    const installed = [
+      {
+        pluginId: "owner@market",
+        name: "owner",
+        marketplaceName: "market",
+        version: "1.0.0",
+        installed: true,
+        enabled: true,
+        source: { source: "git", url: "https://example.test/owner" },
+        installPolicy: "AVAILABLE",
+        authPolicy: "ON_USE",
+      },
+    ];
+    const scanner = codexScanner(home, workspace, codex, installed);
+    const scan = () =>
+      scanner.scanSessionSetup({ workspace: { path: workspace } });
+    const snapshot = await scan();
+    const target = snapshot.targets.find(
+      (item) =>
+        item.kind === "mcp-registration" && item.owner.kind === "plugin",
+    );
+    if (!target || target.kind !== "mcp-registration")
+      throw new Error("expected Plugin MCP");
+    const plan = disableMcp(snapshot, workspace, target);
+    expect((await executeCodexPlan(plan, scan)).status).toBe("succeeded");
+    expect(await readFile(join(codex, "config.toml"), "utf8")).toContain(
+      "enabled = false",
+    );
+    expect(
+      (await scan()).targets.find((item) => item.id === target.id)?.state
+        .policy,
+    ).toBe("disabled");
+  });
 });
+
+function codexScanner(
+  home: string,
+  workspace: string,
+  codex: string,
+  installed: readonly object[],
+) {
+  return createSessionSetupScanner({
+    now: () => new Date("2026-09-20T00:00:00.000Z"),
+    environment: {
+      homeDirectory: home,
+      workspaceDirectory: workspace,
+      agentHomeDirectories: { codex },
+    },
+    commandRunner: {
+      run: async (command) =>
+        command.executable === "codex"
+          ? {
+              exitCode: 0,
+              stdout: JSON.stringify({ installed, available: [] }),
+            }
+          : { exitCode: 1, stdout: "" },
+    },
+  });
+}
+function disableMcp(
+  snapshot: Awaited<
+    ReturnType<ReturnType<typeof codexScanner>["scanSessionSetup"]>
+  >,
+  workspace: string,
+  target: Extract<
+    (typeof snapshot.targets)[number],
+    { kind: "mcp-registration" }
+  >,
+) {
+  return planSessionSetup(snapshot, {
+    schemaVersion: 1,
+    kind: "session-setup-intent",
+    action: "disable",
+    harnessId: "codex",
+    workspace: { path: workspace },
+    targets: [
+      {
+        kind: "mcp-registration",
+        targetId: target.id,
+        declarationSourceId: target.declarationSource.sourceId,
+        serverKey: target.serverKey,
+      },
+    ],
+  });
+}
+async function executeCodexPlan(
+  plan: ReturnType<typeof planSessionSetup>,
+  scan: () => Promise<
+    Awaited<ReturnType<ReturnType<typeof codexScanner>["scanSessionSetup"]>>
+  >,
+) {
+  return executeSessionSetup(
+    plan,
+    { grants: plan.actions.flatMap((item) => item.approvals) },
+    {
+      scan,
+      replan: planSessionSetup,
+      configurationWriter: createCodexSessionSetupConfigurationWriter(),
+      processRunner: {
+        run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      },
+      inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+      auditWriter: { write: async () => undefined },
+      now: () => new Date("2026-09-20T00:00:00.000Z"),
+    },
+  );
+}
 
 async function write(path: string, value: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
