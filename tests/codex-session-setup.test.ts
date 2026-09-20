@@ -46,8 +46,8 @@ describe("Codex Session setup Inventory", () => {
     });
     await writeJson(join(pluginRoot, ".app.json"), {
       apps: {
-        left: { connectorId: "connector" },
-        right: { connectorId: "connector" },
+        left: { id: "connector" },
+        right: { id: "connector" },
       },
     });
     const runner: InventoryCommandRunner = {

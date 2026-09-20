@@ -255,6 +255,9 @@ async function scanCodexSessionSetup(
         { kind: "user" },
         `codex:plugin-mcp-declaration:${plugin.id}:${serverKey}`,
         [],
+        "success",
+        null,
+        descriptor.path,
       );
       targets.push({
         id,
@@ -281,8 +284,7 @@ async function scanCodexSessionSetup(
       });
     }
     for (const [alias, raw] of entries(descriptor.apps)) {
-      const connectorId =
-        stringAt(raw, ["connectorId"]) ?? stringAt(raw, ["connector_id"]);
+      const connectorId = stringAt(raw, ["id"]);
       if (!connectorId) continue;
       const id = stableId("setup-app", plugin.id, alias);
       const source = addSource(
@@ -299,6 +301,9 @@ async function scanCodexSessionSetup(
         { kind: "user" },
         `codex:app-declaration:${plugin.id}:${alias}`,
         [],
+        "success",
+        null,
+        descriptor.path,
       );
       targets.push({
         id,
@@ -655,6 +660,7 @@ async function pluginDescriptor(
 ): Promise<{
   readonly mcp: Record<string, unknown>;
   readonly apps: Record<string, unknown>;
+  readonly path: string | null;
 }> {
   const paths = plugin.resources
     .filter(
@@ -668,6 +674,7 @@ async function pluginDescriptor(
     mcp: Record<string, unknown>;
     apps: Record<string, unknown>;
   } = { mcp: {}, apps: {} };
+  let descriptorPath: string | null = null;
   for (const path of paths) {
     const read = await readAvailabilityDocument(
       path,
@@ -680,6 +687,7 @@ async function pluginDescriptor(
     if (read.unsafe || read.text === null) continue;
     try {
       const value = record(JSON.parse(read.text));
+      descriptorPath ??= path;
       Object.assign(
         combined.mcp,
         record(value?.mcpServers) ?? record(value?.mcp_servers) ?? {},
@@ -689,7 +697,7 @@ async function pluginDescriptor(
       /* an invalid descriptor remains non-actionable */
     }
   }
-  return combined;
+  return { ...combined, path: descriptorPath };
 }
 function completeSelectors(
   targets: readonly SessionSetupTarget[],
