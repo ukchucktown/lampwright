@@ -86,7 +86,40 @@ function renderSetupPlan(
   state: Extract<TuiState, { screen: "setup-plan" }>,
   style: TuiPaint,
 ): string {
-  return `${[style.title(`Session setup ${state.plan.intent.action} review`), style.muted(`Harness: ${state.plan.intent.harnessId} · Workspace: ${state.plan.intent.workspace.path}`), style.muted(`Targets: ${String(state.plan.targets.length)} · Actions: ${String(state.plan.actions.length)}`), ...state.plan.targets.map((target) => style.info(`${target.name} · ${target.kind} · policy ${target.state.policy} · effective ${target.state.effectiveWorkspaceState}`)), ...state.plan.actions.flatMap((action) => [`Dependencies: ${action.dependsOn.join(", ") || "none"}`, `Approvals: ${action.approvals.map((approval) => approval.kind).join(", ") || "none"}`].map(style.muted)), ...state.plan.blocks.map((block) => style.error(`Blocked: ${block.kind}${"reason" in block ? ` — ${block.reason}` : ""}`)), ...state.plan.warnings.map((warning) => style.warning(`Warning: ${warning.kind}`)), ...state.plan.errors.map((error) => style.error(`Error: ${error.kind}${"reason" in error ? ` — ${error.reason}` : ""}`)), ...state.plan.verifications.map((verification) => style.muted(`Verify: ${verification.kind}`)), style.muted(state.plan.blocks.length || state.plan.errors.length ? (state.plan.blocks.some((block) => block.kind === "owner-gate") ? "o owner review · esc cancel" : "esc cancel") : "y confirm · esc cancel")].join("\n")}\n`;
+  return renderTrashScrollable(
+    setupPlanBodyLines(state, style),
+    [
+      style.muted(
+        state.plan.blocks.length || state.plan.errors.length
+          ? "esc cancel"
+          : "y confirm · esc cancel",
+      ),
+    ],
+    state.scrollOffset,
+    state.browse.model.viewport,
+  );
+}
+function setupPlanBodyLines(
+  state: Extract<TuiState, { screen: "setup-plan" }>,
+  style: TuiPaint,
+): readonly string[] {
+  return [
+    style.title(`Session setup ${state.plan.intent.action} review`),
+    style.muted(
+      `Harness: ${state.plan.intent.harnessId} · Workspace: ${state.plan.intent.workspace.path}`,
+    ),
+    ...state.plan.targets.map((target) =>
+      style.info(`${target.name} · ${target.kind}`),
+    ),
+    ...state.plan.blocks.map((block) => style.error(`Blocked: ${block.kind}`)),
+    ...state.plan.warnings.map((warning) =>
+      style.warning(`Warning: ${warning.kind}`),
+    ),
+    ...state.plan.errors.map((error) => style.error(`Error: ${error.kind}`)),
+    ...state.plan.verifications.map((item) =>
+      style.muted(`Verify: ${item.kind}`),
+    ),
+  ];
 }
 function renderSetupReport(
   state: Extract<TuiState, { screen: "setup-report" }>,

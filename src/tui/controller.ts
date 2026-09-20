@@ -1439,6 +1439,14 @@ export class TuiController {
       this.stateValue = { ...state, technicalDetails: !state.technicalDetails };
       return;
     }
+    if (action.kind === "move" || action.kind === "page") {
+      const delta = action.kind === "page" ? action.delta * 8 : action.delta;
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.max(0, state.scrollOffset + delta),
+      };
+      return;
+    }
     if (action.kind === "owner-review") {
       const owner = state.plan.blocks.find(
         (block) => block.kind === "owner-gate",
@@ -1476,6 +1484,17 @@ export class TuiController {
     state: import("./types.js").TuiSetupReportState,
     action: TuiAction,
   ): Promise<void> {
+    if (action.kind === "move" || action.kind === "page") {
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.max(
+          0,
+          state.scrollOffset +
+            (action.kind === "page" ? action.delta * 8 : action.delta),
+        ),
+      };
+      return;
+    }
     if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: state.report };
       return;
