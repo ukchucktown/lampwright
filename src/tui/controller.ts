@@ -2240,6 +2240,40 @@ function setupHarness(
         : null;
 }
 
+/** Rebuilds one setup view while preserving only state from its matching harness. */
+export function refreshedSetupHarnessModels(
+  prior: TuiBrowseSnapshot,
+  snapshot: import("../session-setup/types.js").SessionSetupSnapshot,
+  disabledEntries: readonly import("../disabled-storage/types.js").DisabledEntry[],
+  view: "inventory" | "disabled",
+): Partial<
+  Record<
+    import("../session-setup/types.js").SetupHarnessId,
+    TuiBrowseState["model"]
+  >
+> {
+  const sections = createSetupSections(snapshot, view, disabledEntries);
+  const priorView = prior.view === view ? prior : prior.viewSnapshots?.[view];
+  const result: Partial<
+    Record<
+      import("../session-setup/types.js").SetupHarnessId,
+      TuiBrowseState["model"]
+    >
+  > = {};
+  for (const [index, harness] of (
+    ["codex", "claude-code", "gemini-cli"] as const
+  ).entries()) {
+    const previous =
+      prior.setupHarnessStates?.[view]?.[harness] ?? priorView?.model;
+    result[harness] = preserveBrowseModel(
+      previous ?? createBrowseModel(sections, prior.model.viewport),
+      sections,
+    );
+    result[harness] = { ...result[harness]!, sectionIndex: index };
+  }
+  return result;
+}
+
 function unavailableSetupSnapshot(
   inventory: Inventory,
   workspacePath: string,
