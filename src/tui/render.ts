@@ -67,6 +67,10 @@ export function renderTui(
     return renderAvailabilityExecuting(state, style);
   if (state.screen === "availability-report")
     return renderAvailabilityReport(state, style);
+  if (state.screen === "setup-plan") return renderSetupPlan(state, style);
+  if (state.screen === "setup-executing")
+    return `${style.title("Lampwright — Session setup")}\n\n${style.info("Applying reviewed native availability…")}\n`;
+  if (state.screen === "setup-report") return renderSetupReport(state, style);
   if (state.screen === "update-plan") return renderUpdatePlan(state, style);
   if (state.screen === "update-executing")
     return renderUpdateExecuting(state, style);
@@ -76,6 +80,127 @@ export function renderTui(
     return `${style.title("Lampwright — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
   if (state.screen === "trash-report") return renderTrashReport(state, style);
   return renderReport(state, style);
+}
+
+function renderSetupPlan(
+  state: Extract<TuiState, { screen: "setup-plan" }>,
+  style: TuiPaint,
+): string {
+  return renderTrashScrollable(
+    setupPlanBodyLines(state, style),
+    [
+      style.muted(
+        state.plan.blocks.some((block) => block.kind === "owner-gate")
+          ? "o owner review · esc cancel"
+          : state.plan.blocks.length || state.plan.errors.length
+            ? "esc cancel"
+            : "y confirm · esc cancel",
+      ),
+    ],
+    state.scrollOffset,
+    state.browse.model.viewport,
+  );
+}
+function setupPlanBodyLines(
+  state: Extract<TuiState, { screen: "setup-plan" }>,
+  style: TuiPaint,
+): readonly string[] {
+  return [
+    style.title(`Session setup ${state.plan.intent.action} review`),
+    style.muted(
+      `Harness: ${state.plan.intent.harnessId} · Workspace: ${state.plan.intent.workspace.path}`,
+    ),
+    ...state.plan.targets.map((target) =>
+      style.info(
+        `${target.name} · ${target.kind} · policy ${target.state.policy} · effective ${target.state.effectiveWorkspaceState}`,
+      ),
+    ),
+    ...state.plan.actions.flatMap((action) =>
+      [
+        `Dependencies: ${action.dependsOn.join(", ") || "none"}`,
+        `Approvals: ${action.approvals.map((approval) => approval.kind).join(", ") || "none"}`,
+      ].map(style.muted),
+    ),
+    ...state.plan.blocks.map((block) =>
+      style.error(
+        `Blocked: ${block.kind}${"reason" in block ? ` — ${block.reason}` : ""}`,
+      ),
+    ),
+    ...state.plan.warnings.map((warning) =>
+      style.warning(
+        `Warning: ${warning.kind}${"scope" in warning ? ` — ${warning.scope.kind}` : ""}${"activation" in warning ? ` — ${warning.activation}` : ""}`,
+      ),
+    ),
+    ...state.plan.errors.map((error) =>
+      style.error(
+        `Error: ${error.kind}${"reason" in error ? ` — ${error.reason}` : ""}`,
+      ),
+    ),
+    ...state.plan.verifications.map((item) =>
+      style.muted(
+        `Verify: ${item.kind}${"expected" in item ? ` — ${item.expected}` : ""}`,
+      ),
+    ),
+  ];
+}
+export function setupPlanScrollMetrics(
+  state: Extract<TuiState, { screen: "setup-plan" }>,
+) {
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    setupPlanBodyLines(state, createPaint(plainTuiTheme)).length,
+    1,
+  );
+}
+function renderSetupReport(
+  state: Extract<TuiState, { screen: "setup-report" }>,
+  style: TuiPaint,
+): string {
+  return renderTrashScrollable(
+    setupReportBodyLines(state, style),
+    [style.muted("enter/esc refresh · q quit")],
+    state.scrollOffset,
+    state.browse.model.viewport,
+    "result",
+  );
+}
+function setupReportBodyLines(
+  state: Extract<TuiState, { screen: "setup-report" }>,
+  style: TuiPaint,
+): readonly string[] {
+  return [
+    style.title(`Session setup result: ${state.report.status}`),
+    ...state.report.actionResults.map((result) =>
+      style.muted(
+        `Action ${result.actionId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`,
+      ),
+    ),
+    ...state.report.targetResults.map(
+      (result) =>
+        `${result.status === "failed" || result.status === "blocked" || result.status === "unverified" ? style.error("!") : style.success("✓")} ${result.target.targetId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`,
+    ),
+    ...state.report.verificationResults.map((result) =>
+      style.muted(
+        `Verification ${result.verificationId}: ${result.status}${"error" in result ? ` — ${result.error.message}` : ""}`,
+      ),
+    ),
+    style.muted(
+      `Final snapshot: ${state.report.finalSnapshotId ?? "unverified"}`,
+    ),
+    state.report.rescanError === null
+      ? ""
+      : style.warning(`Rescan: ${state.report.rescanError.message}`),
+    state.refreshError === undefined ? "" : style.warning(state.refreshError),
+  ].filter(Boolean);
+}
+export function setupReportScrollMetrics(
+  state: Extract<TuiState, { screen: "setup-report" }>,
+) {
+  return trashScrollMetricsFor(
+    state.browse.model.viewport,
+    setupReportBodyLines(state, createPaint(plainTuiTheme)).length,
+    1,
+  );
 }
 
 function renderTrashReport(
@@ -1812,7 +1937,7 @@ export function browseTabHitboxes(state: TuiBrowseState): {
   readonly disabled: readonly [number, number];
   readonly trash: readonly [number, number];
 } {
-  const inventoryStart = "Lampwright ".length + 1;
+  const inventoryStart = 1;
   const inventoryEnd = inventoryStart + "Inventory".length - 1;
   const disabledStart = inventoryEnd + 4;
   const disabledEnd =
@@ -1841,11 +1966,21 @@ export function renderBrowseLines(
   const view = panes(model);
   const section = currentSection(model);
   const out: string[] = [];
-  const isTrash = state.view === "trash";
+  const isTrash = state.area !== "setup" && state.view === "trash";
   const isDisabled = state.view === "disabled";
 
   const selected = model.selected.size;
+  const setupHarness =
+    state.area === "setup"
+      ? (model.sections[model.sectionIndex]?.label ?? "Setup")
+      : null;
   const trashCount = state.operations?.size ?? 0;
+  const globalControls = [
+    { text: "esc", paint: style.title },
+    { text: isTrash ? " Inventory · " : " back · ", paint: style.muted },
+    { text: "q", paint: style.title },
+    { text: " quit", paint: style.muted },
+  ] as const;
   const paneControls = [
     { text: "click", paint: style.title },
     { text: " focus · ", paint: style.muted },
@@ -1855,14 +1990,6 @@ export function renderBrowseLines(
     { text: " width · ", paint: style.muted },
     { text: "shift+↑↓", paint: style.title },
     { text: " height", paint: style.muted },
-  ] as const;
-  const globalControls = [
-    { text: "ctrl-t", paint: style.title },
-    { text: " view · ", paint: style.muted },
-    { text: "esc", paint: style.title },
-    { text: isTrash ? " Inventory · " : " back · ", paint: style.muted },
-    { text: "q", paint: style.title },
-    { text: " quit", paint: style.muted },
   ] as const;
   const navigationControls = [
     { text: "↑↓/wheel", paint: style.title },
@@ -1881,8 +2008,21 @@ export function renderBrowseLines(
         { text: " remove · ", paint: style.muted },
         ...updateControls,
       ];
+  const setupControls = [
+    { text: "d", paint: style.title },
+    { text: " disable · ", paint: style.muted },
+    { text: "e", paint: style.title },
+    { text: " enable · ", paint: style.muted },
+    { text: "space", paint: style.title },
+    { text: " select · ", paint: style.muted },
+    { text: "ctrl-a", paint: style.title },
+    { text: " select view", paint: style.muted },
+  ] as const;
   out.push(
-    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
+    `${style.title("Lampwright")} ${state.area === "setup" ? style.muted("Skills & plugins") : style.selected("Skills & plugins")} ${style.muted("|")} ${state.area === "setup" ? style.selected("Session setup") : style.muted("Session setup")}  ${style.title("ctrl-o")} ${style.muted("area")}`,
+  );
+  out.push(
+    `${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)}${state.area === "setup" ? ` · ${setupHarness} · Workspace: ${state.setupInventory?.workspace.path ?? "unknown"}` : ` ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${style.title("ctrl-t")} ${style.muted("view")}`}  ${
       isTrash
         ? style.muted("read-only recovery")
         : selected > 0
@@ -1906,27 +2046,37 @@ export function renderBrowseLines(
         )
       : model.focus === "detail"
         ? fitStyledSegments(
-            [
-              { text: "↑↓/wheel", paint: style.title },
-              { text: " scroll · ", paint: style.muted },
-              { text: "PgUp/PgDn", paint: style.title },
-              { text: " page", paint: style.muted },
-            ],
+            state.area === "setup"
+              ? [
+                  { text: "↑↓/wheel", paint: style.title },
+                  { text: " scroll · ", paint: style.muted },
+                  { text: "PgUp/PgDn", paint: style.title },
+                  { text: " page · ", paint: style.muted },
+                  ...setupControls,
+                ]
+              : [
+                  { text: "↑↓/wheel", paint: style.title },
+                  { text: " scroll · ", paint: style.muted },
+                  { text: "PgUp/PgDn", paint: style.title },
+                  { text: " page", paint: style.muted },
+                ],
             usable,
             style.muted,
           )
         : fitPrioritizedStyledSegments(
-            [
-              ...navigationControls,
-              ...(isDisabled
-                ? []
-                : [
-                    { text: " · enter", paint: style.title },
-                    { text: " remove", paint: style.muted },
-                  ]),
-              { text: " · u", paint: style.title },
-              { text: " update", paint: style.muted },
-            ],
+            state.area === "setup"
+              ? setupControls
+              : [
+                  ...navigationControls,
+                  ...(isDisabled
+                    ? []
+                    : [
+                        { text: " · enter", paint: style.title },
+                        { text: " remove", paint: style.muted },
+                      ]),
+                  { text: " · u", paint: style.title },
+                  { text: " update", paint: style.muted },
+                ],
             navigationControls,
             lifecycleControls,
             updateControls,
@@ -2110,15 +2260,17 @@ function entryCell(
   const focused = index === model.entryIndex && model.focus === "entries";
   const selectable = entry.selectable ?? entry.target !== null;
   const marker =
-    entry.rowKind === "plugin-skill"
+    entry.rowKind === "heading"
       ? "   "
-      : isTrash
-        ? " • "
-        : section !== null && (!section.selectable || !selectable)
-          ? " - "
-          : model.selected.has(entry.key)
-            ? "[x]"
-            : "[ ]";
+      : entry.rowKind === "plugin-skill"
+        ? "   "
+        : isTrash
+          ? " • "
+          : section !== null && (!section.selectable || !selectable)
+            ? " - "
+            : model.selected.has(entry.key)
+              ? "[x]"
+              : "[ ]";
   const displayName =
     entry.rowKind === "plugin-skill"
       ? `${entry.treeBranch === "last" ? "└─" : "├─"} ${entry.name}`
@@ -2145,6 +2297,7 @@ function entryCell(
   const nameWidth = Math.max(6, Math.min(44, width - 22));
   const head = `${marker} ${fit(displayName, nameWidth)} `;
   const tail = fit(note, Math.max(0, width - nameWidth - 5));
+  if (entry.rowKind === "heading") return style.title(fit(head + tail, width));
   if (focused) return style.focus(fit(head + tail, width));
   const styledHead = model.selected.has(entry.key)
     ? style.selected(fit(head, nameWidth + 5))
@@ -2153,6 +2306,14 @@ function entryCell(
 }
 
 function disabledCount(state: TuiBrowseState): number {
+  if (state.area === "setup")
+    return state.view === "disabled"
+      ? (state.model.sections[state.model.sectionIndex]?.entries.filter(
+          (entry) => entry.rowKind !== "heading",
+        ).length ?? 0)
+      : (state.viewSnapshots?.disabled?.model.sections[
+          state.model.sectionIndex
+        ]?.entries.filter((entry) => entry.rowKind !== "heading").length ?? 0);
   if (state.view === "disabled") return disabledRows(state.model.sections);
   const snapshot = state.viewSnapshots?.disabled;
   if (snapshot !== undefined) return disabledRows(snapshot.model.sections);

@@ -234,7 +234,7 @@ describe("Trash projection", () => {
     expect(
       mouseAction(
         { screen: "browse", ...browse },
-        { button: 0, column: 42, row: 1, pressed: true },
+        { button: 0, column: 29, row: 2, pressed: true },
         { dragging: false, doubleClick: false },
       ),
     ).toEqual({ kind: "switch-view", view: "trash" });
@@ -855,12 +855,12 @@ describe("terminal theme", () => {
     });
     const state: TuiState = { screen: "browse", inventory, model };
     const theme = createNightfallTheme("truecolor");
-    const colored = renderBrowseLines(state, theme)[1]!;
-    const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
-    const controls = renderBrowseLines(state, theme)[2]!;
-    const plainControls = renderBrowseLines(state, plainTuiTheme)[2]!;
-    const actions = renderBrowseLines(state, theme)[3]!;
-    const plainActions = renderBrowseLines(state, plainTuiTheme)[3]!;
+    const colored = renderBrowseLines(state, theme)[2]!;
+    const plain = renderBrowseLines(state, plainTuiTheme)[2]!;
+    const controls = renderBrowseLines(state, theme)[3]!;
+    const plainControls = renderBrowseLines(state, plainTuiTheme)[3]!;
+    const actions = renderBrowseLines(state, theme)[4]!;
+    const plainActions = renderBrowseLines(state, plainTuiTheme)[4]!;
 
     expect(colored).toContain(styleTui(theme, "title", "↑↓/wheel"));
     expect(colored).toContain(styleTui(theme, "title", "space/dbl-click"));
@@ -885,7 +885,7 @@ describe("terminal theme", () => {
         }),
       },
       theme,
-    )[1]!;
+    )[2]!;
     expect(narrow).toContain(styleTui(theme, "title", "↑↓/wheel"));
     expect(visibleWidth(narrow)).toBe(61);
   });
@@ -904,8 +904,8 @@ describe("terminal theme", () => {
       plainTuiTheme,
     );
 
-    expect(lines[1]).toContain("u update");
-    if (columns === 60) expect(lines[1]).toContain("enter remove");
+    expect(lines[2]).toContain("u update");
+    if (columns === 60) expect(lines[2]).toContain("enter remove");
     for (const line of lines) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(columns - 1);
     }
@@ -922,7 +922,7 @@ describe("terminal theme", () => {
       plainTuiTheme,
     );
 
-    expect(lines[1]).toContain(
+    expect(lines[2]).toContain(
       "↑↓/wheel move · space/dbl-click select · enter remove · u update",
     );
     for (const line of lines) {
@@ -946,11 +946,11 @@ describe("terminal theme", () => {
       plainTuiTheme,
     );
 
-    expect(lines[1]).toContain("↑↓/wheel scroll");
-    expect(lines[1]).toContain("PgUp/PgDn page");
-    expect(lines[2]).toContain("shift+←→ width");
-    expect(lines[2]).toContain("shift+↑↓ height");
-    expect(lines[2]).toContain("tab/shift+tab pane");
+    expect(lines[2]).toContain("↑↓/wheel scroll");
+    expect(lines[2]).toContain("PgUp/PgDn page");
+    expect(lines[3]).toContain("shift+←→ width");
+    expect(lines[3]).toContain("shift+↑↓ height");
+    expect(lines[3]).toContain("tab/shift+tab pane");
   });
 
   it("keeps explicit pane and resize controls visible across browse focus", () => {
@@ -969,11 +969,11 @@ describe("terminal theme", () => {
       renderBrowseLines(
         { screen: "browse", inventory, model: navigationModel },
         theme,
-      )[2]!,
+      )[3]!,
       renderBrowseLines(
         { screen: "browse", inventory, model: detailModel },
         theme,
-      )[2]!,
+      )[3]!,
     ];
 
     for (const line of lines) {
@@ -984,7 +984,7 @@ describe("terminal theme", () => {
     }
   });
 
-  it("uses four short header rows before the browse frame", () => {
+  it("uses five short header rows before the browse frame", () => {
     const inventory = groupedInventory();
     const model = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
@@ -995,16 +995,18 @@ describe("terminal theme", () => {
       plainTuiTheme,
     );
 
-    expect(plain[0]).toContain("Lampwright Inventory");
-    expect(plain[1]).toContain("space/dbl-click select");
-    expect(plain[2]).toContain("tab/shift+tab pane");
-    expect(plain[2]).toContain("shift+←→ width");
-    expect(plain[2]).toContain("shift+↑↓ height");
-    expect(plain[3]).toContain("d disable");
-    expect(plain[3]).toContain("/ regex search");
-    expect(plain[3]).toContain("q quit");
-    expect(plain[4]?.[model.viewport.columns - 2]).toBe("─");
-    for (const line of plain.slice(0, 4)) {
+    expect(plain[0]).toContain("Lampwright Skills & plugins");
+    expect(plain[0]).toContain("Session setup");
+    expect(plain[1]).toContain("Inventory");
+    expect(plain[2]).toContain("space/dbl-click select");
+    expect(plain[3]).toContain("tab/shift+tab pane");
+    expect(plain[3]).toContain("shift+←→ width");
+    expect(plain[3]).toContain("shift+↑↓ height");
+    expect(plain[4]).toContain("d disable");
+    expect(plain[4]).toContain("/ regex search");
+    expect(plain[4]).toContain("q quit");
+    expect(plain[5]?.[model.viewport.columns - 2]).toBe("─");
+    for (const line of plain.slice(0, 5)) {
       expect(visibleWidth(line)).toBe(model.viewport.columns - 1);
       expect(line).not.toContain("…");
     }
@@ -1464,14 +1466,14 @@ describe("terminal pane navigation", () => {
       delta: 100,
     });
 
-    expect(enlarged.detailRows).toBe(13);
-    expect(layout(enlarged).detailRows).toBe(13);
+    expect(enlarged.detailRows).toBe(12);
+    expect(layout(enlarged).detailRows).toBe(12);
 
     const taller = reduceBrowse(enlarged, {
       kind: "viewport",
       viewport: { rows: 50, columns: 100 },
     });
-    expect(layout(taller).detailRows).toBe(13);
+    expect(layout(taller).detailRows).toBe(12);
   });
 
   it("never draws beyond a terminal that is temporarily too small", () => {
@@ -3051,7 +3053,7 @@ describe("terminal pointer input", () => {
   it("ignores clicks on chrome, the section header, and empty rows", () => {
     const { headerRows, leftWidth } = layout(browse.model);
     const firstPaneRow = headerRows + 2;
-    expect(mouseAction(browse, press(4, 2), idle)).toEqual({ kind: "noop" });
+    expect(mouseAction(browse, press(4, 1), idle)).toEqual({ kind: "noop" });
     expect(
       mouseAction(browse, press(leftWidth + 8, firstPaneRow), idle),
     ).toEqual({

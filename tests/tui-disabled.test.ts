@@ -569,7 +569,7 @@ describe("Disabled TUI projection", () => {
       plainTuiTheme,
     );
 
-    expect(lines[1]).toContain("u update");
+    expect(lines[2]).toContain("u update");
     for (const line of lines) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(columns - 1);
     }
@@ -925,7 +925,7 @@ describe("Disabled TUI projection", () => {
     expect(
       mouseAction(
         state,
-        { button: 0, column: 28, row: 1, pressed: true },
+        { button: 0, column: 15, row: 2, pressed: true },
         { dragging: false, doubleClick: false },
       ),
     ).toEqual({ kind: "switch-view", view: "disabled" });
@@ -1367,7 +1367,7 @@ describe("Disabled TUI projection", () => {
         await controller.dispatch(
           mouseAction(
             controller.state,
-            { button: 0, column: 28, row: 1, pressed: true },
+            { button: 0, column: 15, row: 2, pressed: true },
             { dragging: false, doubleClick: false },
           ),
         );

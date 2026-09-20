@@ -14,6 +14,7 @@ export {
 } from "./browse.js";
 export { createTuiSections, selectionTargets } from "./sections.js";
 export { createTrashSections } from "./trash.js";
+export { createSetupSections, selectedSetupTargetIds } from "./setup.js";
 export {
   createDisabledSections,
   disabledSelectionTargets,

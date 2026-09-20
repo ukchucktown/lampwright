@@ -21,8 +21,8 @@ import type {
  * left unused. A frame that fills the terminal exactly scrolls it by one on
  * the final newline, which reads as the panes drifting.
  */
-const HEADER_ROWS = 4;
-const CHROME_ROWS = 8;
+const HEADER_ROWS = 5;
+const CHROME_ROWS = 9;
 const MIN_PANE_ROWS = 3;
 const MIN_DETAIL_ROWS = 3;
 const SCROLL_MARGIN = 1;

@@ -133,6 +133,8 @@ export function mouseAction(
     state.screen === "report" ||
     state.screen === "availability-plan" ||
     state.screen === "availability-report" ||
+    state.screen === "setup-plan" ||
+    state.screen === "setup-report" ||
     state.screen === "update-plan" ||
     state.screen === "update-report"
   )
@@ -171,6 +173,12 @@ export function mouseAction(
   }
   if (state.screen !== "browse") return { kind: "noop" };
   if (report.pressed && report.row === 1 && (report.button & 3) === 0) {
+    if (report.column >= 12 && report.column <= 27)
+      return { kind: "switch-area", area: "skills" };
+    if (report.column >= 31 && report.column <= 43)
+      return { kind: "switch-area", area: "setup" };
+  }
+  if (report.pressed && report.row === 2 && (report.button & 3) === 0) {
     const tabs = browseTabHitboxes(state);
     if (inColumns(report.column, tabs.inventory))
       return { kind: "switch-view", view: "inventory" };
@@ -308,6 +316,8 @@ export function createNodeTuiTerminal(
 export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   const value = line.trim();
   if (state.screen === "browse") {
+    if (value === "setup") return { kind: "switch-area", area: "setup" };
+    if (value === "skills") return { kind: "switch-area", area: "skills" };
     if (value === "") return { kind: "select" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
     if (value === "down" || value === "j") return { kind: "move", delta: 1 };
@@ -334,13 +344,16 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "backspace") return { kind: "delete-query" };
     if (value === "quit" || value === "q") return { kind: "quit" };
     if (state.view === "trash") return { kind: "noop" };
-    if (value === "update" || value === "u") return { kind: "update-review" };
+    if (value === "update" || value === "u")
+      return state.area === "setup"
+        ? { kind: "noop" }
+        : { kind: "update-review" };
     if (value === "disable" || value === "d")
-      return state.view === "inventory"
+      return state.area === "setup" || state.view === "inventory"
         ? { kind: "disable-review" }
         : { kind: "noop" };
     if (value === "enable" || value === "e")
-      return state.view === "disabled"
+      return state.area === "setup" || state.view === "disabled"
         ? { kind: "enable-review" }
         : { kind: "noop" };
     if (value.startsWith("search "))
@@ -362,7 +375,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   if (
     state.screen === "plan" ||
     state.screen === "availability-plan" ||
-    state.screen === "update-plan"
+    state.screen === "update-plan" ||
+    state.screen === "setup-plan"
   ) {
     if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -379,7 +393,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   if (
     state.screen === "report" ||
     state.screen === "availability-report" ||
-    state.screen === "update-report"
+    state.screen === "update-report" ||
+    state.screen === "setup-report"
   ) {
     if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -394,7 +409,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "fallback" };
     if (
       (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
+        state.screen === "update-report" ||
+        state.screen === "setup-report") &&
       (value === "back" || value === "cancel")
     )
       return { kind: "cancel" };
@@ -629,6 +645,11 @@ export function parseRawTuiAction(
               ? "trash"
               : "inventory",
       };
+    if (key.ctrl && key.name === "o")
+      return {
+        kind: "switch-area",
+        area: state.area === "setup" ? "skills" : "setup",
+      };
     if (text === "p" && state.view === "trash") return { kind: "purge-review" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
@@ -657,18 +678,24 @@ export function parseRawTuiAction(
       return state.view === "trash"
         ? { kind: "noop" }
         : { kind: "toggle-select" };
-    if (key.ctrl && key.name === "a") return { kind: "clear-selection" };
+    if (key.ctrl && key.name === "a")
+      return state.area === "setup"
+        ? { kind: "select-all" }
+        : { kind: "clear-selection" };
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
     if (state.view === "trash") return { kind: "noop" };
-    if (text === "u") return { kind: "update-review" };
+    if (text === "u")
+      return state.area === "setup"
+        ? { kind: "noop" }
+        : { kind: "update-review" };
     if (text === "d")
-      return state.view === "inventory"
+      return state.area === "setup" || state.view === "inventory"
         ? { kind: "disable-review" }
         : { kind: "noop" };
     if (text === "e")
-      return state.view === "disabled"
+      return state.area === "setup" || state.view === "disabled"
         ? { kind: "enable-review" }
         : { kind: "noop" };
     if (!key.ctrl && !key.meta && text.length > 0)
@@ -692,24 +719,28 @@ export function parseRawTuiAction(
   if (
     state.screen === "plan" ||
     state.screen === "availability-plan" ||
-    state.screen === "update-plan"
+    state.screen === "update-plan" ||
+    state.screen === "setup-plan"
   ) {
     if (key.name === "escape" || text === "n") return { kind: "cancel" };
     if (text === "d") return { kind: "toggle-details" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
     if (key.name === "pagedown") return { kind: "page", delta: 1 };
     if (text === "y") return { kind: "confirm" };
+    if (text === "o") return { kind: "owner-review" };
     if (text === "f") return { kind: "force" };
     return { kind: "noop" };
   }
   if (
     state.screen === "report" ||
     state.screen === "availability-report" ||
-    state.screen === "update-report"
+    state.screen === "update-report" ||
+    state.screen === "setup-report"
   ) {
     if (
       (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
+        state.screen === "update-report" ||
+        state.screen === "setup-report") &&
       key.name === "escape"
     )
       return { kind: "cancel" };

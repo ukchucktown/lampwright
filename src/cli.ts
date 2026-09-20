@@ -1457,6 +1457,35 @@ async function main(): Promise<void> {
         planUpdate,
         executeUpdate: (updatePlan, approvals) =>
           productionExecuteUpdate(updatePlan, [], [], [], approvals, workspace),
+        scanSessionSetup: () =>
+          createSessionSetupScanner({
+            now: () => new Date(),
+            environment: defaultInventoryScanEnvironment(),
+            commandRunner: systemCommandRunner,
+          }).scanSessionSetup({ workspace: { path: workspace } }),
+        planSessionSetup,
+        executeSessionSetup: (setupPlan, approvals) =>
+          executeSessionSetup(setupPlan, approvals, {
+            scan: () =>
+              createSessionSetupScanner({
+                now: () => new Date(),
+                environment: defaultInventoryScanEnvironment(),
+                commandRunner: systemCommandRunner,
+              }).scanSessionSetup({ workspace: { path: workspace } }),
+            replan: planSessionSetup,
+            configurationWriter: createCodexSessionSetupConfigurationWriter(),
+            processRunner: systemExecutionProcessRunner,
+            inspectGitProtection: (path, artifactType) =>
+              inspectGitProtection(
+                path,
+                artifactType?.kind === "directory",
+                systemCommandRunner,
+              ),
+            auditWriter: createFileSessionSetupExecutionAuditWriter(
+              defaultLocalStateRoot(),
+            ),
+            now: () => new Date(),
+          }),
       },
       createNodeTuiTerminal(),
     );
