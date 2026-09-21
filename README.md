@@ -35,6 +35,7 @@ current work.
 | Live Inventory | Finds standalone, Manager-owned, and Plugin-owned Skills across Codex, Claude Code, Gemini CLI, and supported ecosystems. |
 | Reversible disable and enable | Uses native harness controls when possible, or safely suspends complete supported artifact sets in Disabled Storage. |
 | Plugin availability | Disables or enables a supported Plugin as one complete boundary while its files stay installed. |
+| Pre-session setup | Enables or disables native Skills, Plugins, MCP servers, and Apps for a selected harness and workspace before a new session. |
 | Owner-managed Update | Asks the current Owner to update an existing target, then rescans and verifies the local result. |
 | Safe removal | Uses the Owner's removal operation first. A separately confirmed filesystem fallback moves content to recoverable Quarantine. |
 | Built-in protection | Blocks changes to System Skills, non-ignored Git worktree content, read-only paths, and incomplete ownership boundaries. |
@@ -79,6 +80,8 @@ lampwright scan             # print the live Inventory
 lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # natively disable or safely suspend targets
 lampwright enable <target>  # enable native or Disabled Storage targets
+lampwright scan --session-setup --harness codex --json
+lampwright disable setup:<target-id> --harness codex --dry-run
 lampwright remove <target>  # review and remove selected target(s)
 lampwright restore <entry>  # restore a Quarantine entry
 lampwright purge <entry>    # permanently delete Quarantine entries
@@ -88,6 +91,8 @@ See [Reversible Skill availability](./docs/availability.md) for Native versus
 Suspended state, safe recovery, reports, and platform behavior.
 See [Targeted Owner Update](./docs/update.md) for Update authority,
 verification, and the no-rollback model.
+See the [Session setup operator guide](./docs/session-setup-guide.md) for
+pre-session controls, scope, activation, and unsupported client surfaces.
 
 Use `lampwright --help` for selectors, approvals, JSON output, dry-run, and
 stable exit statuses. See the [terminal UI](./docs/tui.md) and
@@ -101,6 +106,8 @@ stable exit statuses. See the [terminal UI](./docs/tui.md) and
 - [Core model](./docs/model.md)
 - [Reversible Skill availability](./docs/availability.md)
 - [Targeted Owner Update](./docs/update.md)
+- [Session setup operator guide](./docs/session-setup-guide.md)
+- [Session setup acceptance](./docs/session-setup-acceptance.md)
 - [Inventory scanning](./docs/inventory.md)
 - [Adapter runtime](./docs/adapters.md)
 - [Removal planning](./docs/planning.md)

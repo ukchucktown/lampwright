@@ -576,6 +576,37 @@ describe("Session setup terminal area", () => {
     }
   });
 
+  it("refreshes a completed setup report with Enter in raw and line terminals", async () => {
+    for (const raw of [true, false]) {
+      const snapshot = buildSessionSetupSnapshot();
+      const scanSessionSetup = vi.fn(async () => snapshot);
+      const controller = new TuiController({
+        scan: async () => buildInventory(),
+        plan,
+        execute: vi.fn(),
+        scanSessionSetup,
+        planSessionSetup: () => buildSessionSetupPlan(),
+        executeSessionSetup: async () => buildSessionSetupReport(),
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "switch-area", area: "setup" });
+      await controller.dispatch({ kind: "focus", pane: "entries" });
+      await controller.dispatch({ kind: "move", delta: 1 });
+      await controller.dispatch({ kind: "disable-review" });
+      await controller.dispatch({ kind: "confirm" });
+      await controller.waitForSetupExecution();
+      expect(controller.state.screen).toBe("setup-report");
+
+      const action = raw
+        ? parseRawTuiAction(controller.state, "\r", { name: "return" })
+        : parseLineTuiAction(controller.state, "");
+      expect(action).toEqual({ kind: "select" });
+      await controller.dispatch(action);
+      expect(controller.state.screen).toBe("browse");
+      expect(scanSessionSetup).toHaveBeenCalledTimes(2);
+    }
+  });
+
   it("plans unsupported setup controls as blocks without executing them", async () => {
     const target = buildSessionSetupTarget({
       control: {

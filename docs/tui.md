@@ -8,17 +8,20 @@ passes the exact action approval requirements to Execution.
 
 ## Layout
 
-The accepted [Session setup extension](./session-setup.md#tui-integration)
-adds a `Skills & plugins | Session setup` area row. The layout below remains
-the Skills & plugins contract. Setup delivery adds a harness list, typed
-capability rows, and Inventory/Disabled views through the same pane components.
-It preserves the current theme and lifecycle selection behavior.
+The [Session setup area](./session-setup.md#tui-integration) adds a
+`Skills & plugins | Session setup` area row. The layout below remains the
+Skills & plugins contract. Session setup uses the same pane components for a
+harness list, typed capability rows, and Inventory and Disabled views. It
+preserves the theme and the lifecycle selection behavior.
 
 `ctrl-o` changes areas and `ctrl-t` changes views within an area. Each setup
 harness and view owns its selection and position. Setup `d` and `e` open native
 availability reviews. Enter never invokes removal in that area. The linked
 design defines the exact key behavior, source warnings, scope review, owner
 routes, wireframe, and report refresh requirements.
+
+See the [Session setup operator guide](./session-setup-guide.md) for the
+complete procedure, the supported terminal profiles, and the activation rules.
 
 The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl-t` cycles the
 three views and each header label is clickable. Each view retains its own
@@ -372,12 +375,15 @@ with its result. The refresh preserves the other view snapshots.
 ## Limited terminals
 
 When raw terminal controls are unavailable, the same UI uses line-oriented
-commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
+commands. Use `setup` and `skills` to switch areas. In the lifecycle inventory,
+use `search <regex>`, `up`, `down`, `in`, `out`,
 `detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
 `disable`, `update`, `disabled`, `trash`, and `quit`. In Disabled, `enable` opens
 review. `update` opens Update review in Inventory or Disabled. The `inventory`
 and `trash` commands switch peer views. Navigation, selection, and
-`search <regex>` match Inventory. Search accepts a regex, `up`, `down`, `take`,
+`search <regex>` match Inventory. In Session setup, use `inventory` and
+`disabled` to switch views. Use `disable` or `enable` to open the matching
+native policy review. Search accepts a regex, `up`, `down`, `take`,
 `all`, `clear`, `done`, and `cancel`. Removal and Availability plan screens
 accept `yes`, `no`, `details`, `up`, `down`, `pageup`, `pagedown`, `force`, and
 `quit` (`force` has no effect where the plan does not permit it). Update plan
@@ -387,6 +393,8 @@ reports also accept `back`. This command refreshes Inventory and Disabled, and
 then returns to Inventory. Update reports accept `back` and use the same refresh.
 Removal reports add `previous`, `next`, and `fallback`. End-of-input cancels
 safely.
+On a Session setup result, an empty command or `back` refreshes the setup
+sources.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 

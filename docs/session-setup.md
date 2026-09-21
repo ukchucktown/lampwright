@@ -11,6 +11,10 @@ Codex, the Claude Code terminal, and Gemini CLI use the same module interfaces a
 
 Session setup changes durable native configuration. It does not launch an agent, attach to an active session, disconnect an account, or promise an exact token reduction. Presets, token measurement, per-tool filters, arbitrary harness configuration, and permanent MCP deletion are outside this increment.
 
+The [operator guide](./session-setup-guide.md) gives the TUI and CLI procedure.
+The [acceptance record](./session-setup-acceptance.md) maps the current outcome
+to automated and real-terminal evidence.
+
 ## Targets and state
 
 Each target belongs to one harness and a selected workspace context:

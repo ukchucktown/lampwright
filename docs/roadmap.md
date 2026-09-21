@@ -64,7 +64,7 @@ Issue #15 prepares a release but explicitly does not publish to npm or make the 
 
 ## Pre-session availability
 
-[#148 Session setup across coding harnesses](https://github.com/ukchucktown/lampwright/issues/148) replaces the obsolete MCP integration effort in #135–#147. The accepted [Session setup contract](./session-setup.md), [native source profiles](./session-setup-controls.md), and [ADR 0015](./adr/0015-scope-session-setup-to-native-availability.md) define the next increment. Application support remains pending.
+[#148 Session setup across coding harnesses](https://github.com/ukchucktown/lampwright/issues/148) replaces the obsolete MCP integration effort in #135–#147. The [Session setup contract](./session-setup.md), [native source profiles](./session-setup-controls.md), and [ADR 0015](./adr/0015-scope-session-setup-to-native-availability.md) define the implemented increment. The [operator guide](./session-setup-guide.md) and [acceptance record](./session-setup-acceptance.md) describe its use and evidence.
 
 1. [#149 Session setup contracts and native source profiles](https://github.com/ukchucktown/lampwright/issues/149) defines the new types, schema, source fixtures, and reuse boundaries after this design is in the implementation base.
 2. [#150 Scoped native availability planning and execution](https://github.com/ukchucktown/lampwright/issues/150) depends on #149.

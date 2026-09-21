@@ -396,6 +396,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     state.screen === "update-report" ||
     state.screen === "setup-report"
   ) {
+    if (state.screen === "setup-report" && value === "")
+      return { kind: "select" };
     if (value === "details" || value === "d") return { kind: "toggle-details" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
     if (value === "down" || value === "j") return { kind: "move", delta: 1 };
@@ -737,6 +739,11 @@ export function parseRawTuiAction(
     state.screen === "update-report" ||
     state.screen === "setup-report"
   ) {
+    if (
+      state.screen === "setup-report" &&
+      (key.name === "return" || key.name === "enter")
+    )
+      return { kind: "select" };
     if (
       (state.screen === "availability-report" ||
         state.screen === "update-report" ||

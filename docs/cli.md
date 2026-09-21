@@ -1,19 +1,37 @@
 # Non-interactive CLI
 
-`lampwright scan`, `disable`, `enable`, `update`, `remove`, `restore`, and
-`purge` are thin callers of Inventory, Disabled Storage, Planning, Execution, and
-Quarantine. They do not inspect configuration, edit settings, or move Skill
-paths themselves.
+The lifecycle commands are thin callers of Inventory, Disabled Storage,
+Planning, Execution, and Quarantine. The Session setup commands use the
+separate Session setup inventory, planner, and executor. The CLI does not scan
+or change agent configuration itself.
+
+## Session setup
+
+Session setup changes native availability before a new harness session. Scan
+with `--json` to get the exact target IDs:
+
+```console
+lampwright scan --session-setup --harness codex --workspace /path/to/workspace --json
+lampwright disable setup:<target-id> --harness codex --workspace /path/to/workspace --dry-run
+lampwright disable setup:<target-id> --harness codex --workspace /path/to/workspace --yes
+lampwright enable setup:<target-id> --harness codex --workspace /path/to/workspace --yes
+```
+
+Use `codex`, `claude-code`, or `gemini-cli` as the harness ID. A mutation
+requires one explicit harness. The workspace defaults to the invocation
+directory. The review discloses a workspace or user-wide effect and the
+activation requirement.
+
+See the [Session setup operator guide](./session-setup-guide.md) for the
+supported profiles and unavailable client surfaces.
 
 ## Selectors and confirmation
 
-The selectors below retain their legacy lifecycle behavior. The accepted
-[Session setup extension](./session-setup.md#cli-parity) adds `setup:<id>`
-selectors for native Enable and Disable, an explicit `--harness`, and a
-workspace context. `scan --session-setup` exposes the corresponding targets.
-Setup uses a separate versioned JSON schema, and mixed setup/lifecycle
-selectors are invalid. Its delivery issues add this surface without changing
-the defaults below.
+The selectors below retain their legacy lifecycle behavior. Session setup uses
+`setup:<id>` selectors for native Enable and Disable, an explicit `--harness`,
+and a workspace context. `scan --session-setup` exposes the corresponding
+targets. Setup uses a separate versioned JSON schema. Mixed setup and lifecycle
+selectors are invalid.
 
 `remove` accepts `installation:<id>`, `logical-skill:<id>`, `source:<source-id>`,
 `group:<group-id>`, and `plugin:<boundary-id>`.
@@ -111,6 +129,12 @@ use these envelopes:
 - `confirmation-required`
 - `quarantine-plan`, `restore-result`, and `purge-result`
 - `trust-required` and `error`.
+
+Session setup emits `session-setup-snapshot`, `session-setup-plan`,
+`session-setup-report`, `session-setup-confirmation-required`, or
+`session-setup-error`. The published schema is
+[`schemas/session-setup-v1.schema.json`](../schemas/session-setup-v1.schema.json)
+and is also exported as `lampwright/session-setup-v1.schema.json`.
 
 An Availability report includes a sorted `disabledEntryIds` array that contains
 only entries created by successful Suspended Disable actions. Native Disable and
