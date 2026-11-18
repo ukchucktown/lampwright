@@ -210,7 +210,10 @@ Sections come from declared evidence, never from a name or a path:
   detail into one oversized catalog. The entry list stays name-first; harness,
   ownership, protection, and view-only context appear in the focused detail
   pane instead of being repeated beside every row.
-- `System skills`, present but not selectable. Its rows draw no checkbox,
+- `System skills`, present but not selectable. The section lists the Skills
+  that an agent runtime supplies and the Skills that the account service of an
+  agent supplies. For a Claude synced Skill, the owner shows `account sync` and
+  the source that the synced manifest declares. Its rows draw no checkbox,
   because offering one would invite a click that can only be refused.
 
 A section header carries what its entries share — how many, the Owner, the

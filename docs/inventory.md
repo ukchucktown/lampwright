@@ -86,8 +86,8 @@ covers both while removing one Installation removes only that entry.
 Claude may expose capabilities compiled into its runtime that do not correspond
 to a filesystem `SKILL.md`, installed Plugin, or manager record. Inventory does
 not invent findings for those capabilities: there is no bounded artifact to
-inspect or safe removal boundary to plan. This differs from Codex System Skills,
-whose marked runtime subtree contains filesystem Skills that can be shown as
+inspect or safe removal boundary to plan. This differs from Codex System Skills
+and Claude synced Skills, which are filesystem Skills that can be shown as
 visible, immutable evidence.
 
 Codex marks the Skills shipped with its own runtime. When
@@ -97,6 +97,26 @@ findings, while the rest of `<CODEX_HOME>/skills` stays an ordinary agent root.
 The marker must be a regular file, never a link, so a planted link cannot make
 the scanner treat a user's own Skills as inseparable runtime content. Without
 the marker the subtree stays ordinary: a missing marker never hides Skills.
+
+Claude synchronizes a set of Skills into
+`<CLAUDE_CONFIG_DIR>/skills/synced/<bucket>/`. The owner of this repository
+decided that these Skills are System Skills, because the user does not install
+them in that directory. Lampwright did not confirm which Claude component
+writes the directory. The boundary comes from the evidence in the directory:
+
+- The file `synced/.bucket-<bucket>` is a regular file.
+- The file `synced/<bucket>/manifest.json` is a stable regular file, is valid
+  JSON, and contains a `skills` array.
+- An entry of that array has a `name` and a `source`, and the `name` is one
+  path segment that names a real directory in the bucket.
+
+Each directory that satisfies these conditions is a `system` root. Its finding
+carries the declared source in the metadata key `claude-code-synced-skill`.
+The rule applies to each `source` value. All other content of `synced` stays an
+ordinary part of the agent root. Thus a bucket with no marker, with no valid
+manifest, or with a linked manifest gives ordinary Installations, and a
+directory that the manifest does not name stays an ordinary Installation. A
+missing manifest never hides Skills.
 
 `Inventory.id` is a deterministic fingerprint of the complete normalized
 snapshot, excluding `scannedAt`. Repeating an unchanged scan at another time

@@ -133,6 +133,8 @@ Every finding is classified as one of:
 
 Source, cache, vendor, and unknown findings are hidden from ordinary cleanup results unless the user enables the relevant inspection filter. System Skills remain visible in their own non-selectable section so their protected status is clear. Their discovery never authorizes deletion.
 
+A System Skill is a Skill that an agent runtime supplies as an inseparable part of itself, or a Skill that the account service of an agent supplies and keeps current. The Skills in a Claude synced bucket that the bucket manifest names are System Skills.
+
 ### 6.3 Inventory fields
 
 The normalized inventory schema includes:

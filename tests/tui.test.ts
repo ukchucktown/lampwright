@@ -1185,6 +1185,31 @@ describe("terminal section projection", () => {
     expect(rows.entries[0]?.targets).toBeUndefined();
   });
 
+  it("names the declared source of a System Skill that an account service supplies", () => {
+    const sections = createTuiSections(
+      buildInventory({
+        installations: [],
+        otherFindings: [
+          buildSystemSkillFinding(),
+          {
+            ...buildSystemSkillFinding(),
+            id: "finding-synced",
+            metadata: { "claude-code-synced-skill": { source: "anthropic" } },
+          },
+        ],
+      }),
+    );
+    const system = sections.find((section) => section.key === "system")!;
+
+    expect(system.selectable).toBe(false);
+    expect(
+      system.entries.map((entry) => [entry.owner, entry.target]).sort(),
+    ).toEqual([
+      ["account sync · anthropic", null],
+      ["agent runtime", null],
+    ]);
+  });
+
   it("collapses a fully selected Group into one Source Group target", () => {
     const sections = createTuiSections(groupedInventory());
     const bundle = sections[0]!;

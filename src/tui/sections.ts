@@ -180,7 +180,8 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     sections.push({
       key: "system",
       label: "System skills",
-      detail: "inseparable runtime content; not removable",
+      detail:
+        "supplied by an agent runtime or its account service; not removable",
       selectable: false,
       target: null,
       entries: sorted(
@@ -190,7 +191,7 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
           description: finding.skill.description,
           exposedTo: finding.agentId === null ? [] : [finding.agentId],
           paths: [finding.location.path],
-          owner: "agent runtime",
+          owner: systemSkillOwner(finding.metadata),
           note: "protected",
           target: null,
         })),
@@ -273,6 +274,18 @@ function combineIdenticalCopies(
     });
   }
   return single;
+}
+
+/** Names the declared source of a Skill that an account service supplies. */
+function systemSkillOwner(metadata: Readonly<Record<string, unknown>>): string {
+  const synced = metadata["claude-code-synced-skill"];
+  const source =
+    typeof synced === "object" && synced !== null && "source" in synced
+      ? synced.source
+      : null;
+  return typeof source === "string"
+    ? `account sync · ${source}`
+    : "agent runtime";
 }
 
 function evidenceLabel(group: InstallationGroup): string {

@@ -3,6 +3,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  rm,
   symlink,
   utimes,
   writeFile,
@@ -444,6 +445,31 @@ function createGitCommandRunner(
       };
     },
   };
+}
+
+function syncedManifest(name: string): string {
+  return JSON.stringify({
+    lastUpdated: 1,
+    skills: [{ skillId: name, name, source: "anthropic" }],
+  });
+}
+
+/** A Claude synced bucket with its marker, and a manifest unless `skills` is null. */
+async function createSyncedBucket(
+  claudeSkills: string,
+  skills: readonly Record<string, string>[] | null,
+): Promise<string> {
+  const synced = join(claudeSkills, "synced");
+  const bucket = join(synced, "bucket-1");
+  await mkdir(bucket, { recursive: true });
+  await writeFile(join(synced, ".bucket-bucket-1"), "", "utf8");
+  if (skills !== null)
+    await writeFile(
+      join(bucket, "manifest.json"),
+      JSON.stringify({ lastUpdated: 1, skills }),
+      "utf8",
+    );
+  return bucket;
 }
 
 async function createSkill(
@@ -3517,6 +3543,129 @@ describe("Inventory scan", () => {
       skill: { name: "imagegen" },
       classification: "system-skill",
     });
+  });
+
+  it("treats the Skills that a Claude synced manifest names as System Skills", async () => {
+    const environment = await createTestEnvironment();
+    const claudeSkills = join(environment.home, ".claude", "skills");
+    const bucket = await createSyncedBucket(claudeSkills, [
+      { skillId: "docx", name: "docx", source: "anthropic" },
+      { skillId: "skill_01", name: "find-skills", source: "plugin" },
+      { skillId: "gone", name: "not-on-disk", source: "anthropic" },
+    ]);
+    await createSkill(join(bucket, "docx"), { name: "docx" });
+    await createSkill(join(bucket, "find-skills"), { name: "find-skills" });
+    await createSkill(join(bucket, "unlisted"), { name: "unlisted" });
+    await createSkill(join(claudeSkills, "user-installed"), {
+      name: "user-installed",
+    });
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+    }).scan({});
+
+    expect(inventory.installations.map((item) => item.skill.name)).toEqual([
+      "unlisted",
+      "user-installed",
+    ]);
+    expect(
+      inventory.otherFindings.map((item) => [
+        item.skill.name,
+        item.classification,
+        item.metadata["claude-code-synced-skill"],
+      ]),
+    ).toEqual([
+      ["docx", "system-skill", { source: "anthropic" }],
+      ["find-skills", "system-skill", { source: "plugin" }],
+    ]);
+    expect(inventory.otherFindings[0]).toMatchObject({
+      ownership: { kind: "agent-runtime", agentId: "claude-code" },
+      protection: { system: { kind: "system-skill", agentId: "claude-code" } },
+    });
+  });
+
+  it.each([
+    ["no manifest", async () => undefined],
+    [
+      "a manifest that is not valid JSON",
+      async (bucket: string) =>
+        writeFile(join(bucket, "manifest.json"), "{not json", "utf8"),
+    ],
+    [
+      "a manifest with no skills array",
+      async (bucket: string) =>
+        writeFile(join(bucket, "manifest.json"), '{"skills":{}}', "utf8"),
+    ],
+    [
+      "a linked manifest",
+      async (bucket: string, outside: string) => {
+        await writeFile(outside, syncedManifest("docx"), "utf8");
+        await symlink(outside, join(bucket, "manifest.json"));
+      },
+    ],
+    [
+      "no bucket marker",
+      async (bucket: string) => {
+        await writeFile(
+          join(bucket, "manifest.json"),
+          syncedManifest("docx"),
+          "utf8",
+        );
+        await rm(join(bucket, "..", ".bucket-bucket-1"));
+      },
+    ],
+    [
+      "a manifest name that leaves the bucket",
+      async (bucket: string) =>
+        writeFile(
+          join(bucket, "manifest.json"),
+          syncedManifest("../bucket-1/docx"),
+          "utf8",
+        ),
+    ],
+  ])(
+    "keeps Claude synced Skills ordinary and visible with %s",
+    async (_label, arrange) => {
+      const environment = await createTestEnvironment();
+      const claudeSkills = join(environment.home, ".claude", "skills");
+      const bucket = await createSyncedBucket(claudeSkills, null);
+      await createSkill(join(bucket, "docx"), { name: "docx" });
+      await arrange(bucket, join(environment.home, "outside-manifest.json"));
+
+      const inventory = await createScanner({
+        homeDirectory: environment.home,
+        workspaceDirectory: join(environment.workspace, "unused-workspace"),
+      }).scan({});
+
+      expect(inventory.installations.map((item) => item.skill.name)).toEqual([
+        "docx",
+      ]);
+      expect(inventory.otherFindings).toEqual([]);
+    },
+  );
+
+  it("honors a configured Claude home when locating synced Skills", async () => {
+    const environment = await createTestEnvironment();
+    const claudeHome = join(environment.root, "configured-claude");
+    const bucket = await createSyncedBucket(join(claudeHome, "skills"), [
+      { skillId: "docx", name: "docx", source: "anthropic" },
+    ]);
+    await createSkill(join(bucket, "docx"), { name: "docx" });
+
+    const inventory = await createScanner({
+      homeDirectory: environment.home,
+      workspaceDirectory: join(environment.workspace, "unused-workspace"),
+      agentHomeDirectories: { "claude-code": claudeHome },
+    }).scan({});
+
+    expect(inventory.installations).toEqual([]);
+    expect(inventory.otherFindings).toEqual([
+      expect.objectContaining({
+        skill: expect.objectContaining({ name: "docx" }),
+        classification: "system-skill",
+      }),
+    ]);
   });
 
   it("refuses a declared root that would widen removal inside a protective root", async () => {
