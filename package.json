@@ -1,6 +1,6 @@
 {
   "name": "lampwright",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Discover, update, reversibly disable, enable, and safely remove AI agent skills.",
   "keywords": [
     "ai-agent",
