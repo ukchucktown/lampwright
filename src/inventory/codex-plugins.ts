@@ -18,6 +18,7 @@ import {
   sep,
 } from "node:path";
 
+import { parse as parseToml } from "@iarna/toml";
 import { type ParseError, parseTree } from "jsonc-parser";
 
 import {
@@ -73,7 +74,7 @@ interface CodexPluginEntry {
   readonly version: string;
   readonly enabled: boolean;
   readonly source: PluginSource;
-  /** Where the marketplace supplying this Plugin lives, when Codex reports it. */
+  /** Where the marketplace supplying this Plugin lives, when Codex records it. */
   readonly marketplaceSource: string | null;
 }
 
@@ -113,7 +114,7 @@ interface LocatedSkill {
 
 type ListState =
   | { readonly kind: "valid"; readonly entries: readonly CodexPluginEntry[] }
-  | { readonly kind: "manager-unavailable" | "invalid-output" };
+  | { readonly kind: "invalid-configuration" };
 
 export interface CodexPluginsScanResult {
   readonly installations: readonly Installation[];
@@ -128,7 +129,7 @@ export async function scanCodexPlugins(
   const home = codexHome(environment);
   const cacheRoot = join(home, "plugins", "cache");
   const runtimeMarketplaceRoots = codexRuntimeMarketplaceRoots(environment);
-  const listState = await listInstalledPlugins(home, commandRunner);
+  const listState = await readInstalledPlugins(home);
   const materialized =
     listState.kind === "valid"
       ? await Promise.all(
@@ -179,161 +180,260 @@ export async function scanCodexPlugins(
   };
 }
 
-async function listInstalledPlugins(
-  home: string,
-  commandRunner: InventoryCommandRunner,
-): Promise<ListState> {
-  let result;
+/**
+ * Reads installed Codex Plugins from local evidence. A scan never runs Codex:
+ * `codex plugin list` contacts a remote catalog on every call (ADR 0016).
+ *
+ * A Plugin is installed when `config.toml` has a `[plugins."<name>@<marketplace>"]`
+ * table and the plugin cache holds at least one version directory for it.
+ */
+async function readInstalledPlugins(home: string): Promise<ListState> {
+  const path = join(home, "config.toml");
+  let stats;
   try {
-    result = await commandRunner.run({
-      executable: CODEX_EXECUTABLE,
-      arguments: ["plugin", "list", "--json"],
-      environment: {
-        CODEX_HOME: home,
-        TMPDIR: home,
-        TMP: home,
-        TEMP: home,
-        DO_NOT_TRACK: "1",
-        DISABLE_TELEMETRY: "1",
-      },
-    });
-  } catch {
-    return { kind: "manager-unavailable" };
+    stats = await lstat(path);
+  } catch (error: unknown) {
+    return isMissing(error)
+      ? { kind: "valid", entries: [] }
+      : { kind: "invalid-configuration" };
   }
-  if (result.exitCode !== 0) return { kind: "manager-unavailable" };
-  const entries = parseListOutput(result.stdout);
-  return entries === null
-    ? { kind: "invalid-output" }
-    : { kind: "valid", entries };
-}
-
-function parseListOutput(stdout: string): readonly CodexPluginEntry[] | null {
-  let value: unknown;
+  // Discovery only reads, so it follows a linked configuration to its target.
+  // `configEvidence` still reports the link, which keeps mutation blocked.
+  const target = stats.isSymbolicLink()
+    ? await realpath(path).catch(() => null)
+    : path;
+  const targetStats =
+    target === null
+      ? null
+      : target === path
+        ? stats
+        : await lstat(target).catch(() => null);
+  const file =
+    target === null || targetStats === null
+      ? null
+      : await readStableRegularFile(target, targetStats);
+  if (file === null) return { kind: "invalid-configuration" };
+  let root: unknown;
   try {
-    value = JSON.parse(stdout);
+    root = parseToml(
+      new TextDecoder("utf-8", { fatal: true }).decode(file.bytes),
+    );
   } catch {
-    return null;
+    return { kind: "invalid-configuration" };
   }
-  const errors: ParseError[] = [];
-  const tree = parseTree(stdout, errors, {
-    allowTrailingComma: false,
-    disallowComments: true,
-  });
-  if (
-    tree === undefined ||
-    errors.length > 0 ||
-    hasDuplicateKeys(tree) ||
-    !isRecord(value) ||
-    !hasExactKeys(value, ["installed", "available"]) ||
-    !Array.isArray(value.installed) ||
-    !Array.isArray(value.available)
-  ) {
-    return null;
-  }
+  if (!isRecord(root)) return { kind: "invalid-configuration" };
+  if (root.plugins === undefined) return { kind: "valid", entries: [] };
+  if (!isRecord(root.plugins)) return { kind: "invalid-configuration" };
+  const marketplaces = isRecord(root.marketplaces) ? root.marketplaces : {};
+  const cacheRoot = join(home, "plugins", "cache");
   const entries: CodexPluginEntry[] = [];
-  const seen = new Set<string>();
-  for (const raw of value.installed) {
-    const parsed = parseListEntry(raw);
-    if (parsed === null || seen.has(parsed.pluginId)) return null;
-    seen.add(parsed.pluginId);
-    entries.push(parsed);
-  }
-  return entries.sort((left, right) =>
-    compareText(left.pluginId, right.pluginId),
-  );
-}
-
-function parseListEntry(value: unknown): CodexPluginEntry | null {
-  if (
-    !isRecord(value) ||
-    !hasAllowedKeys(value, [
-      "pluginId",
-      "name",
-      "marketplaceName",
-      "version",
-      "installed",
-      "enabled",
-      "source",
-      "marketplaceSource",
-      "installPolicy",
-      "authPolicy",
-    ]) ||
-    typeof value.name !== "string" ||
-    !isSafePluginName(value.name) ||
-    typeof value.marketplaceName !== "string" ||
-    !safeMarketplaceName.test(value.marketplaceName) ||
-    value.pluginId !== `${value.name}@${value.marketplaceName}` ||
-    value.installed !== true ||
-    typeof value.enabled !== "boolean" ||
-    typeof value.version !== "string" ||
-    !isSafeVersion(value.version) ||
-    typeof value.installPolicy !== "string" ||
-    typeof value.authPolicy !== "string"
-  ) {
-    return null;
-  }
-  const source = parseSource(value.source);
-  if (
-    source === null ||
-    (value.marketplaceSource !== undefined &&
-      (!isRecord(value.marketplaceSource) ||
-        !hasExactKeys(value.marketplaceSource, ["sourceType", "source"]) ||
-        typeof value.marketplaceSource.sourceType !== "string" ||
-        typeof value.marketplaceSource.source !== "string"))
-  ) {
-    return null;
+  for (const [pluginId, table] of Object.entries(root.plugins)) {
+    const separator = pluginId.lastIndexOf("@");
+    const name = pluginId.slice(0, Math.max(separator, 0));
+    const marketplaceName = pluginId.slice(separator + 1);
+    // A table Lampwright cannot interpret is not an installed Plugin; its
+    // cache stays visible as non-removable evidence.
+    if (
+      separator <= 0 ||
+      !isSafePluginName(name) ||
+      !safeMarketplaceName.test(marketplaceName) ||
+      !isRecord(table) ||
+      (table.enabled !== undefined && typeof table.enabled !== "boolean")
+    ) {
+      continue;
+    }
+    const version = await activeCacheVersion(
+      join(cacheRoot, marketplaceName, name),
+    );
+    if (version === null) continue;
+    const marketplace = marketplaces[marketplaceName];
+    const marketplaceSource =
+      isRecord(marketplace) && typeof marketplace.source === "string"
+        ? marketplace.source
+        : null;
+    const marketplaceRoot = isRecord(marketplace)
+      ? codexMarketplaceRoot(home, marketplaceName, marketplace)
+      : null;
+    entries.push({
+      pluginId,
+      name,
+      marketplaceName,
+      version,
+      enabled: table.enabled !== false,
+      source:
+        marketplaceRoot === null
+          ? { kind: "non-local" }
+          : await marketplacePluginSource(marketplaceRoot, name),
+      marketplaceSource,
+    });
   }
   return {
-    pluginId: value.pluginId,
-    name: value.name,
-    marketplaceName: value.marketplaceName,
-    version: value.version,
-    enabled: value.enabled,
-    source,
-    marketplaceSource:
-      isRecord(value.marketplaceSource) &&
-      typeof value.marketplaceSource.source === "string"
-        ? value.marketplaceSource.source
-        : null,
+    kind: "valid",
+    entries: entries.sort((left, right) =>
+      compareText(left.pluginId, right.pluginId),
+    ),
   };
 }
 
-function parseSource(value: unknown): PluginSource | null {
-  if (!isRecord(value) || typeof value.source !== "string") return null;
-  switch (value.source) {
-    case "local":
-      return hasExactKeys(value, ["source", "path"]) &&
-        typeof value.path === "string" &&
-        isAbsolute(value.path)
-        ? { kind: "local", path: resolve(value.path) }
-        : null;
-    case "git":
-      return hasAllowedKeys(value, ["source", "url", "ref", "sha"]) &&
-        typeof value.url === "string" &&
-        optionalFieldsAreStrings(value, ["ref", "sha"])
-        ? { kind: "non-local" }
-        : null;
-    case "git-subdir":
-      return hasAllowedKeys(value, ["source", "url", "path", "ref", "sha"]) &&
-        typeof value.url === "string" &&
-        typeof value.path === "string" &&
-        optionalFieldsAreStrings(value, ["ref", "sha"])
-        ? { kind: "non-local" }
-        : null;
-    case "npm":
-      return hasAllowedKeys(value, [
-        "source",
-        "package",
-        "version",
-        "registry",
-      ]) &&
-        typeof value.package === "string" &&
-        optionalFieldsAreStrings(value, ["version", "registry"])
-        ? { kind: "non-local" }
-        : null;
-    default:
-      return null;
+/**
+ * Selects the cache version Codex treats as active, as observed with Codex CLI
+ * 0.167.0: only real directories count, `local` wins, and otherwise the
+ * greatest name wins. Version links are considered only when no real
+ * directory exists, so the cache safety check can still report them.
+ */
+async function activeCacheVersion(cacheBase: string): Promise<string | null> {
+  const children = await readdir(cacheBase, { withFileTypes: true }).catch(
+    () => [],
+  );
+  const named = children.filter((child) => isSafeVersion(child.name));
+  const directories = named.filter((child) => child.isDirectory());
+  const candidates = (
+    directories.length > 0
+      ? directories
+      : named.filter((child) => child.isSymbolicLink())
+  )
+    .map((child) => child.name)
+    .sort(compareText);
+  if (candidates.includes("local")) return "local";
+  return candidates.reduce<string | null>(
+    (greatest, candidate) =>
+      greatest === null || compareCodexVersions(candidate, greatest) > 0
+        ? candidate
+        : greatest,
+    null,
+  );
+}
+
+interface SemanticVersion {
+  readonly core: readonly [bigint, bigint, bigint];
+  readonly prerelease: readonly string[];
+  readonly build: readonly string[];
+}
+
+const semanticVersionPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+function parseSemanticVersion(value: string): SemanticVersion | null {
+  const match = semanticVersionPattern.exec(value);
+  if (match === null) return null;
+  return {
+    core: [BigInt(match[1]!), BigInt(match[2]!), BigInt(match[3]!)],
+    prerelease: match[4]?.split(".") ?? [],
+    build: match[5]?.split(".") ?? [],
+  };
+}
+
+/** Semantic order when both names are semantic versions, else code-unit order. */
+function compareCodexVersions(left: string, right: string): number {
+  const leftVersion = parseSemanticVersion(left);
+  const rightVersion = parseSemanticVersion(right);
+  if (leftVersion === null || rightVersion === null) {
+    return left < right ? -1 : left > right ? 1 : 0;
   }
+  for (const index of [0, 1, 2] as const) {
+    const difference = leftVersion.core[index] - rightVersion.core[index];
+    if (difference !== 0n) return difference < 0n ? -1 : 1;
+  }
+  // A release outranks its prereleases; build metadata only breaks ties.
+  if (
+    leftVersion.prerelease.length === 0 ||
+    rightVersion.prerelease.length === 0
+  ) {
+    if (leftVersion.prerelease.length !== rightVersion.prerelease.length) {
+      return leftVersion.prerelease.length === 0 ? 1 : -1;
+    }
+  } else {
+    const order = compareIdentifiers(
+      leftVersion.prerelease,
+      rightVersion.prerelease,
+    );
+    if (order !== 0) return order;
+  }
+  return compareIdentifiers(leftVersion.build, rightVersion.build);
+}
+
+function compareIdentifiers(
+  left: readonly string[],
+  right: readonly string[],
+): number {
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    const a = left[index]!;
+    const b = right[index]!;
+    if (a === b) continue;
+    const aNumeric = /^\d+$/.test(a);
+    const bNumeric = /^\d+$/.test(b);
+    if (aNumeric && bNumeric) return BigInt(a) < BigInt(b) ? -1 : 1;
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return a < b ? -1 : 1;
+  }
+  return Math.sign(left.length - right.length);
+}
+
+/**
+ * Where Codex keeps the marketplace a Plugin came from: the declared directory
+ * for a local marketplace, or its own clone for a Git marketplace.
+ */
+function codexMarketplaceRoot(
+  home: string,
+  marketplaceName: string,
+  marketplace: Record<string, unknown>,
+): string | null {
+  if (marketplace.source_type === "git") {
+    return join(home, ".tmp", "marketplaces", marketplaceName);
+  }
+  return marketplace.source_type === "local" &&
+    typeof marketplace.source === "string" &&
+    isAbsolute(marketplace.source)
+    ? resolve(marketplace.source)
+    : null;
+}
+
+const marketplaceManifestPaths = [
+  [".agents", "plugins", "marketplace.json"],
+  [".claude-plugin", "marketplace.json"],
+] as const;
+
+/** Resolves a Plugin's source tree from the marketplace manifest, if it is local. */
+async function marketplacePluginSource(
+  marketplaceRoot: string,
+  pluginName: string,
+): Promise<PluginSource> {
+  for (const manifestPath of marketplaceManifestPaths) {
+    const path = join(marketplaceRoot, ...manifestPath);
+    const stats = await lstat(path).catch(() => null);
+    if (stats === null) continue;
+    const file = await readStableRegularFile(path, stats);
+    let manifest: unknown;
+    try {
+      manifest =
+        file === null
+          ? null
+          : JSON.parse(
+              new TextDecoder("utf-8", { fatal: true }).decode(file.bytes),
+            );
+    } catch {
+      manifest = null;
+    }
+    if (!isRecord(manifest) || !Array.isArray(manifest.plugins)) break;
+    const listed = manifest.plugins.find(
+      (plugin: unknown) => isRecord(plugin) && plugin.name === pluginName,
+    ) as Record<string, unknown> | undefined;
+    const source = listed?.source;
+    const relativeSource =
+      typeof source === "string"
+        ? source
+        : isRecord(source) &&
+            source.source === "local" &&
+            typeof source.path === "string"
+          ? source.path
+          : null;
+    if (relativeSource === null || isAbsolute(relativeSource)) break;
+    const sourcePath = resolve(marketplaceRoot, relativeSource);
+    return pathIsWithin(marketplaceRoot, sourcePath)
+      ? { kind: "local", path: sourcePath }
+      : { kind: "non-local" };
+  }
+  return { kind: "non-local" };
 }
 
 async function materializePlugin(input: {
@@ -1816,33 +1916,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isRecordList(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0 && value.every(isRecord);
-}
-
-function hasAllowedKeys(
-  value: Record<string, unknown>,
-  allowed: readonly string[],
-): boolean {
-  const allowedSet = new Set(allowed);
-  return Object.keys(value).every((key) => allowedSet.has(key));
-}
-
-function hasExactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-): boolean {
-  return (
-    Object.keys(value).length === expected.length &&
-    expected.every((key) => Object.hasOwn(value, key))
-  );
-}
-
-function optionalFieldsAreStrings(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-): boolean {
-  return keys.every(
-    (key) => value[key] === undefined || typeof value[key] === "string",
-  );
 }
 
 function isBroken(location: ArtifactLocation): boolean {

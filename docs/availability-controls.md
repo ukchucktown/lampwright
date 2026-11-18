@@ -158,8 +158,8 @@ agrees with the harness's observed Plugin list. Otherwise the Plugin is
 - Control: `plugins.<plugin-id>.enabled`; no value means enabled.
 - Writable candidate: the user Codex document only.
 
-Lampwright parses the complete TOML document and cross-checks the effective
-value with `codex plugin list`. Mutation updates the existing Plugin table or
+Lampwright parses the complete TOML document. A scan does not run
+`codex plugin list`. Mutation updates the existing Plugin table or
 adds its canonical table while preserving unrelated settings, comments, and
 line endings.
 
