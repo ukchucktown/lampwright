@@ -469,7 +469,7 @@ existing status values and do not change the stable JSON schema version.
 
 ## 11. Quarantine and local state
 
-Read-only scans, TUI browsing, and dry runs create no files.
+Read-only scans, TUI browsing, and dry runs create no files. A theme that the user confirms in the theme picker writes the `theme` value of the Lampwright configuration file. No other action in the terminal UI writes that file, and a preview in the picker writes nothing. [ADR 0017](./adr/0017-keep-theme-preferences-in-a-configuration-file.md) records this decision.
 
 Persistent state is created lazily only for:
 

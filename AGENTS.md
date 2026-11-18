@@ -89,7 +89,7 @@ For Codex-authored branches, use the `feat/` prefix and include the issue number
 ## Non-negotiable safety guardrails
 
 - Never inspect or mutate the developer's real skill installations in tests. Use temporary homes, workspaces, state directories, caches, and fake command runners.
-- A read-only scan, TUI browse, or dry run must create no files or persistent state.
+- A read-only scan, TUI browse, or dry run must create no files or persistent state. The one exception is a theme that the user confirms in the theme picker: that action writes the `theme` value of the Lampwright configuration file.
 - Never crawl an entire home directory by default. Scan only known, configured, or explicitly supplied roots.
 - Never mutate a path inside a Git worktree unless Git classifies that path as ignored. `--force` cannot override this.
 - Never remove System Skills supplied as inseparable agent runtime content.

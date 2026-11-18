@@ -6,11 +6,13 @@ import { layout, panes } from "./browse.js";
 import { searchLayout } from "./search.js";
 import { browseTabHitboxes, renderTui } from "./render.js";
 import {
-  createNightfallTheme,
+  createTuiTheme,
+  terminalThemeDefinition,
   detectTuiColorMode,
   plainTuiTheme,
   type TuiTheme,
 } from "./theme.js";
+import type { TuiThemeDefinition } from "./theme.js";
 import type { TuiAction, TuiState, TuiTerminal, TuiViewport } from "./types.js";
 
 /**
@@ -294,7 +296,8 @@ export function createNodeTuiTerminal(
         input,
         output,
         options.theme ??
-          createNightfallTheme(
+          createTuiTheme(
+            terminalThemeDefinition,
             detectTuiColorMode({
               isTTY: true,
               platform: options.platform ?? process.platform,
@@ -328,6 +331,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "disabled") return { kind: "switch-view", view: "disabled" };
     if (value === "inventory")
       return { kind: "switch-view", view: "inventory" };
+    if (value === "theme") return { kind: "open-theme-picker" };
     if (value === "restore") return { kind: "restore-review" };
     if (value === "purge" || value === "p") return { kind: "purge-review" };
     if (value === "clear") return { kind: "clear-selection" };
@@ -348,6 +352,16 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value.startsWith("/"))
       return { kind: "append-query", value: value.slice(1) };
     return { kind: "append-query", value };
+  }
+  if (state.screen === "theme") {
+    if (value === "" || value === "select" || value === "use")
+      return { kind: "select" };
+    if (value === "up" || value === "k") return { kind: "move", delta: -1 };
+    if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "quit" || value === "q") return { kind: "quit" };
+    return value === "back" || value === "cancel"
+      ? { kind: "cancel" }
+      : { kind: "noop" };
   }
   if (state.screen === "search") {
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -458,7 +472,7 @@ class RawTuiTerminal implements TuiTerminal {
   constructor(
     private readonly input: TerminalInput,
     private readonly output: TerminalOutput,
-    private readonly theme: TuiTheme,
+    private theme: TuiTheme,
   ) {
     // Registered before readline attaches its own reader, so a chunk carrying
     // mouse reports is claimed here and the keypresses readline shreds it into
@@ -488,6 +502,11 @@ class RawTuiTerminal implements TuiTerminal {
     for (const report of reports) this.mouse.push(report);
     this.wake();
   };
+
+  setTheme(theme: TuiThemeDefinition): void {
+    // The color capability belongs to this terminal, not to the theme.
+    this.theme = createTuiTheme(theme, this.theme.mode);
+  }
 
   render(state: TuiState): void {
     this.output.write(`\u001B[2J\u001B[H${renderTui(state, this.theme)}`);
@@ -619,6 +638,7 @@ export function parseRawTuiAction(
   if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
   if (state.screen === "browse") {
     if (key.name === "escape") return { kind: "cancel" };
+    if (key.ctrl && key.name === "p") return { kind: "open-theme-picker" };
     if (key.ctrl && key.name === "t")
       return {
         kind: "switch-view",
@@ -673,6 +693,14 @@ export function parseRawTuiAction(
         : { kind: "noop" };
     if (!key.ctrl && !key.meta && text.length > 0)
       return { kind: "append-query", value: text };
+    return { kind: "noop" };
+  }
+  if (state.screen === "theme") {
+    if (key.name === "escape") return { kind: "cancel" };
+    if (key.name === "return" || key.name === "enter")
+      return { kind: "select" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
     return { kind: "noop" };
   }
   if (state.screen === "search") {

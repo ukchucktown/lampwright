@@ -42,11 +42,20 @@ export {
 } from "./render.js";
 export { runTui } from "./runtime.js";
 export {
+  builtInTuiThemes,
   createNightfallTheme,
+  createTuiTheme,
+  defaultTuiThemeName,
   detectTuiColorMode,
+  isTuiColor,
   nightfallTheme,
+  nightfallThemeDefinition,
+  parseTuiStyle,
   plainTuiTheme,
   styleTui,
+  terminalTheme,
+  terminalThemeDefinition,
+  TUI_STYLE_ROLES,
 } from "./theme.js";
 export {
   createNodeTuiTerminal,
@@ -59,8 +68,10 @@ export type { NodeTuiTerminalOptions } from "./terminal.js";
 export type {
   TuiColorContext,
   TuiColorMode,
+  TuiStyleParseResult,
   TuiStyleRole,
   TuiTextStyle,
   TuiTheme,
+  TuiThemeDefinition,
 } from "./theme.js";
 export type * from "./types.js";

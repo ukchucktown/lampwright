@@ -62,7 +62,18 @@ import {
   createFileAdapterTrustStore,
   defaultLocalStateRoot,
 } from "./state/index.js";
-import { createNodeTuiTerminal, runTui } from "./tui/index.js";
+import {
+  createNodeTuiTerminal,
+  defaultTuiThemeName,
+  runTui,
+  terminalThemeDefinition,
+  type TuiThemeDefinition,
+} from "./tui/index.js";
+import {
+  createThemePreferences,
+  lampwrightConfigDirectory,
+  type ThemePreferences,
+} from "./preferences/index.js";
 
 interface PackageMetadata {
   readonly version: string;
@@ -117,7 +128,7 @@ const help = `lampwright ${readPackageMetadata().version}
 Discover and safely manage AI agent skills.
 
 Usage:
-  lampwright
+  lampwright [--theme <name>]
   lampwright scan [--json] [--adapter <path>]
   lampwright disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
   lampwright enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
@@ -147,6 +158,7 @@ Options:
   --trust-adapter <id>:<sha256>       Approve exact local adapter content
   --trust-package npx:<pkg>@<version>:<adapter-sha256>
                                       Approve exact ephemeral package use
+  --theme <name>                      Open the terminal UI with a theme
   -h, --help                          Show help
   -v, --version                       Show version
 `;
@@ -1077,13 +1089,113 @@ function failure(code: string, message: string, exitCode: number): CliResult {
   };
 }
 
+/**
+ * The arguments that open the terminal UI: none, or one theme option.
+ * Returns null when the arguments name a non-interactive command.
+ */
+export function parseTuiLaunch(
+  argv: readonly string[],
+): { readonly theme: string | null } | null {
+  if (argv.length === 0) return { theme: null };
+  if (argv.length === 2 && argv[0] === "--theme" && argv[1] !== "")
+    return { theme: argv[1]! };
+  if (argv.length === 1 && argv[0]!.startsWith("--theme=")) {
+    const theme = argv[0]!.slice("--theme=".length);
+    return theme === "" ? null : { theme };
+  }
+  return null;
+}
+
+/**
+ * Selects the start theme from the first source that names one: the option,
+ * the environment, the saved selection, then the default. A name from the
+ * option must exist. Another source that names no usable theme gives the
+ * default and a notice, so a stale preference never stops the terminal UI.
+ */
+export async function resolveStartTheme(input: {
+  readonly option: string | null;
+  readonly environmentName: string | undefined;
+  readonly preferences: Pick<ThemePreferences, "list" | "selected">;
+}): Promise<
+  | {
+      readonly ok: true;
+      readonly theme: TuiThemeDefinition;
+      readonly notice: string | null;
+    }
+  | { readonly ok: false; readonly message: string }
+> {
+  const choices = await input.preferences.list();
+  const usable = (name: string): TuiThemeDefinition | null =>
+    choices.find((choice) => choice.name === name)?.theme ?? null;
+  const fallback = usable(defaultTuiThemeName) ?? terminalThemeDefinition;
+  if (input.option !== null) {
+    const theme = usable(input.option);
+    if (theme !== null) return { ok: true, theme, notice: null };
+    const problem = choices.find(
+      (choice) => choice.name === input.option,
+    )?.problem;
+    return {
+      ok: false,
+      message:
+        problem === null || problem === undefined
+          ? `unknown theme "${input.option}". Available themes: ${choices
+              .filter((choice) => choice.theme !== null)
+              .map((choice) => choice.name)
+              .join(", ")}`
+          : `theme "${input.option}" cannot be used: ${problem}`,
+    };
+  }
+  const environmentName =
+    input.environmentName === undefined || input.environmentName.trim() === ""
+      ? null
+      : input.environmentName.trim();
+  const requested =
+    environmentName === null
+      ? { name: await input.preferences.selected(), source: "saved" }
+      : { name: environmentName, source: "LAMPWRIGHT_THEME" };
+  if (requested.name === null)
+    return { ok: true, theme: fallback, notice: null };
+  const theme = usable(requested.name);
+  return theme !== null
+    ? { ok: true, theme, notice: null }
+    : {
+        ok: true,
+        theme: fallback,
+        notice: `The ${requested.source} theme "${requested.name}" is not available. Lampwright uses "${fallback.name}".`,
+      };
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  if (argv.length === 0) {
+  const tuiLaunch = parseTuiLaunch(argv);
+  if (tuiLaunch !== null) {
+    const preferences = createThemePreferences({
+      configDirectory: lampwrightConfigDirectory({
+        homeDirectory: homedir(),
+        platform: process.platform,
+        environment: process.env,
+      }),
+    });
+    const startTheme = await resolveStartTheme({
+      option: tuiLaunch.theme,
+      environmentName: process.env.LAMPWRIGHT_THEME,
+      preferences,
+    });
+    if (!startTheme.ok) {
+      process.stderr.write(`lampwright: ${startTheme.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
     const quarantine = createQuarantineModule();
     const disabledStorage = createProductionDisabledStorage();
     const outcome = await runTui(
       {
+        themes: {
+          current: startTheme.theme,
+          notice: startTheme.notice,
+          list: () => preferences.list(),
+          select: (name) => preferences.select(name),
+        },
         scan: async () => (await scanWithContext([], [], {})).inventory,
         plan,
         execute: (removalPlan, approvals) =>

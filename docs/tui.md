@@ -114,13 +114,98 @@ on the next.
 
 ## Theme and color
 
-The built-in `Nightfall` theme follows the restrained Subliminal Nightfall
-palette used by Ghostty, Yazi, and tmux. Muted blue-gray borders keep the grid
-quiet; cyan identifies structure and paths; yellow identifies the active or
-selected item; green marks success; blue marks information; and pink-red marks
-errors. Focused rows use a light foreground over a slate selection background.
-The application never paints a base background, so terminal transparency and
-blur remain owned by the terminal.
+A theme gives a style to each of 11 roles: `title`, `active`, `muted`, `border`,
+`focus`, `selected`, `success`, `info`, `warning`, `error`, and `path`. The
+application never paints a base background, so terminal transparency and blur
+remain owned by the terminal.
+
+Lampwright has two built-in themes:
+
+- `terminal` is the default. It uses the 16 ANSI palette colors, the default
+  foreground and background, and the attributes bold, dim, and reverse. It
+  sends no 24-bit color and no 256-color code, so the theme of the terminal
+  controls each color on a light or a dark background. It does not use
+  `bright-black`, because some terminal themes give that color the value of the
+  background.
+- `nightfall` follows the restrained Subliminal Nightfall palette used by
+  Ghostty, Yazi, and tmux. It uses fixed hexadecimal colors that were selected
+  for a dark background.
+
+### Theme files
+
+A custom theme is a TOML file in the `themes` directory of the Lampwright
+configuration directory. That directory is `$XDG_CONFIG_HOME/lampwright` when
+`XDG_CONFIG_HOME` is set, `%APPDATA%\lampwright` on Windows, and
+`~/.config/lampwright` in all other conditions. A theme file is data only.
+
+```toml
+name = "ocean"
+extends = "terminal"
+
+[styles]
+title = "#3399ff bold"
+focus = "white on #484e5b bold"
+error = "bright-red"
+muted = "dim"
+```
+
+- `name` is optional. A file with no `name` takes the name of the file without
+  `.toml`. A name uses letters, digits, dots, hyphens, and underscores.
+- `extends` is optional and names a built-in theme. The default is `terminal`.
+  A role that the file does not define takes its style from that theme.
+- Each key of `[styles]` is a role. The value is a style string with the form
+  `<foreground> [on <background>] [attributes]`. Each part is optional.
+- A color is a hexadecimal color (`#rrggbb`), an ANSI color name, an ANSI index
+  from `0` to `255`, or `default`. The ANSI color names are `black`, `red`,
+  `green`, `yellow`, `blue`, `magenta`, `cyan`, and `white`, each with an
+  optional `bright-` prefix.
+- The attributes are `bold`, `dim`, `italic`, `underline`, and `reverse`.
+
+Only a hexadecimal color does not use the palette of the terminal. On a
+terminal with 256 colors or 16 colors, Lampwright sends the nearest palette
+color for a hexadecimal color.
+
+A theme file that is not valid does not stop the terminal UI. The theme picker
+lists the file with the reason. A file is not valid when it is larger than
+64 KB, is not valid TOML, has a setting other than `name`, `extends`, and
+`styles`, names a role that does not exist, or has a style string that
+Lampwright cannot read. Lampwright reads the files in name order. When two
+themes have the same name, or a custom theme has the name of a built-in theme,
+the first theme keeps the name and the picker lists the other file as not
+usable.
+
+### Theme picker
+
+`ctrl-p` in a browse view opens the theme picker. The header shows this key
+when the row has room for it. The picker lists the built-in themes and then the
+custom themes. The picker draws itself with the highlighted theme, and it shows
+a sample of each role, so a move to another row is a live preview.
+
+- Up and down move the highlight. PgUp and PgDn move by a page.
+- Enter applies the highlighted theme and saves the selection.
+- Escape closes the picker and restores the previous theme.
+- `q` exits Lampwright.
+
+A theme that is not usable keeps the previous theme on the screen and shows the
+reason. Enter on that theme saves nothing. When Lampwright cannot save a
+selection, the theme applies to the session and a notice gives the cause.
+
+### Selection order
+
+Lampwright takes the start theme from the first source that names one:
+
+1. The `--theme <name>` option. An unknown name or a theme that is not usable
+   stops Lampwright with exit code 2 and a list of the available themes.
+2. The `LAMPWRIGHT_THEME` environment variable.
+3. The `theme` value of `config.toml` in the configuration directory, which the
+   picker saves.
+4. The `terminal` theme.
+
+When the environment variable or the saved selection names a theme that is not
+available, Lampwright uses `terminal` and shows a notice.
+
+Lampwright changes only the top-level `theme` line of `config.toml`. It keeps
+all other lines and the line endings, and it writes through a symbolic link.
 
 The inventory header uses four rows: title and view status; pane-local movement;
 stable pane controls; and primary actions plus search. Each navigation or action
@@ -144,7 +229,7 @@ Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
 when color is unavailable. Raw terminals select true color, 256-color ANSI, or
 16-color ANSI from their advertised capabilities. `NO_COLOR`, `TERM=dumb`, and
-non-TTY line output use the monochrome theme. No shell command, terminal probe,
+non-TTY line output give monochrome output with each theme. No shell command, terminal probe,
 or platform-specific executable is required.
 
 Up and down move the highlighted row in a navigation pane or scroll a focused
@@ -387,7 +472,7 @@ with its result. The refresh preserves the other view snapshots.
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
 `detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
-`disable`, `update`, `disabled`, `trash`, and `quit`. In Disabled, `enable` opens
+`disable`, `update`, `disabled`, `trash`, `theme`, and `quit`. In Disabled, `enable` opens
 review. `update` opens Update review in Inventory or Disabled. The `inventory`
 and `trash` commands switch peer views. Navigation, selection, and
 `search <regex>` match Inventory. Search accepts a regex, `up`, `down`, `take`,
@@ -398,13 +483,14 @@ screens accept the same commands, but `force` has no effect. Report screens
 accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`. Availability
 reports also accept `back`. This command refreshes Inventory and Disabled, and
 then returns to Inventory. Update reports accept `back` and use the same refresh.
-Removal reports add `previous`, `next`, and `fallback`. End-of-input cancels
-safely.
+Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
+`up`, `down`, `select`, `back`, and `quit`. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 
-Read-only scanning, searching, expanding, cancellation, and plan review create
-no files or persistent state. The terminal UI does not scan paths, infer
+Read-only scanning, searching, expanding, cancellation, plan review, and a
+preview in the theme picker create no files or persistent state. A confirmed
+theme writes the `theme` value of the configuration file. The terminal UI does not scan paths, infer
 ownership, invoke a manager, or mutate the filesystem itself.
 
 ## Embedding interface
@@ -422,6 +508,24 @@ rendered state through `render`, supplies semantic `TuiAction` values through
 
 `renderTui(state, theme?)` and `renderBrowseLines(state, theme?)` accept a
 declarative `TuiTheme`. `createNodeTuiTerminal(input?, output?, options?)`
-accepts an explicit theme for embedding; otherwise it selects a Nightfall color
-mode from the output terminal and environment. `createNightfallTheme(mode)`,
-`nightfallTheme`, and `plainTuiTheme` are exported with the theme types.
+accepts an explicit theme for embedding; otherwise it binds the `terminal`
+theme to the color mode of the output terminal and environment.
+
+A `TuiThemeDefinition` is a theme name and a style for each role. It has no
+color mode. `createTuiTheme(definition, mode)` binds a definition to a color
+mode and returns a `TuiTheme`. `builtInTuiThemes`, `terminalThemeDefinition`,
+`nightfallThemeDefinition`, `terminalTheme`, `nightfallTheme`, `plainTuiTheme`,
+`createNightfallTheme(mode)`, `parseTuiStyle(value)`, `isTuiColor(value)`, and
+`TUI_STYLE_ROLES` are exported with the theme types.
+
+An embedding host supplies `themes` in `TuiDependencies` to offer the theme
+picker: `current` is the start theme, `list` returns the choices, and `select`
+saves a confirmed choice. A host that supplies no `themes` value shows a notice
+in place of the picker. A `TuiTerminal` can implement `setTheme(definition)`.
+`runTui` calls it before each draw with the applied theme or, while the picker
+is open, with the highlighted theme.
+
+`createThemePreferences({ configDirectory })` reads the theme files and the
+saved selection, and `lampwrightConfigDirectory(input)` resolves the
+configuration directory. `parseThemeDocument(text, fallbackName)` parses one
+theme file.

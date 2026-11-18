@@ -12,5 +12,6 @@ export type {
   ArtifactLink,
 } from "./filesystem/artifact-filesystem.js";
 export * from "./state/index.js";
+export * from "./preferences/index.js";
 export * from "./tui/index.js";
 export * from "./update/index.js";
