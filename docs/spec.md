@@ -542,6 +542,12 @@ access the network as described in its plan. A reviewed Managed Update may also
 let the Owner process access the network. Lampwright discloses that access
 before execution and does not perform a hidden remote Update check.
 
+For Codex Plugins, a scan reads the Codex configuration file and the Codex
+plugin cache. A scan does not run `codex plugin list`, because that command
+contacts a remote catalog.
+[ADR 0016](./adr/0016-read-codex-plugins-from-local-evidence.md) records this
+decision.
+
 ## 15. MVP acceptance criteria
 
 The v1 MVP is complete when:

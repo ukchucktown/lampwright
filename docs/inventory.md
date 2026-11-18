@@ -423,13 +423,37 @@ entry. Inventory does not contact that source during a scan.
 
 ## Codex plugin reconciliation
 
-Inventory obtains installed Codex Plugin state only from the supported
-`codex plugin list --json` command. The command receives the injected or
-environment-derived `CODEX_HOME`; its temporary-directory variables point to
-that same root so Codex cannot create its helper alias during a read-only scan.
-`DO_NOT_TRACK=1` and `DISABLE_TELEMETRY=1` are also fixed by the scanner. Tests
-can observe the complete structured command and environment through
-`InventoryCommandRunner` without invoking the developer's Codex installation.
+Inventory reads installed Codex Plugin state from local evidence in the Codex
+home, which is the injected or environment-derived `CODEX_HOME`. A scan does
+not run the Codex executable, because `codex plugin list` contacts a remote
+catalog on each call. [ADR 0016](./adr/0016-read-codex-plugins-from-local-evidence.md)
+records this decision.
+
+A Codex Plugin is installed when both of these conditions are true:
+
+- The `config.toml` file contains a `[plugins."<name>@<marketplace>"]` table.
+- The directory `plugins/cache/<marketplace>/<name>` contains one or more
+  version directories.
+
+The `enabled` value of the table gives the enabled state. A table with no
+`enabled` value is enabled. The active version is the version directory that
+Codex selects: `local` when that directory exists, otherwise the greatest
+name. Two names that are both semantic versions use semantic version order.
+All other pairs use string order. A file or a link is not a version directory.
+
+A `[marketplaces.<marketplace>]` table gives the marketplace source. For a
+`local` marketplace, the source tree of a Plugin comes from the marketplace
+manifest in the declared directory. For a `git` marketplace, the manifest comes
+from the Codex clone at `.tmp/marketplaces/<marketplace>`. The scan reads
+`.agents/plugins/marketplace.json` first and `.claude-plugin/marketplace.json`
+second.
+
+A configuration file that is linked, hard-linked, unstable, or not valid TOML
+gives no Codex Plugins. The scan then reports each cache version as a
+non-removable finding with the state `invalid-configuration`. A Plugin table
+that the scan cannot interpret, or a cache directory with no Plugin table, also
+gives no Plugin. The remote plugins that the Codex desktop app enables have no
+Plugin table, so they stay outside each plan.
 
 A Plugin whose declared `marketplaceSource` resolves inside a runtime-managed
 marketplace root is marked `runtimeDefault` on its boundary. Two are in use:
