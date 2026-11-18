@@ -449,6 +449,12 @@ the status/action footer remains visible and gives the visible range. Resizing
 clamps that viewport. Left/Right selects an offered fallback, while vertical
 scrolling never changes that selection.
 
+On each report screen, Escape reads the Inventory again and returns to the
+Inventory view, and `q` exits Lampwright. After a Removal, the terminal UI also
+reads the Disabled entries and the Trash again, so the Trash count includes the
+new operation. The terminal UI never shows the Inventory from before a
+mutation: when the new scan fails, it exits and returns the report.
+
 ### Technical report reference
 
 The review, execution-feedback, and final-report screens describe the same
@@ -535,10 +541,9 @@ and `trash` commands switch peer views. Navigation, selection, and
 accept `yes`, `no`, `details`, `up`, `down`, `pageup`, `pagedown`, `force`, and
 `quit` (`force` has no effect where the plan does not permit it). Update plan
 screens accept the same commands, but `force` has no effect. Report screens
-accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`. Availability
-reports also accept `back`. This command refreshes Inventory and Disabled, and
-then returns to Inventory. Update reports accept `back` and use the same refresh.
-Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
+accept `up`, `down`, `pageup`, `pagedown`, `details`, `back`, and `quit`. The
+`back` command reads the Inventory again and then returns to the Inventory
+view. Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
 `up`, `down`, `select`, `back`, and `quit`. Any command except `quit` closes the
 key reference. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive

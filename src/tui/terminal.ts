@@ -412,12 +412,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "select-fallback", delta: 1 };
     if (state.screen === "report" && (value === "fallback" || value === "f"))
       return { kind: "fallback" };
-    if (
-      (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
-      (value === "back" || value === "cancel")
-    )
-      return { kind: "cancel" };
+    if (value === "back" || value === "cancel") return { kind: "cancel" };
     if (value === "quit" || value === "q" || value === "done")
       return { kind: "quit" };
     return { kind: "noop" };
@@ -756,13 +751,9 @@ export function parseRawTuiAction(
     state.screen === "availability-report" ||
     state.screen === "update-report"
   ) {
-    if (
-      (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
-      key.name === "escape"
-    )
-      return { kind: "cancel" };
-    if (key.name === "escape" || text === "q") return { kind: "quit" };
+    // Escape returns to a fresh Inventory from each report; `q` exits.
+    if (key.name === "escape") return { kind: "cancel" };
+    if (text === "q") return { kind: "quit" };
     if (text === "d") return { kind: "toggle-details" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
     if (key.name === "pagedown") return { kind: "page", delta: 1 };

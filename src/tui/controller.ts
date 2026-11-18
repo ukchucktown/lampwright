@@ -1010,6 +1010,54 @@ export class TuiController {
     }
   }
 
+  /**
+   * Returns to the Inventory after a Removal with everything read again: the
+   * Inventory, the Disabled entries, and the Trash, which the Removal changed.
+   */
+  private async refreshAfterRemoval(state: TuiReportState): Promise<void> {
+    try {
+      const inventory = await this.dependencies.scan();
+      const disabledEntries =
+        this.dependencies.listDisabled === undefined
+          ? []
+          : await this.dependencies.listDisabled();
+      const operations =
+        this.dependencies.quarantine === undefined
+          ? undefined
+          : await this.dependencies.quarantine.listOperations();
+      const sections = createTuiSections(inventory);
+      const previous =
+        (state.browse.view ?? "inventory") === "inventory"
+          ? state.browse.model
+          : state.browse.viewSnapshots?.inventory?.model;
+      this.stateValue = {
+        screen: "browse",
+        inventory,
+        model: {
+          ...(previous === undefined
+            ? createBrowseModel(sections, state.browse.model.viewport)
+            : preserveBrowseModel(previous, sections)),
+          notice: null,
+        },
+        view: "inventory",
+        disabledEntries,
+        ...(operations === undefined
+          ? {}
+          : {
+              operations: new Map(
+                operations.map((operation) => [
+                  `trash-operation:${operation.id}`,
+                  operation,
+                ]),
+              ),
+            }),
+      };
+    } catch {
+      // A successful mutation must never lead back to a stale live projection.
+      this.stateValue = { screen: "done", report: state.report };
+    }
+  }
+
   private async refreshAfterUpdate(state: TuiUpdateReportState): Promise<void> {
     try {
       const inventory = await this.dependencies.scan();
@@ -1085,8 +1133,12 @@ export class TuiController {
     state: TuiReportState,
     action: TuiAction,
   ): Promise<void> {
-    if (action.kind === "quit" || action.kind === "cancel") {
+    if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: state.report };
+      return;
+    }
+    if (action.kind === "cancel") {
+      await this.refreshAfterRemoval(state);
       return;
     }
     if (action.kind === "toggle-details") {
