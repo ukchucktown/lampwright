@@ -36,7 +36,11 @@ import {
   createDisabledSections,
   disabledSelectionTargets,
 } from "./disabled.js";
-import { createTuiSections, selectionTargets } from "./sections.js";
+import {
+  createTuiSections,
+  entryTargets,
+  selectionTargets,
+} from "./sections.js";
 import { createTrashSections, type TrashRestoreReadiness } from "./trash.js";
 import { createSearchModel, reduceSearch } from "./search.js";
 import type {
@@ -695,7 +699,7 @@ export class TuiController {
     );
     if (selected.length > 0) return selected;
     const entry = currentEntry(state.model);
-    return entry?.target === null || entry === null ? [] : [entry.target];
+    return entry === null ? [] : entryTargets(entry);
   }
 
   private async planAction(
@@ -1618,6 +1622,12 @@ function updateSelection(state: TuiBrowseState): {
     };
   if (entry.key.startsWith("finding:"))
     return { target: null, notice: "System Skills are read-only." };
+  if (entry.targets !== undefined)
+    return {
+      target: null,
+      notice:
+        "This row combines identical copies. Update accepts one target only.",
+    };
   const target =
     state.view === "disabled"
       ? availabilityUpdateTarget(

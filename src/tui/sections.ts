@@ -15,6 +15,10 @@ import type { TuiEntry, TuiSection } from "./types.js";
  * `exposedTo` decides agents, `runtimeDefault` decides what an agent ships with
  * itself, and System Skill findings decide what is out of reach. Nothing is
  * inferred from a name or a path.
+ *
+ * Rows with no shared source that the Inventory's identity hints relate by both
+ * name and content hash are shown as one row. That is presentation only: the
+ * Inventory keeps each copy as its own record, and the row targets every copy.
  */
 export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
   const installations = new Map(
@@ -24,6 +28,8 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
   const pluginOwned = new Set(
     inventory.plugins.flatMap((plugin) => plugin.installationIds),
   );
+
+  const copyKeys = identicalCopyKeys(inventory);
 
   const entryFor = (logical: LogicalSkill): TuiEntry => {
     const members = logical.installationIds
@@ -128,7 +134,25 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       detail: "no Owner records these together",
       selectable: true,
       target: null,
-      entries: sorted([...ungrouped.map(entryFor), ...loneEntries]),
+      entries: sorted(
+        combineIdenticalCopies(
+          [
+            ...ungrouped.map((logical) => ({
+              entry: entryFor(logical),
+              members: logical.installationIds
+                .map((id) => installations.get(id))
+                .filter((item): item is Installation => item !== undefined),
+            })),
+            ...loneEntries.map((entry) => ({
+              entry,
+              members: inventory.installations.filter(
+                (item) => entry.key === `installation:${item.id}`,
+              ),
+            })),
+          ],
+          copyKeys,
+        ),
+      ),
     });
 
   const inventoryPlugins = inventory.plugins.filter(
@@ -174,6 +198,84 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
     });
 
   return sections;
+}
+
+interface RowWithMembers {
+  readonly entry: TuiEntry;
+  readonly members: readonly Installation[];
+}
+
+/**
+ * Maps each Installation that shares both a name hint and a content-hash hint
+ * with another Installation to a key that is equal exactly for such copies.
+ * A matching name alone, or a matching hash alone, yields no key.
+ */
+function identicalCopyKeys(
+  inventory: Inventory,
+): ReadonlyMap<Installation["id"], string> {
+  const nameHint = new Map<Installation["id"], number>();
+  const hashHint = new Map<Installation["id"], number>();
+  inventory.identityHints.forEach((hint, index) => {
+    const byKind = hint.evidence.kind === "name" ? nameHint : hashHint;
+    for (const id of hint.installationIds) byKind.set(id, index);
+  });
+  const keys = new Map<Installation["id"], string>();
+  for (const [id, name] of nameHint) {
+    const hash = hashHint.get(id);
+    if (hash !== undefined) keys.set(id, `${String(name)}:${String(hash)}`);
+  }
+  return keys;
+}
+
+function combineIdenticalCopies(
+  rows: readonly RowWithMembers[],
+  copyKeys: ReadonlyMap<Installation["id"], string>,
+): readonly TuiEntry[] {
+  const sets = new Map<string, RowWithMembers[]>();
+  const single: TuiEntry[] = [];
+  for (const row of rows) {
+    const keys = new Set(row.members.map((item) => copyKeys.get(item.id)));
+    const [key] = keys;
+    // A row joins a set only when every one of its members is the same copy.
+    if (keys.size !== 1 || key === undefined || row.entry.target === null) {
+      single.push(row.entry);
+      continue;
+    }
+    sets.set(key, [...(sets.get(key) ?? []), row]);
+  }
+  for (const set of sets.values()) {
+    const ordered = [...set].sort((left, right) =>
+      compare(left.entry.key, right.entry.key),
+    );
+    const first = ordered[0]!.entry;
+    if (ordered.length === 1) {
+      single.push(first);
+      continue;
+    }
+    const members = ordered.flatMap((row) => row.members);
+    const note = entryNote(null, members);
+    single.push({
+      key: `copies:${ordered.map((row) => row.entry.key).join("+")}`,
+      name: first.name,
+      description: first.description,
+      exposedTo: [
+        ...new Set(ordered.flatMap((row) => row.entry.exposedTo)),
+      ].sort(compare),
+      paths: ordered.flatMap((row) => row.entry.paths),
+      owner: [...new Set(ordered.map((row) => row.entry.owner))].join(", "),
+      note: [`${String(ordered.length)} identical copies`, note]
+        .filter((value): value is string => value !== null)
+        .join(" · "),
+      target: first.target,
+      targets: ordered.flatMap((row) =>
+        row.entry.target === null ? [] : [row.entry.target],
+      ),
+      availabilityTargets: ordered.flatMap(
+        (row) => row.entry.availabilityTargets ?? [],
+      ),
+    });
+  }
+  return single;
 }
 
 function evidenceLabel(group: InstallationGroup): string {
@@ -306,7 +408,10 @@ function memberCount(
 }
 
 function sorted(entries: readonly TuiEntry[]): readonly TuiEntry[] {
-  return [...entries].sort((left, right) => compare(left.name, right.name));
+  return [...entries].sort(
+    (left, right) =>
+      compare(left.name, right.name) || compare(left.key, right.key),
+  );
 }
 
 function compare(left: string, right: string): number {
@@ -330,8 +435,12 @@ export function selectionTargets(
       targets.push(section.target);
       continue;
     }
-    for (const entry of chosen)
-      if (entry.target !== null) targets.push(entry.target);
+    for (const entry of chosen) targets.push(...entryTargets(entry));
   }
   return targets;
+}
+
+/** Every Removal Target a row stands for; more than one for identical copies. */
+export function entryTargets(entry: TuiEntry): readonly RemovalTarget[] {
+  return entry.targets ?? (entry.target === null ? [] : [entry.target]);
 }

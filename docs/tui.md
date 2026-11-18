@@ -189,6 +189,16 @@ Sections come from declared evidence, never from a name or a path:
 - One section per Installation Group, labelled with its source.
 - `No shared source` for Skills no Owner records together, including an
   Installation that belongs to no Logical Skill.
+  Identical copies of one Skill in this section show as one row. Two rows are
+  identical copies when the identity hints of the Inventory give them both the
+  same normalized name and the same content hash. The row lists the agents and
+  the paths of all copies, and its note gives the number of copies. Removal,
+  Disable, and Enable from the row use one target for each copy, and the review
+  screen lists each copy. Update is not available from a combined row, because
+  Update accepts one target. The Inventory does not merge the copies. When the
+  content of one copy changes, that copy shows as a separate row again. A
+  Plugin-owned Skill, a System Skill, and a Skill in an Installation Group never
+  join a combined row.
 - `Plugins`, listing each Plugin boundary, its owned Skill names and resources,
   and the agent harness tied to it. A custom Plugin boundary can be selected
   for complete Plugin removal with Enter or whole-Plugin Native Disable with

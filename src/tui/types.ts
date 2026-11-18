@@ -110,6 +110,11 @@ export interface TuiEntry {
   /** Detail-only notes keep hierarchical entry lists name-first. */
   readonly showNoteInRow?: boolean;
   readonly target: RemovalTarget | null;
+  /**
+   * Every Removal Target of a row that combines identical copies of one Skill.
+   * The Inventory keeps the copies as separate records; `target` is the first.
+   */
+  readonly targets?: readonly RemovalTarget[];
   /** Targets used only by the Disabled/Availability workflow. */
   readonly availabilityTargets?: readonly AvailabilityTarget[];
   /** Overrides target-based selectability for non-removal projections. */
