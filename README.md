@@ -67,7 +67,9 @@ remove-all excludes Plugins. Lampwright cannot disable Plugin-owned Skills
 individually. When a harness exposes a safe native control, Lampwright can
 disable or enable the complete Plugin and keep its files installed.
 
-Read-only scans, TUI browsing, and dry runs create no persistent state. The
+Read-only scans, TUI browsing, and dry runs create no persistent state. A theme
+that you confirm in the theme picker is the one preference that Lampwright
+saves. The
 application has no telemetry and does not transmit paths, Inventory, metadata,
 or search queries.
 

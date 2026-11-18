@@ -25,7 +25,7 @@ import {
 } from "./browse.js";
 import { searchLayout } from "./search.js";
 import {
-  nightfallTheme,
+  terminalTheme,
   plainTuiTheme,
   styleTui,
   type TuiStyleRole,
@@ -49,7 +49,7 @@ import type {
 
 export function renderTui(
   state: TuiState,
-  theme: TuiTheme = nightfallTheme,
+  theme: TuiTheme = terminalTheme,
 ): string {
   const style = createPaint(theme);
   if (state.screen === "loading")
@@ -59,6 +59,7 @@ export function renderTui(
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
+  if (state.screen === "theme") return renderThemePicker(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
   if (state.screen === "executing") return renderExecuting(state, style);
   if (state.screen === "availability-plan")
@@ -76,6 +77,79 @@ export function renderTui(
     return `${style.title("Lampwright — Trash")}\n\n${style.info(`${state.kind === "restore" ? "Restoring" : "Permanently purging"} ${state.operation.displayNames.join(", ")}…`)}\n`;
   if (state.screen === "trash-report") return renderTrashReport(state, style);
   return renderReport(state, style);
+}
+
+/**
+ * The picker draws with the highlighted theme, so the sample lines are the
+ * preview. A theme with a problem keeps the previous theme and names the cause.
+ */
+function renderThemePicker(
+  state: Extract<TuiState, { screen: "theme" }>,
+  theme: TuiTheme,
+): string {
+  const style = createPaint(theme);
+  const viewport = state.browse.model.viewport;
+  const width = Math.max(20, viewport.columns - 1);
+  const clip = (value: string): string =>
+    [...value].length > width
+      ? `${[...value].slice(0, Math.max(0, width - 1)).join("")}…`
+      : value;
+  const choice = state.choices[state.index];
+  const sample = [
+    `${style.title("Title")}  ${style.active("active")}  ${style.selected("selected")}  ${style.muted("muted")}`,
+    `${style.success("success")}  ${style.info("info")}  ${style.warning("warning")}  ${style.error("error")}`,
+    `${style.path("/path/to/skill")}  ${style.border("─────")}  ${style.focus(" focused row ")}`,
+  ];
+  const detail =
+    choice === undefined
+      ? []
+      : [
+          style.muted(
+            clip(
+              choice.source === "built-in"
+                ? "Built-in theme"
+                : `Custom theme: ${choice.path ?? choice.name}`,
+            ),
+          ),
+          ...(choice.problem === null
+            ? []
+            : [style.error(clip(`Not usable: ${choice.problem}`))]),
+        ];
+  const footer = [
+    ...(state.notice === null ? [] : [style.warning(clip(state.notice))]),
+    `${style.title("↑↓")} ${style.muted("preview")}  ${style.title("enter")} ${style.muted("use and save")}  ${style.title("esc")} ${style.muted("cancel")}  ${style.title("q")} ${style.muted("quit")}`,
+  ];
+  const fixedRows =
+    2 + 1 + sample.length + 1 + detail.length + 1 + footer.length;
+  const listRows = Math.max(1, viewport.rows - fixedRows);
+  const offset = Math.min(
+    Math.max(0, state.index - Math.floor(listRows / 2)),
+    Math.max(0, state.choices.length - listRows),
+  );
+  const rows = state.choices
+    .slice(offset, offset + listRows)
+    .map((item, position) => {
+      const index = offset + position;
+      const label = clip(
+        ` ${index === state.index ? "›" : " "} ${item.name}${item.source === "custom" ? " (custom)" : ""}${item.problem === null ? "" : " — not usable"} `,
+      );
+      return index === state.index
+        ? style.focus(label)
+        : item.problem === null
+          ? label
+          : style.muted(label);
+    });
+  return `${[
+    style.title("Lampwright — Theme"),
+    "",
+    ...rows,
+    "",
+    ...sample,
+    "",
+    ...detail,
+    "",
+    ...footer,
+  ].join("\n")}\n`;
 }
 
 function renderTrashReport(
@@ -1829,7 +1903,7 @@ export function browseTabHitboxes(state: TuiBrowseState): {
 
 export function renderBrowseLines(
   state: TuiBrowseState,
-  theme: TuiTheme = nightfallTheme,
+  theme: TuiTheme = terminalTheme,
 ): readonly string[] {
   const style = createPaint(theme);
   const model = state.model;
@@ -1948,23 +2022,31 @@ export function renderBrowseLines(
         )
       : model.query === ""
         ? fitStyledSegments(
-            [
-              ...globalControls,
-              { text: " · ", paint: style.muted },
-              ...(isDisabled
-                ? [
-                    { text: "e", paint: style.title },
-                    { text: " enable · ", paint: style.muted },
-                  ]
-                : [
-                    { text: "d", paint: style.title },
-                    { text: " disable · ", paint: style.muted },
-                  ]),
-              { text: "/", paint: style.title },
-              { text: " regex search · ", paint: style.muted },
-              { text: "ctrl-u", paint: style.title },
-              { text: " clear", paint: style.muted },
-            ],
+            withOptionalSegments(
+              [
+                ...globalControls,
+                { text: " · ", paint: style.muted },
+                ...(isDisabled
+                  ? [
+                      { text: "e", paint: style.title },
+                      { text: " enable · ", paint: style.muted },
+                    ]
+                  : [
+                      { text: "d", paint: style.title },
+                      { text: " disable · ", paint: style.muted },
+                    ]),
+                { text: "/", paint: style.title },
+                { text: " regex search · ", paint: style.muted },
+                { text: "ctrl-u", paint: style.title },
+                { text: " clear", paint: style.muted },
+              ],
+              [
+                { text: " · ", paint: style.muted },
+                { text: "ctrl-p", paint: style.title },
+                { text: " theme", paint: style.muted },
+              ],
+              usable,
+            ),
             usable,
             style.muted,
           )
@@ -2236,6 +2318,19 @@ function createPaint(theme: TuiTheme): TuiPaint {
     error: paint("error"),
     path: paint("path"),
   };
+}
+
+/** Adds a secondary hint only when the row holds it without clipping. */
+function withOptionalSegments<Segment extends { readonly text: string }>(
+  segments: readonly Segment[],
+  optional: readonly Segment[],
+  width: number,
+): readonly Segment[] {
+  const length = (values: readonly Segment[]): number =>
+    values.reduce((total, value) => total + [...value.text].length, 0);
+  return length(segments) + length(optional) <= width
+    ? [...segments, ...optional]
+    : segments;
 }
 
 function fitStyledSegments(

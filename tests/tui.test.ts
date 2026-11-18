@@ -15,6 +15,7 @@ import {
   layout,
   matches,
   mouseAction,
+  nightfallThemeDefinition,
   parseLineTuiAction,
   parseMouseReport,
   parseMouseReports,
@@ -1671,8 +1672,15 @@ describe("terminal pane navigation", () => {
     expect(renderTui({ screen: "browse", inventory, model: clicked })).toBe(
       renderTui({ screen: "browse", inventory, model: keyboard }),
     );
+    // The default theme marks the focused row with reverse video.
     expect(
       renderTui({ screen: "browse", inventory, model: clicked }),
+    ).toContain("\u001B[1;7m");
+    expect(
+      renderTui(
+        { screen: "browse", inventory, model: clicked },
+        createNightfallTheme("truecolor"),
+      ),
     ).toContain("48;2;72;78;91");
 
     const doubleClicked = reduceBrowse(initial, {
@@ -3262,6 +3270,12 @@ describe("raw terminal pointer input", () => {
       colorHost.output as unknown as NodeJS.WriteStream,
       { environment: { COLORTERM: "truecolor" } },
     );
+    colorTerminal.render(state);
+    // The default theme follows the terminal: palette colors only.
+    expect(colorHost.written.at(-1)).toContain("[1;36m");
+    expect(colorHost.written.at(-1)).not.toContain("[38;2;");
+    expect(colorHost.written.at(-1)).not.toContain("[38;5;");
+    colorTerminal.setTheme?.(nightfallThemeDefinition);
     colorTerminal.render(state);
     expect(colorHost.written.at(-1)).toContain("[38;2;");
     colorTerminal.close();

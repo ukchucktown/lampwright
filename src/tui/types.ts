@@ -30,6 +30,27 @@ import type {
   UpdatePlan,
   UpdateReport,
 } from "../update/types.js";
+import type { TuiThemeDefinition } from "./theme.js";
+
+/** One row of the theme picker. A choice with a problem cannot be applied. */
+export interface TuiThemeChoice {
+  readonly name: string;
+  readonly source: "built-in" | "custom";
+  readonly path: string | null;
+  readonly theme: TuiThemeDefinition | null;
+  readonly problem: string | null;
+}
+
+/** Theme choices and the one write that the picker can cause. */
+export interface TuiThemeDependencies {
+  /** The theme in use when the terminal UI starts. */
+  readonly current: TuiThemeDefinition;
+  /** Shown once after the first scan, for a preference that had no effect. */
+  readonly notice?: string | null;
+  readonly list: () => Promise<readonly TuiThemeChoice[]>;
+  /** Saves the selection; called only when the user confirms a theme. */
+  readonly select: (name: string) => Promise<void>;
+}
 
 export interface TuiDependencies {
   readonly scan: () => Promise<Inventory>;
@@ -65,6 +86,8 @@ export interface TuiDependencies {
   ) => Promise<UpdateReport>;
   /** Injected for deterministic retention display and expiry classification. */
   readonly now?: () => Date;
+  /** Optional to preserve embedding hosts that do not offer a theme picker. */
+  readonly themes?: TuiThemeDependencies;
 }
 
 export interface TuiViewport {
@@ -276,6 +299,15 @@ export interface TuiSearchState {
   readonly model: TuiSearchModel;
 }
 
+export interface TuiThemeState {
+  readonly screen: "theme";
+  /** The untouched browse position to restore on apply or cancel. */
+  readonly browse: TuiBrowseSnapshot;
+  readonly choices: readonly TuiThemeChoice[];
+  readonly index: number;
+  readonly notice: string | null;
+}
+
 export interface TuiPlanState {
   readonly screen: "plan";
   readonly browse: TuiBrowseSnapshot;
@@ -368,6 +400,7 @@ export type TuiState =
   | TuiLoadingState
   | TuiBrowseState
   | TuiSearchState
+  | TuiThemeState
   | TuiPlanState
   | TuiExecutingState
   | TuiReportState
@@ -416,6 +449,7 @@ export type TuiAction =
   | { readonly kind: "open-search"; readonly value?: string }
   | { readonly kind: "stage-all-search" }
   | { readonly kind: "apply-search" }
+  | { readonly kind: "open-theme-picker" }
   | { readonly kind: "toggle-details" }
   | { readonly kind: "select" }
   | { readonly kind: "confirm" }
@@ -444,6 +478,8 @@ export type TuiOutcome =
   | { readonly status: "failed"; readonly message: string };
 
 export interface TuiTerminal {
+  /** Optional: a terminal with no color support can ignore themes. */
+  setTheme?(theme: TuiThemeDefinition): void;
   render(state: TuiState): void;
   readAction(state: TuiState): Promise<TuiAction>;
   close(): void;
