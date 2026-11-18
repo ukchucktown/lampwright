@@ -308,6 +308,12 @@ export interface TuiThemeState {
   readonly notice: string | null;
 }
 
+/** The key reference, drawn over the browse view it was opened from. */
+export interface TuiHelpState {
+  readonly screen: "help";
+  readonly browse: TuiBrowseSnapshot;
+}
+
 export interface TuiPlanState {
   readonly screen: "plan";
   readonly browse: TuiBrowseSnapshot;
@@ -401,6 +407,7 @@ export type TuiState =
   | TuiBrowseState
   | TuiSearchState
   | TuiThemeState
+  | TuiHelpState
   | TuiPlanState
   | TuiExecutingState
   | TuiReportState
@@ -450,6 +457,7 @@ export type TuiAction =
   | { readonly kind: "stage-all-search" }
   | { readonly kind: "apply-search" }
   | { readonly kind: "open-theme-picker" }
+  | { readonly kind: "open-help" }
   | { readonly kind: "toggle-details" }
   | { readonly kind: "select" }
   | { readonly kind: "confirm" }

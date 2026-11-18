@@ -16,6 +16,7 @@ import {
   matches,
   mouseAction,
   nightfallThemeDefinition,
+  terminalThemeDefinition,
   parseLineTuiAction,
   parseMouseReport,
   parseMouseReports,
@@ -153,9 +154,9 @@ describe("Trash projection", () => {
       plainTuiTheme,
     );
     expect(trashFrame).toContain("Inventory | Disabled (0) | Trash (1)");
-    expect(trashFrame).toContain("enter/dbl-click restore");
+    expect(trashFrame).toContain("enter restore");
     expect(trashFrame).toContain("p purge");
-    expect(trashFrame).toContain("esc Inventory");
+    expect(trashFrame).toContain("esc inventory");
     expect(trashFrame).not.toContain("nothing selected");
     expect(trashFrame).not.toContain("search names by regex");
 
@@ -849,47 +850,51 @@ describe("terminal theme", () => {
     expect(plain).toContain("│");
   });
 
-  it("distinguishes header keys from their action descriptions", () => {
+  it("puts the header and one row of key hints above the browse frame", () => {
     const inventory = groupedInventory();
     const model = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
-      columns: 180,
+      columns: 80,
+    });
+    const plain = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    );
+
+    expect(plain).toHaveLength(23);
+    expect(plain[0]).toMatch(
+      /^Lampwright Inventory \| .* {2,}nothing selected$/u,
+    );
+    expect(plain[2]?.[model.viewport.columns - 2]).toBe("─");
+    // The last line holds a notice only, so nothing sits under the scrollbar.
+    expect(plain.at(-1)?.trim()).toBe("");
+    expect(plain[1]).toMatch(
+      /^space select · enter remove · u update · d disable · \/ search +\? help · q quit$/u,
+    );
+    for (const line of plain) {
+      expect(visibleWidth(line)).toBe(model.viewport.columns - 1);
+    }
+    expect(plain[0]).not.toContain("…");
+    expect(plain[1]).not.toContain("…");
+  });
+
+  it("distinguishes hint keys from their action descriptions", () => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 110,
     });
     const state: TuiState = { screen: "browse", inventory, model };
     const theme = createNightfallTheme("truecolor");
     const colored = renderBrowseLines(state, theme)[1]!;
     const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
-    const controls = renderBrowseLines(state, theme)[2]!;
-    const plainControls = renderBrowseLines(state, plainTuiTheme)[2]!;
-    const actions = renderBrowseLines(state, theme)[3]!;
-    const plainActions = renderBrowseLines(state, plainTuiTheme)[3]!;
 
-    expect(colored).toContain(styleTui(theme, "title", "↑↓/wheel"));
-    expect(colored).toContain(styleTui(theme, "title", "space/dbl-click"));
-    expect(colored).toContain(styleTui(theme, "muted", " move · "));
+    for (const key of ["enter", "d", "u", "space", "/", "ctrl+t", "?", "q"])
+      expect(colored).toContain(styleTui(theme, "title", key));
+    expect(colored).toContain(styleTui(theme, "muted", "remove"));
+    expect(colored).toContain(styleTui(theme, "muted", " · "));
     expect(colored.replace(ansi, "")).toBe(plain);
-    expect(plain).toContain("↑↓/wheel move");
-    expect(plain).toContain("space/dbl-click select");
-    expect(visibleWidth(colored)).toBe(179);
-    expect(controls).toContain(styleTui(theme, "title", "click"));
-    expect(plainControls).toContain("click focus");
-    expect(actions).toContain(styleTui(theme, "title", "q"));
-    expect(plainActions).toContain("q quit");
-    expect(visibleWidth(controls)).toBe(179);
-    expect(visibleWidth(actions)).toBe(179);
-
-    const narrow = renderBrowseLines(
-      {
-        ...state,
-        model: reduceBrowse(model, {
-          kind: "viewport",
-          viewport: { rows: 14, columns: 62 },
-        }),
-      },
-      theme,
-    )[1]!;
-    expect(narrow).toContain(styleTui(theme, "title", "↑↓/wheel"));
-    expect(visibleWidth(narrow)).toBe(61);
+    expect(visibleWidth(colored)).toBe(109);
   });
 
   it.each([
@@ -907,108 +912,351 @@ describe("terminal theme", () => {
     );
 
     expect(lines[1]).toContain("u update");
-    if (columns === 60) expect(lines[1]).toContain("enter remove");
+    if (columns === 60) {
+      expect(lines[1]).toContain("enter remove");
+      expect(lines[1]).toContain("? help · q quit");
+      expect(lines[0]).not.toContain("…");
+    }
     for (const line of lines) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(columns - 1);
     }
   });
 
-  it("preserves the wide Inventory help while prioritizing Update", () => {
+  it("shows only the hints that apply to the view, the pane, and the selection", () => {
     const inventory = groupedInventory();
-    const model = createBrowseModel(createTuiSections(inventory), {
+    const base = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
-      columns: 180,
+      columns: 110,
     });
-    const lines = renderBrowseLines(
-      { screen: "browse", inventory, model },
-      plainTuiTheme,
-    );
-
-    expect(lines[1]).toContain(
-      "↑↓/wheel move · space/dbl-click select · enter remove · u update",
-    );
-    for (const line of lines) {
-      expect(visibleWidth(line)).toBeLessThanOrEqual(
-        model.viewport.columns - 1,
+    const frame = (
+      model: typeof base,
+      view?: "inventory" | "disabled" | "trash",
+    ) =>
+      renderBrowseLines(
+        {
+          screen: "browse",
+          inventory,
+          model,
+          ...(view === undefined ? {} : { view }),
+        },
+        plainTuiTheme,
       );
-    }
+    const footer = (
+      model: typeof base,
+      view?: "inventory" | "disabled" | "trash",
+    ) => frame(model, view)[1]!;
+    const pinned = /ctrl\+t view · \? help · q quit$/u;
+
+    expect(footer(base)).toMatch(
+      /^space select · enter remove · u update · d disable · \/ search · ctrl\+u clear /u,
+    );
+
+    const entries = reduceBrowse(base, { kind: "focus", pane: "entries" });
+    const one = reduceBrowse(entries, { kind: "toggle-select" });
+    expect(footer(one)).toMatch(
+      /^space select · enter remove · u update · d disable · \/ search · ctrl\+u clear /u,
+    );
+    const two = reduceBrowse(reduceBrowse(one, { kind: "move", delta: 1 }), {
+      kind: "toggle-select",
+    });
+    // The row is the same with nothing, one row, or two rows selected.
+    expect(footer(two)).toMatch(
+      /^space select · enter remove · u update · d disable · \/ search · ctrl\+u clear /u,
+    );
+    // The header alone gives the number of selected rows.
+    expect(frame(two)[0]).toMatch(/ 2 selected$/u);
+    expect(footer(two)).not.toMatch(/\d/u);
+    expect(footer(one)).toBe(footer(base));
+    expect(footer(two)).toBe(footer(base));
+
+    expect(
+      footer(reduceBrowse(base, { kind: "focus", pane: "detail" })),
+    ).toMatch(/^↑↓ scroll · PgUp PgDn page · tab pane /u);
+    expect(footer(base, "disabled")).toMatch(
+      /^space select · e enable · u update · \/ search · ctrl\+u clear /u,
+    );
+    expect(footer(base, "trash")).toMatch(
+      /^enter restore · p purge · esc inventory /u,
+    );
+    expect(frame(base, "trash")[0]).toMatch(/ read-only recovery$/u);
+
+    // The right group depends on the width alone, so it never moves.
+    for (const line of [
+      footer(base),
+      footer(one),
+      footer(two),
+      footer(base, "disabled"),
+      footer(base, "trash"),
+    ])
+      expect(line).toMatch(pinned);
   });
 
-  it("shows detail scrolling and resizing controls when detail has focus", () => {
+  it("names the agents on every row, also when all rows have the same agents", () => {
     const inventory = groupedInventory();
-    const model = reduceBrowse(
-      createBrowseModel(createTuiSections(inventory), {
-        rows: 24,
-        columns: 180,
-      }),
-      { kind: "focus", pane: "detail" },
-    );
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 110,
+    });
     const lines = renderBrowseLines(
       { screen: "browse", inventory, model },
       plainTuiTheme,
     );
+    const entryPane = (line: string) => line.slice(line.indexOf("│") + 1);
+    const header = entryPane(lines[3]!);
+    const rows = [lines[4]!, lines[5]!].map(entryPane);
 
-    expect(lines[1]).toContain("↑↓/wheel scroll");
-    expect(lines[1]).toContain("PgUp/PgDn page");
-    expect(lines[2]).toContain("shift+←→ width");
-    expect(lines[2]).toContain("shift+↑↓ height");
-    expect(lines[2]).toContain("tab/shift+tab pane");
+    // The fixture gives both Skills the same two agents.
+    for (const row of rows) expect(row).toMatch(/claude-code codex/u);
+    expect(rows[0]).toMatch(/^\[ \] alpha /u);
+    expect(rows[1]).toMatch(/^\[ \] beta /u);
+    // The section header keeps the shared facts and leaves the agents to the rows.
+    expect(header).toContain("2 entries");
+    expect(header).not.toContain("claude-code");
   });
 
-  it("keeps explicit pane and resize controls visible across browse focus", () => {
+  it("selects and clears a whole section without a notice", () => {
     const inventory = groupedInventory();
-    const sections = createTuiSections(inventory);
-    const navigationModel = createBrowseModel(sections, {
-      rows: 24,
-      columns: 180,
-    });
-    const detailModel = reduceBrowse(navigationModel, {
-      kind: "focus",
-      pane: "detail",
-    });
-    const theme = createNightfallTheme("truecolor");
-    const lines = [
-      renderBrowseLines(
-        { screen: "browse", inventory, model: navigationModel },
-        theme,
-      )[2]!,
-      renderBrowseLines(
-        { screen: "browse", inventory, model: detailModel },
-        theme,
-      )[2]!,
-    ];
-
-    for (const line of lines) {
-      expect(line).toContain(styleTui(theme, "title", "tab/shift+tab"));
-      expect(line).toContain(styleTui(theme, "title", "shift+←→"));
-      expect(line).toContain(styleTui(theme, "title", "shift+↑↓"));
-      expect(line.replace(ansi, "")).not.toContain("⇧");
-    }
-  });
-
-  it("uses four short header rows before the browse frame", () => {
-    const inventory = groupedInventory();
-    const model = createBrowseModel(createTuiSections(inventory), {
+    const base = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
       columns: 80,
     });
-    const plain = renderBrowseLines(
+    const lastLine = (model: typeof base) =>
+      renderBrowseLines({ screen: "browse", inventory, model }, plainTuiTheme)
+        .at(-1)!
+        .trim();
+
+    // Space on a section row takes the whole section.
+    const taken = reduceBrowse(base, { kind: "toggle-select" });
+    expect(taken.selected.size).toBe(2);
+    expect(taken.notice).toBeNull();
+    expect(lastLine(taken)).toBe("");
+
+    const cleared = reduceBrowse(taken, { kind: "toggle-select" });
+    expect(cleared.selected.size).toBe(0);
+    expect(cleared.notice).toBeNull();
+    expect(lastLine(cleared)).toBe("");
+
+    const emptied = reduceBrowse(taken, { kind: "clear-selection" });
+    expect(emptied.selected.size).toBe(0);
+    expect(emptied.notice).toBeNull();
+  });
+
+  it("shows a notice on the last line and keeps the key hints", () => {
+    const inventory = groupedInventory();
+    const model = {
+      ...createBrowseModel(createTuiSections(inventory), {
+        rows: 24,
+        columns: 80,
+      }),
+      notice: "Update requires exactly one target.",
+    };
+    const lines = renderBrowseLines(
       { screen: "browse", inventory, model },
       plainTuiTheme,
     );
 
-    expect(plain[0]).toContain("Lampwright Inventory");
-    expect(plain[1]).toContain("space/dbl-click select");
-    expect(plain[2]).toContain("tab/shift+tab pane");
-    expect(plain[2]).toContain("shift+←→ width");
-    expect(plain[2]).toContain("shift+↑↓ height");
-    expect(plain[3]).toContain("d disable");
-    expect(plain[3]).toContain("/ regex search");
-    expect(plain[3]).toContain("q quit");
-    expect(plain[4]?.[model.viewport.columns - 2]).toBe("─");
-    for (const line of plain.slice(0, 4)) {
-      expect(visibleWidth(line)).toBe(model.viewport.columns - 1);
-      expect(line).not.toContain("…");
+    expect(lines.at(-1)?.trimEnd()).toBe(
+      "! Update requires exactly one target.",
+    );
+    expect(lines[1]).toContain("enter remove");
+    expect(lines).toHaveLength(23);
+  });
+
+  it("opens the key reference over the browse view and restores the position", async () => {
+    const inventory = groupedInventory();
+    const controller = new TuiController(
+      {
+        scan: async () => inventory,
+        plan: () => {
+          throw new Error("planning is not part of this test");
+        },
+        execute: async () => {
+          throw new Error("execution is not part of this test");
+        },
+      },
+      { rows: 24, columns: 80 },
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    const before = controller.state;
+    const browseKey = { name: "", ctrl: false, meta: false, shift: false };
+    expect(parseRawTuiAction(before, "?", browseKey)).toEqual({
+      kind: "open-help",
+    });
+    expect(parseLineTuiAction(before, "help")).toEqual({ kind: "open-help" });
+
+    await controller.dispatch({ kind: "open-help" });
+    const help = controller.state;
+    expect(help.screen).toBe("help");
+    const lines = renderTui(help, plainTuiTheme).split("\n").slice(0, -1);
+    // The browse view stays visible behind the panel.
+    expect(lines[0]).toMatch(/^Lampwright Inventory /u);
+    expect(lines[1]).toContain("? help · q quit");
+    expect(lines).toHaveLength(23);
+    const text = lines.join("\n");
+    // The top border names the first group: the actions of the current view.
+    expect(text).toContain("┌ Inventory ─");
+    expect(text).toContain(" esc close ─┘");
+    expect(text).not.toContain("Keys");
+    // One key to a line: the key, its effect, then the matching mouse action.
+    expect(text).toMatch(/│ enter +remove +│/u);
+    expect(text).toMatch(/│ space +select +dbl-click │/u);
+    expect(text).toMatch(/│ tab +next pane +click +│/u);
+    expect(text).toMatch(/│ ↑↓ +move +wheel +│/u);
+    // A labelled rule opens each later group.
+    expect(text).toMatch(/│ Move and select ─+ mouse ─+ │/u);
+    expect(text).toMatch(/│ App ─+ │/u);
+    // The mouse actions share one column, under their heading.
+    const start = (word: string) =>
+      lines.find((line) => line.includes(` ${word}`))!.lastIndexOf(word);
+    expect(
+      new Set(["mouse", "wheel", "click", "dbl-click"].map(start)).size,
+    ).toBe(1);
+    // Every key that the four-row header showed is in the reference.
+    for (const key of [
+      "↑↓",
+      "wheel",
+      "space",
+      "dbl-click",
+      "enter",
+      "u ",
+      "click",
+      "tab",
+      "shift+←→",
+      "shift+↑↓",
+      "ctrl+t",
+      "esc",
+      "q ",
+      "d ",
+      "/ ",
+      "ctrl+u",
+      "ctrl+p",
+      "PgUp PgDn",
+    ])
+      expect(text).toContain(key);
+    const reference = (view: "disabled" | "trash") =>
+      renderTui(
+        { screen: "help", browse: { ...before, view } } as TuiState,
+        plainTuiTheme,
+      );
+    expect(reference("disabled")).toMatch(/│ e +enable +│/u);
+    expect(reference("disabled")).toContain("┌ Disabled ─");
+    // Escape is named for what it does in the view, not as a second "close".
+    expect(text).toMatch(/│ esc +step back +│/u);
+    expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
+    // The keys of the first group start directly under the top border, the
+    // last key sits directly on the bottom border, and an empty row is above
+    // each later group.
+    const blank = /│ +│/u;
+    const top = lines.findIndex((line) => line.includes("┌ Inventory "));
+    const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
+    const row = (label: string) =>
+      lines.findIndex((line) => line.includes(`│ ${label} ─`));
+    expect(lines[top + 1]).toMatch(/│ enter +remove +│/u);
+    expect(lines[bottom - 1]).toMatch(/│ q +quit +│/u);
+    expect(lines[row("Move and select") - 1]).toMatch(blank);
+    expect(lines[row("App") - 1]).toMatch(blank);
+    // The three group headings start in the same column.
+    expect(
+      new Set(
+        ["Inventory ─", "Move and select ─", "App ─"].map((heading) =>
+          lines.find((line) => line.includes(heading))!.indexOf(heading),
+        ),
+      ).size,
+    ).toBe(1);
+    expect(bottom - top + 1).toBe(21);
+    // The header and the key hints stay visible above the panel.
+    expect(top).toBe(2);
+    // A destructive action is the one effect in the warning style.
+    const nightfall = createNightfallTheme("truecolor");
+    const colored = renderTui(help, nightfall);
+    expect(colored).toContain(
+      styleTui(nightfall, "warning", "remove").slice(0, -4),
+    );
+    expect(colored).not.toContain(
+      styleTui(nightfall, "warning", "update").slice(0, -4),
+    );
+    // The three group headings share the muted style, and the mouse actions
+    // are plain text like the effects.
+    for (const heading of [" Inventory ", "Move and select ", "App ", "mouse"])
+      expect(colored).toContain(styleTui(nightfall, "muted", heading));
+    expect(colored).not.toContain(styleTui(nightfall, "title", " Inventory "));
+    for (const mouse of ["wheel", "click", "dbl-click"]) {
+      expect(colored).not.toContain(
+        styleTui(nightfall, "muted", mouse).slice(0, -4),
+      );
+      expect(colored).not.toContain(
+        styleTui(nightfall, "title", mouse).slice(0, -4),
+      );
+    }
+    expect(reference("trash")).toContain("┌ Trash ─");
+    expect(reference("trash")).toMatch(/│ enter +restore +│/u);
+    expect(reference("trash")).toMatch(/│ p +purge +│/u);
+
+    for (const [value, key] of [
+      ["?", browseKey],
+      ["q", browseKey],
+      ["", { ...browseKey, name: "escape" }],
+    ] as const)
+      expect(parseRawTuiAction(help, value, key)).toEqual({ kind: "cancel" });
+    expect(parseRawTuiAction(help, "x", browseKey)).toEqual({ kind: "noop" });
+    expect(parseLineTuiAction(help, "")).toEqual({ kind: "cancel" });
+
+    await controller.dispatch({ kind: "cancel" });
+    expect(controller.state).toEqual(before);
+  });
+
+  it.each([
+    { columns: 110, rows: 30 },
+    { columns: 80, rows: 24 },
+    { columns: 60, rows: 18 },
+    { columns: 44, rows: 12 },
+    { columns: 20, rows: 6 },
+  ])("keeps the overlays inside a $columns by $rows terminal", (viewport) => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), viewport);
+    const browse = { inventory, model };
+    const states: TuiState[] = [
+      { screen: "help", browse },
+      {
+        screen: "theme",
+        browse,
+        index: 1,
+        notice: null,
+        choices: [
+          {
+            name: "terminal",
+            source: "built-in",
+            path: null,
+            theme: terminalThemeDefinition,
+            problem: null,
+          },
+          {
+            name: "broken",
+            source: "custom",
+            path: "/themes/a-long-directory-name/broken.toml",
+            theme: null,
+            problem: 'title: "blurple" is not a color or an attribute',
+          },
+        ],
+      },
+    ];
+    for (const state of states) {
+      for (const theme of [plainTuiTheme, createNightfallTheme("truecolor")]) {
+        const lines = renderTui(state, theme).split("\n").slice(0, -1);
+        expect(lines.length).toBeLessThanOrEqual(viewport.rows - 1);
+        for (const line of lines)
+          expect(visibleWidth(line)).toBeLessThanOrEqual(viewport.columns - 1);
+        const drawn = lines.join("\n").replace(ansi, "");
+        // From 60 columns, both overlays are panels over the browse view.
+        // From 60 columns, both overlays are panels over the browse view.
+        if (viewport.columns >= 60) expect(drawn).toContain("┌");
+        if (viewport.columns <= 20) expect(drawn).not.toContain("┌");
+        // A panel is drawn over the browse view, which stays around it.
+        if (drawn.includes("┌"))
+          expect(lines[0]?.replace(ansi, "")).toMatch(/^Lamp/u);
+      }
     }
   });
 
@@ -1512,9 +1760,11 @@ describe("terminal pane navigation", () => {
     expect(rendered).not.toContain("focus=");
     expect(rendered).not.toContain("section=");
     expect(rendered).not.toContain("entry=");
-    expect(rendered).toContain("▕");
+    expect(rendered).not.toContain("▕");
     expect(rendered).not.toContain("█");
-    expect(colored).toContain(styleTui(theme, "path", "▕"));
+    expect(colored).toContain(styleTui(theme, "path", "│"));
+    // The thumb has no track: only the pane divider is in the border style.
+    expect(colored).not.toContain(styleTui(theme, "border", "│") + "\n");
   });
 
   it("leaves the browse status row free of navigation diagnostics", () => {
@@ -1613,14 +1863,15 @@ describe("terminal pane navigation", () => {
       delta: 100,
     });
 
-    expect(enlarged.detailRows).toBe(13);
-    expect(layout(enlarged).detailRows).toBe(13);
+    // Two rows above the frame leave two more rows for the panes than before.
+    expect(enlarged.detailRows).toBe(15);
+    expect(layout(enlarged).detailRows).toBe(15);
 
     const taller = reduceBrowse(enlarged, {
       kind: "viewport",
       viewport: { rows: 50, columns: 100 },
     });
-    expect(layout(taller).detailRows).toBe(13);
+    expect(layout(taller).detailRows).toBe(15);
   });
 
   it("never draws beyond a terminal that is temporarily too small", () => {
@@ -1992,7 +2243,7 @@ describe("global name-regex search", () => {
     const lines = rendered.split("\n");
     expect(lines[0]).toContain("Lampwright search");
     expect(lines[1]).toContain("↑↓ move");
-    expect(lines[1]).toContain("ctrl-a");
+    expect(lines[1]).toContain("ctrl+a");
     expect(lines[2]!.trimEnd()).toMatch(/^┌─+┐$/u);
     expect(lines[3]!.trimEnd()).toMatch(/^│> alpha +│$/u);
     expect(lines[4]!.trimEnd()).toMatch(/^├─+┬─+┤$/u);
@@ -2095,9 +2346,9 @@ describe("global name-regex search", () => {
       },
       plainTuiTheme,
     );
-    expect(wide.split("\n")[1]).toContain("ctrl-a");
-    expect(wide.split("\n")[1]).toContain("ctrl-u");
-    expect(wide.split("\n")[1]).toContain("ctrl-c");
+    expect(wide.split("\n")[1]).toContain("ctrl+a");
+    expect(wide.split("\n")[1]).toContain("ctrl+u");
+    expect(wide.split("\n")[1]).toContain("ctrl+c");
     const invalid = renderTui(
       {
         ...blank,
@@ -3279,6 +3530,40 @@ describe("raw terminal pointer input", () => {
     colorTerminal.render(state);
     expect(colorHost.written.at(-1)).toContain("[38;2;");
     colorTerminal.close();
+  });
+
+  it("reports a lone Escape quickly and still reads a complete arrow key", async () => {
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "help",
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 24,
+          columns: 100,
+        }),
+      },
+    };
+    const browse: TuiState = { screen: "browse", ...state.browse };
+
+    // Escape is the first byte of every arrow key, so the terminal waits for
+    // the rest of a sequence. The wait must stay far below the 500 ms default.
+    const started = Date.now();
+    const closing = terminal.readAction(state);
+    input.write("\u001B");
+    await expect(closing).resolves.toEqual({ kind: "cancel" });
+    expect(Date.now() - started).toBeLessThan(300);
+
+    // A complete sequence in one read is one key, not Escape and two letters.
+    const moving = terminal.readAction(browse);
+    input.write("\u001B[B");
+    await expect(moving).resolves.toEqual({ kind: "move", delta: 1 });
+    terminal.close();
   });
 
   it("delivers terminal resizes immediately so the controller can repaint", async () => {

@@ -17,12 +17,12 @@ import type {
  */
 
 /**
- * Seven drawn rows — four header rows, two rules, and status — plus one row
- * left unused. A frame that fills the terminal exactly scrolls it by one on
- * the final newline, which reads as the panes drifting.
+ * Five drawn rows — the header, the key hints, two rules, and the notice
+ * line — plus one row left unused. A frame that fills the terminal exactly
+ * scrolls it by one on the final newline, which reads as the panes drifting.
  */
-const HEADER_ROWS = 4;
-const CHROME_ROWS = 8;
+const HEADER_ROWS = 2;
+const CHROME_ROWS = 6;
 const MIN_PANE_ROWS = 3;
 const MIN_DETAIL_ROWS = 3;
 const SCROLL_MARGIN = 1;
@@ -426,14 +426,8 @@ function toggleSelect(model: TuiBrowseModel): TuiBrowseModel {
     if (everyTaken) selected.delete(key);
     else selected.add(key);
   }
-  return {
-    ...model,
-    selected,
-    notice:
-      model.focus === "sections"
-        ? `${everyTaken ? "Cleared" : "Selected"} ${String(keys.length)} in ${section.label}.`
-        : null,
-  };
+  // No notice: the checkboxes and the header status already show the result.
+  return { ...model, selected, notice: null };
 }
 
 /** Clamps indices to current contents, then brings both viewports into range. */

@@ -10,4 +10,4 @@ A theme is a TOML file with one style string for each role, in the form `<foregr
 
 A custom theme can extend a built-in theme only. A chain of custom themes adds resolution order and cycle checks for small value. A theme file that is not valid never stops the terminal UI: the picker lists it with the reason. A saved selection or an environment value that names no usable theme gives the `terminal` theme and a notice, but an unknown `--theme` value stops Lampwright, because the user typed that value for this run.
 
-The theme picker opens with `ctrl-p`. A letter key in a browse view starts a search, so the picker needs a control key, and `ctrl-t` already changes the view.
+The theme picker opens with `ctrl+p`. A letter key in a browse view starts a search, so the picker needs a control key, and `ctrl+t` already changes the view.

@@ -198,10 +198,10 @@ The UI must:
   description, category, ownership, exposure, and paths in a right-hand
   preview. System Skills remain visible but cannot be staged.
 - Stage individual matches with Space, stage every visible removable match with
-  Ctrl-A, and add staged matches to the existing inventory selection with
+  Ctrl+A, and add staged matches to the existing inventory selection with
   Enter. Enter returns to the prior inventory position, `/` can start another
   additive search, Escape cancels search without changing the inventory
-  selection, Ctrl-U clears the search expression, and Ctrl-U in the inventory
+  selection, Ctrl+U clears the search expression, and Ctrl+U in the inventory
   clears its selection.
 - Show one row per Logical Skill by default.
 - Show the focused Logical Skill's physical paths in the detail pane. Selecting

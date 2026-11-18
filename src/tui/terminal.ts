@@ -1,5 +1,5 @@
 import { emitKeypressEvents } from "node:readline";
-import type { Key } from "node:readline";
+import type { Interface as ReadlineInterface, Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
@@ -277,6 +277,9 @@ function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
   return index < view.entries.total ? { pane, index } : null;
 }
 
+/** How long a lone Escape waits for the rest of a key sequence. */
+const ESCAPE_KEY_WAIT_MS = 50;
+
 type TerminalInput = NodeJS.ReadStream;
 type TerminalOutput = NodeJS.WriteStream;
 
@@ -332,6 +335,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "inventory")
       return { kind: "switch-view", view: "inventory" };
     if (value === "theme") return { kind: "open-theme-picker" };
+    if (value === "help" || value === "?") return { kind: "open-help" };
     if (value === "restore") return { kind: "restore-review" };
     if (value === "purge" || value === "p") return { kind: "purge-review" };
     if (value === "clear") return { kind: "clear-selection" };
@@ -353,6 +357,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "append-query", value: value.slice(1) };
     return { kind: "append-query", value };
   }
+  if (state.screen === "help")
+    return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
   if (state.screen === "theme") {
     if (value === "" || value === "select" || value === "use")
       return { kind: "select" };
@@ -478,7 +484,13 @@ class RawTuiTerminal implements TuiTerminal {
     // mouse reports is claimed here and the keypresses readline shreds it into
     // are ignored rather than typed into the filter.
     input.on("data", this.onData);
-    emitKeypressEvents(input);
+    // A lone Escape is also the first byte of every arrow and function key, so
+    // readline waits before it reports one. Its default wait is 500 ms, which
+    // makes Escape feel slow beside every other key. A complete key sequence
+    // arrives in one read, so a short wait is enough to tell the two apart.
+    emitKeypressEvents(input, {
+      escapeCodeTimeout: ESCAPE_KEY_WAIT_MS,
+    } as unknown as ReadlineInterface);
     input.on("keypress", this.onKeypress);
     output.on("resize", this.onResize);
     input.setRawMode(true);
@@ -632,6 +644,14 @@ export function parseRawTuiAction(
   key: Key,
 ): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
+  if (state.screen === "help")
+    return key.name === "escape" ||
+      key.name === "return" ||
+      key.name === "enter" ||
+      text === "?" ||
+      text === "q"
+      ? { kind: "cancel" }
+      : { kind: "noop" };
   if (state.screen !== "search" && !key.ctrl && !key.meta && text === "q")
     return { kind: "quit" };
   if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
@@ -681,6 +701,7 @@ export function parseRawTuiAction(
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
+    if (text === "?") return { kind: "open-help" };
     if (state.view === "trash") return { kind: "noop" };
     if (text === "u") return { kind: "update-review" };
     if (text === "d")

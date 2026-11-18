@@ -14,13 +14,13 @@ the Skills & plugins contract. Setup delivery adds a harness list, typed
 capability rows, and Inventory/Disabled views through the same pane components.
 It preserves the current theme and lifecycle selection behavior.
 
-`ctrl-o` changes areas and `ctrl-t` changes views within an area. Each setup
+`ctrl+o` changes areas and `ctrl+t` changes views within an area. Each setup
 harness and view owns its selection and position. Setup `d` and `e` open native
 availability reviews. Enter never invokes removal in that area. The linked
 design defines the exact key behavior, source warnings, scope review, owner
 routes, wireframe, and report refresh requirements.
 
-The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl-t` cycles the
+The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl+t` cycles the
 three views and each header label is clickable. Each view retains its own
 cursor, panes, scrolling, search, and additive selection through search,
 review, report, resize, and tab round-trips.
@@ -98,8 +98,9 @@ results/preview split and shows the active regular expression in the theme's
 active-input color. Match status follows the panes, so typed input cannot be
 mistaken for header status or help text.
 
-When detail content overflows, its right edge draws a thin, non-bold cyan
-scrollbar over the muted border track. The status row remains blank unless the
+When pane content overflows, the right edge of the pane draws a thin, non-bold
+cyan thumb for the visible part. The scrollbar has no track, and the panes have
+no right border, so the thumb is the only mark in that column. The status row remains blank unless the
 TUI has an operator-facing notice; internal focus, index, and visible-range
 counters are never shown. Moving to another entry resets detail scrolling to
 the top. Resizing the window or detail pane clamps the range to the content, so
@@ -176,10 +177,12 @@ usable.
 
 ### Theme picker
 
-`ctrl-p` in a browse view opens the theme picker. The header shows this key
-when the row has room for it. The picker lists the built-in themes and then the
-custom themes. The picker draws itself with the highlighted theme, and it shows
-a sample of each role, so a move to another row is a live preview.
+`ctrl+p` in a browse view opens the theme picker. The key reference lists this
+key. The picker is a panel over the middle of the browse view. It lists the
+built-in themes and then the custom themes. The terminal UI draws the browse
+view behind the panel with the highlighted theme, so a move to another row is a
+live preview of the real screen. When the terminal is too small for the panel,
+the picker fills the screen.
 
 - Up and down move the highlight. PgUp and PgDn move by a page.
 - Enter applies the highlighted theme and saves the selection.
@@ -207,23 +210,73 @@ available, Lampwright uses `terminal` and shows a notice.
 Lampwright changes only the top-level `theme` line of `config.toml`. It keeps
 all other lines and the line endings, and it writes through a symbolic link.
 
-The inventory header uses four rows: title and view status; pane-local movement;
-stable pane controls; and primary actions plus search. Each navigation or action
-key is bold cyan and its description is muted. The active view is gold while
-inactive views are muted. `tab/shift+tab` cycles panes,
-`shift+←→` changes pane width, and `shift+↑↓` changes detail height.
-Navigation panes show movement and selection, while detail shows scrolling and
-paging. Pointer focus, view changes, review, back, and quit remain separate
-key/action pairs. Separators remain muted, so the header does not conflate
-navigation with selection. Segment styling is applied after clipping,
-preserving emphasis and reset boundaries on narrow terminals.
+The browse views use two rows above the panes. The first row is the header:
+the title, the three views, and the selection status. The active view is in the
+selected style and the other views are muted. The status is at the right edge:
+`nothing selected`, the number of selected rows, or `read-only recovery` in
+Trash. A narrow terminal shows a shorter status, and it never shows a clipped
+status.
 
-Inventory and Disabled always retain the complete `u update` key/action pair
-at supported terminal widths. When the action row must shrink, it removes or
-shortens secondary navigation hints before it shortens a lifecycle command.
-A 60-column render includes `u update` without an ellipsis.
-The browse grid supports a minimum of nine terminal columns. The margin guard
-leaves eight columns for `u update`.
+The second row shows the key hints that apply in the current context. Each key
+is in the title style and its description is muted. The view, the focused pane,
+and the selection decide the hints:
+
+- Inventory: `space select`, `enter remove`, `u update`, `d disable`,
+  `/ search`, and `ctrl+u clear`.
+- Disabled: `space select`, `e enable`, `u update`, `/ search`, and
+  `ctrl+u clear`.
+- Trash: `enter restore`, `p purge`, and `esc inventory`.
+- A focused detail pane: `↑↓ scroll`, `PgUp PgDn page`, and `tab pane`.
+- A focused row that no plan can contain: `/ search` and `tab pane`.
+
+The hints of a view do not change with the selection: the row is the same with
+no rows, one row, or more rows selected, and it does not show the number of
+selected rows, because the header status shows it. `u update` stays in the row
+when two or more rows are selected. Update accepts one target, and the terminal
+UI shows a notice when the user presses `u` with more.
+
+`? help` and `q quit` stay at the right edge of the hint row. From 100 columns,
+`ctrl+t view` joins them. The right group depends on the width only, so it does
+not move when the selection changes. A hint that does not fit leaves the row
+whole, from the end of the list, so the row never shows a clipped key.
+Inventory and Disabled keep the complete `u update` hint down to the minimum
+browse width of nine columns whenever Update can apply.
+
+The last line of the frame shows a notice when there is one, and is empty in
+all other conditions. No hint is below the detail pane, so the scroll mark of
+the detail pane ends at an empty line. A selection or a cleared selection gives no notice, because the
+checkboxes and the header status show the result.
+
+`?` in a browse view opens the key reference. It is a panel with a border that
+the terminal UI draws over the middle of the browse view. The browse view stays
+visible behind the panel in a dim style. The panel starts below the header and
+the key hints when the terminal has the rows.
+
+The panel has one key on each line in three columns: the key, its effect, and
+the mouse action that has the same effect. The keys are in the title style. The
+effects and the mouse actions are plain text. The three group headings and the
+`mouse` heading are muted. The panel has three groups. The first group lists the actions of the current view. The
+top border of the panel shows the name of that view, and the keys of the group
+start directly under the border. A labelled rule opens each of the other two
+groups: the keys for movement and selection, and the application keys. An empty
+row is above each of those two groups. The last key is directly above the
+bottom border, which ends with `esc close`. An effect that removes content,
+`remove` or `purge`, is in the warning style. The `esc` row names the effect of
+Escape in the current view.
+
+`?`, `q`, Escape, or Enter closes the panel and keeps the browse position. The
+complete panel has 21 rows. A shorter terminal drops the empty rows between the
+groups first, then the rules, before the key reference fills the screen.
+
+Escape is the first byte of each arrow key and each function key, so the
+terminal waits for the rest of a key sequence before it reports a lone Escape.
+The wait is 50 ms. The default of Node.js is 500 ms, which made Escape slower
+than each other key.
+
+A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
+one effect have a space between them, for example `PgUp PgDn`. `?`,
+`q`, Escape, or Enter closes the panel and keeps the browse position. When the
+terminal is too small for the panel, the key reference fills the screen.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
@@ -301,10 +354,12 @@ Sections come from declared evidence, never from a name or a path:
   the source that the synced manifest declares. Its rows draw no checkbox,
   because offering one would invite a click that can only be refused.
 
-A section header carries what its entries share — how many, the Owner, the
-Scope, the path count, and the agents that can load them. A row repeats none of
-that; it shows a note only where it departs from the section, such as an
-unusual exposure, `protected`, `broken`, or `spans groups`. Descriptions are too
+A section header carries what its entries share: how many, the Owner, the
+Scope, and the path count. Each row shows the agents that can load its Skill.
+A row shows its agents in each condition, so a section whose rows have the same
+agents and a section whose rows have different agents use the same layout. A
+row also shows a note where it departs from the section, such as `protected`,
+`broken`, or `spans groups`. Descriptions are too
 long to read in a row, so they are word-wrapped in the detail area with the
 physical paths.
 
@@ -323,12 +378,12 @@ preview but cannot make an unrelated Skill appear. Explicit field syntax such
 as `category:` and `agent:` is deferred for later prototyping.
 
 Up and down move through matches. Space stages the focused removable Skill and
-Ctrl-A stages every visible removable match. System Skills stay visible without
+Ctrl+A stages every visible removable match. System Skills stay visible without
 a selectable marker. Enter adds the staged Skills to the existing inventory
 selection and returns to the exact inventory position that opened search;
 another `/` starts another additive search. Escape cancels search and discards
-its staging without changing the inventory selection. Ctrl-U clears the regex
-while preserving staging. From the inventory, Ctrl-U clears the complete
+its staging without changing the inventory selection. Ctrl+U clears the regex
+while preserving staging. From the inventory, Ctrl+U clears the complete
 selection.
 
 `space` on an entry selects it. `space` on a section takes or clears the whole
@@ -349,7 +404,7 @@ no mutable target. With nothing selected, `enter` reviews the removable row
 under the cursor and does nothing on an informational row.
 
 `q` exits the TUI immediately from every screen except search, where it is valid
-regex input; Ctrl-C remains an alternate exit everywhere. In the inventory,
+regex input; Ctrl+C remains an alternate exit everywhere. In the inventory,
 `esc` unwinds pane focus and then selection before leaving, so a stray keypress
 cannot discard a selection.
 
@@ -472,7 +527,7 @@ with its result. The refresh preserves the other view snapshots.
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
 `detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
-`disable`, `update`, `disabled`, `trash`, `theme`, and `quit`. In Disabled, `enable` opens
+`disable`, `update`, `disabled`, `trash`, `theme`, `help`, and `quit`. In Disabled, `enable` opens
 review. `update` opens Update review in Inventory or Disabled. The `inventory`
 and `trash` commands switch peer views. Navigation, selection, and
 `search <regex>` match Inventory. Search accepts a regex, `up`, `down`, `take`,
@@ -484,7 +539,8 @@ accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`. Availability
 reports also accept `back`. This command refreshes Inventory and Disabled, and
 then returns to Inventory. Update reports accept `back` and use the same refresh.
 Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
-`up`, `down`, `select`, `back`, and `quit`. End-of-input cancels safely.
+`up`, `down`, `select`, `back`, and `quit`. Any command except `quit` closes the
+key reference. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 
