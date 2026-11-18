@@ -1042,7 +1042,7 @@ describe("terminal theme", () => {
     expect(lines).toHaveLength(23);
     const text = lines.join("\n");
     // The top border names the first group: the actions of the current view.
-    expect(text).toContain("┌─ Inventory ─");
+    expect(text).toContain("┌ Inventory ─");
     expect(text).toContain(" esc close ─┘");
     expect(text).not.toContain("Keys");
     // One key to a line: the key, its effect, then the matching mouse action.
@@ -1087,7 +1087,7 @@ describe("terminal theme", () => {
         plainTuiTheme,
       );
     expect(reference("disabled")).toMatch(/│ e +enable +│/u);
-    expect(reference("disabled")).toContain("┌─ Disabled ─");
+    expect(reference("disabled")).toContain("┌ Disabled ─");
     // Escape is named for what it does in the view, not as a second "close".
     expect(text).toMatch(/│ esc +step back +│/u);
     expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
@@ -1095,7 +1095,7 @@ describe("terminal theme", () => {
     // last key sits directly on the bottom border, and an empty row is above
     // each later group.
     const blank = /│ +│/u;
-    const top = lines.findIndex((line) => line.includes("┌─ Inventory "));
+    const top = lines.findIndex((line) => line.includes("┌ Inventory "));
     const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
     const row = (label: string) =>
       lines.findIndex((line) => line.includes(`│ ${label} ─`));
@@ -1103,6 +1103,14 @@ describe("terminal theme", () => {
     expect(lines[bottom - 1]).toMatch(/│ q +quit +│/u);
     expect(lines[row("Move and select") - 1]).toMatch(blank);
     expect(lines[row("App") - 1]).toMatch(blank);
+    // The three group headings start in the same column.
+    expect(
+      new Set(
+        ["Inventory ─", "Move and select ─", "App ─"].map((heading) =>
+          lines.find((line) => line.includes(heading))!.indexOf(heading),
+        ),
+      ).size,
+    ).toBe(1);
     expect(bottom - top + 1).toBe(21);
     // The header and the key hints stay visible above the panel.
     expect(top).toBe(2);
@@ -1128,7 +1136,7 @@ describe("terminal theme", () => {
         styleTui(nightfall, "title", mouse).slice(0, -4),
       );
     }
-    expect(reference("trash")).toContain("┌─ Trash ─");
+    expect(reference("trash")).toContain("┌ Trash ─");
     expect(reference("trash")).toMatch(/│ enter +restore +│/u);
     expect(reference("trash")).toMatch(/│ p +purge +│/u);
 
@@ -1189,10 +1197,10 @@ describe("terminal theme", () => {
         const drawn = lines.join("\n").replace(ansi, "");
         // From 60 columns, both overlays are panels over the browse view.
         // From 60 columns, both overlays are panels over the browse view.
-        if (viewport.columns >= 60) expect(drawn).toContain("┌─");
-        if (viewport.columns <= 20) expect(drawn).not.toContain("┌─");
+        if (viewport.columns >= 60) expect(drawn).toContain("┌");
+        if (viewport.columns <= 20) expect(drawn).not.toContain("┌");
         // A panel is drawn over the browse view, which stays around it.
-        if (drawn.includes("┌─"))
+        if (drawn.includes("┌"))
           expect(lines[0]?.replace(ansi, "")).toMatch(/^Lamp/u);
       }
     }

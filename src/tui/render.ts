@@ -166,14 +166,19 @@ function panelLines(
   hint: string,
   inner: number,
   style: TuiPaint,
-  /** A title that is a group heading takes the style of the other headings. */
-  titlePaint: (value: string) => string = style.title,
+  /**
+   * A title that is a group heading takes the style of the headings in the
+   * body and starts in their column, directly after the corner.
+   */
+  heading = false,
 ): readonly string[] {
+  const titlePaint = heading ? style.muted : style.title;
+  const titleLead = heading ? "" : "─";
   const rule = (label: string, start: string, end: string, lead: boolean) => {
     const text = label === "" ? "" : ` ${label} `;
     const fill = "─".repeat(Math.max(0, inner + 2 - [...text].length - 1));
     return lead
-      ? `${style.border(`${start}─`)}${titlePaint(text)}${style.border(`${fill}${end}`)}`
+      ? `${style.border(`${start}${titleLead}`)}${titlePaint(text)}${style.border(`${"─".repeat(Math.max(0, inner + 2 - [...text].length - titleLead.length))}${end}`)}`
       : `${style.border(`${start}${fill}`)}${style.muted(text)}${style.border(`─${end}`)}`;
   };
   return [
@@ -334,7 +339,7 @@ function renderHelp(
     );
     return overlayPanel(
       frame,
-      panelLines(title, body, closeHint, inner, style, style.muted),
+      panelLines(title, body, closeHint, inner, style, true),
       viewport,
       // Below the header and the key hints when the frame has the rows.
       2,
