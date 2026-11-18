@@ -2904,6 +2904,87 @@ describe("terminal removal interactions", () => {
     expect(terminal.frames.join("\n")).toContain("Completed");
   });
 
+  it("returns from the Removal report to a fresh Inventory, and exits on q", async () => {
+    const full = groupedInventory(["alpha", "beta", "gamma"]);
+    const afterRemoval = groupedInventory(["beta", "gamma"]);
+    let scans = 0;
+    let failScan = false;
+    const operation = { id: "operation-1" } as QuarantineOperation;
+    const dependencies: TuiDependencies = {
+      scan: async () => {
+        if (failScan) throw new Error("scan is unavailable");
+        scans += 1;
+        return scans === 1 ? full : afterRemoval;
+      },
+      plan,
+      execute: async (removalPlan) =>
+        buildExecutionReport({
+          planId: removalPlan.id,
+          inventoryId: removalPlan.inventoryId,
+        }),
+      quarantine: {
+        listOperations: async () => (scans === 1 ? [] : [operation]),
+      } as unknown as NonNullable<TuiDependencies["quarantine"]>,
+      listDisabled: async () => [],
+    };
+    const reach = async () => {
+      scans = 0;
+      const controller = new TuiController(dependencies, {
+        rows: 24,
+        columns: 100,
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "focus", pane: "entries" });
+      await controller.dispatch({ kind: "select" });
+      await controller.dispatch({ kind: "confirm" });
+      await controller.waitForExecution();
+      expect(controller.state.screen).toBe("report");
+      return controller;
+    };
+    const key = { name: "", ctrl: false, meta: false, shift: false };
+
+    const returning = await reach();
+    const report = returning.state;
+    expect(renderTui(report, plainTuiTheme)).toContain(
+      "Esc Inventory · q quit",
+    );
+    expect(parseRawTuiAction(report, "", { ...key, name: "escape" })).toEqual({
+      kind: "cancel",
+    });
+    expect(parseRawTuiAction(report, "q", key)).toEqual({ kind: "quit" });
+    expect(parseLineTuiAction(report, "back")).toEqual({ kind: "cancel" });
+    expect(parseLineTuiAction(report, "quit")).toEqual({ kind: "quit" });
+
+    await returning.dispatch({ kind: "cancel" });
+    const browse = returning.state;
+    if (browse.screen !== "browse") throw new Error("expected browse");
+    expect(scans).toBe(2);
+    expect(browse.view).toBe("inventory");
+    expect(browse.inventory).toBe(afterRemoval);
+    expect(
+      browse.model.sections.flatMap((section) =>
+        section.entries.map((entry) => entry.name),
+      ),
+    ).toEqual(["beta", "gamma"]);
+    expect(browse.model.selected.size).toBe(0);
+    // The Trash count comes from a new read, not from before the Removal.
+    expect(browse.operations?.size).toBe(1);
+    expect(renderTui(browse, plainTuiTheme)).toContain("Trash (1)");
+
+    const quitting = await reach();
+    await quitting.dispatch({ kind: "quit" });
+    expect(quitting.state.screen).toBe("done");
+
+    // A refresh that fails never shows the Inventory from before the Removal.
+    const failing = await reach();
+    failScan = true;
+    await failing.dispatch({ kind: "cancel" });
+    expect(failing.state).toMatchObject({
+      screen: "done",
+      report: expect.objectContaining({ status: expect.any(String) }),
+    });
+  });
+
   it("renders a readable scrolling report and keeps identifiers behind details", async () => {
     const inventory = groupedInventory(["alpha", "beta", "gamma", "delta"]);
     const controller = new TuiController(

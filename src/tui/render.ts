@@ -3474,14 +3474,14 @@ function reportFooterLines(state: TuiReportState, style: TuiPaint): string[] {
     );
     lines.push(
       style.active("←/→ choose fallback   f review selected fallback") +
-        style.muted("   Esc/q finish"),
+        style.muted("   Esc Inventory · q quit"),
     );
     lines.push(
       style.muted(
         "Fallbacks are never executed automatically; review and confirm each separately.",
       ),
     );
-  } else lines.push(style.muted("Esc/q finish"));
+  } else lines.push(style.muted("Esc Inventory · q quit"));
   lines.push(style.title("d") + style.muted(` ${details}`));
   return lines;
 }
