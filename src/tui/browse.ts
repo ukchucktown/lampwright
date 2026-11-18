@@ -17,12 +17,12 @@ import type {
  */
 
 /**
- * Four drawn rows — one header row, two rules, and the footer — plus one row
- * left unused. A frame that fills the terminal exactly scrolls it by one on
- * the final newline, which reads as the panes drifting.
+ * Five drawn rows — the header, the key hints, two rules, and the notice
+ * line — plus one row left unused. A frame that fills the terminal exactly
+ * scrolls it by one on the final newline, which reads as the panes drifting.
  */
-const HEADER_ROWS = 1;
-const CHROME_ROWS = 5;
+const HEADER_ROWS = 2;
+const CHROME_ROWS = 6;
 const MIN_PANE_ROWS = 3;
 const MIN_DETAIL_ROWS = 3;
 const SCROLL_MARGIN = 1;

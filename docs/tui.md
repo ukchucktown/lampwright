@@ -209,15 +209,15 @@ available, Lampwright uses `terminal` and shows a notice.
 Lampwright changes only the top-level `theme` line of `config.toml`. It keeps
 all other lines and the line endings, and it writes through a symbolic link.
 
-The browse views use one header row and one footer row. The header shows the
-title, the three views, and the selection status. The active view is in the
+The browse views use two rows above the panes. The first row is the header:
+the title, the three views, and the selection status. The active view is in the
 selected style and the other views are muted. The status is at the right edge:
 `nothing selected`, the number of selected rows, or `read-only recovery` in
 Trash. A narrow terminal shows a shorter status, and it never shows a clipped
 status.
 
-The footer shows the key hints that apply in the current context. Each key is
-in the title style and its description is muted. The view, the focused pane,
+The second row shows the key hints that apply in the current context. Each key
+is in the title style and its description is muted. The view, the focused pane,
 and the selection decide the hints:
 
 - Inventory: `enter remove`, `d disable`, `u update`, `space select`, and
@@ -229,19 +229,23 @@ and the selection decide the hints:
 - A focused detail pane: `↑↓ scroll`, `PgUp/PgDn page`, and `tab pane`.
 - A focused row that no plan can contain: `/ search` and `tab pane`.
 
-`? help` and `q quit` stay at the right edge of the footer. From 100 columns,
+`? help` and `q quit` stay at the right edge of the hint row. From 100 columns,
 `ctrl-t view` joins them. The right group depends on the width only, so it does
 not move when the selection changes. A hint that does not fit leaves the row
-whole, from the end of the list, so the footer never shows a clipped key.
+whole, from the end of the list, so the row never shows a clipped key.
 Inventory and Disabled keep the complete `u update` hint down to the minimum
-browse width of nine columns whenever Update can apply. A notice replaces the
-footer hints until the next action.
+browse width of nine columns whenever Update can apply.
+
+The last line of the frame shows a notice when there is one, and is empty in
+all other conditions. No hint is below the detail pane, so the scroll mark of
+the detail pane ends at an empty line.
 
 `?` in a browse view opens the key reference. It is a panel with a border that
 the terminal UI draws over the middle of the browse view. The browse view stays
-visible behind the panel in a dim style. The panel lists each key in groups:
-the actions of each view, then movement, panes, pane size, selection, search,
-views, and application keys. The row of the current view is highlighted. `?`,
+visible behind the panel in a dim style. The panel has one key on each line in
+two columns: the key, then its effect. A mouse action is on the line of the key
+that has the same effect. The panel has three groups: the actions of the
+current view, the keys for movement and selection, and the other keys. `?`,
 `q`, Escape, or Enter closes the panel and keeps the browse position. When the
 terminal is too small for the panel, the key reference fills the screen.
 

@@ -136,9 +136,9 @@ function overlayPanel(
   const width = visibleLength(panel[0] ?? "");
   const usable = Math.max(0, viewport.columns - 1);
   const rows = Math.max(0, viewport.rows - 1);
-  if (width + 2 > usable || panel.length + 2 > rows) return null;
+  if (width + 2 > usable || panel.length > rows) return null;
   const left = Math.floor((usable - width) / 2);
-  const top = Math.max(1, Math.floor((rows - panel.length) / 2));
+  const top = Math.floor((rows - panel.length) / 2);
   const lines = Array.from({ length: Math.max(rows, frame.length) }, (_, row) =>
     fit(frame[row] ?? "", usable),
   );
@@ -204,82 +204,56 @@ function browseFrame(
   );
 }
 
-/** Every key, grouped by purpose. The current view's actions lead. */
+/**
+ * Every key, one to a line, in two aligned columns: the key, then what it
+ * does. Three short groups: the actions of the current view, the ways to move
+ * and select, and the rest. The mouse equivalents share the line of their key.
+ */
 function helpBody(
   view: TuiBrowseState["view"],
   style: TuiPaint,
 ): readonly string[] {
-  const row = (
-    label: string,
-    hints: readonly (readonly [string, string])[],
-    current = false,
-  ): string =>
-    `${(current ? style.active : style.muted)(fit(label, 11))}${hints
-      .map(
-        ([key, text]) =>
-          `${style.title(key)}${text === "" ? "" : ` ${style.muted(text)}`}`,
-      )
-      .join("   ")}`;
-  const active = view ?? "inventory";
-  return [
-    "",
-    row(
-      "Inventory",
-      [
-        ["enter", "remove"],
-        ["d", "disable"],
-        ["u", "update"],
-      ],
-      active === "inventory",
-    ),
-    row(
-      "Disabled",
-      [
-        ["e", "enable"],
-        ["u", "update"],
-      ],
-      active === "disabled",
-    ),
-    row(
-      "Trash",
-      [
-        ["enter", "restore"],
-        ["p", "purge"],
-      ],
-      active === "trash",
-    ),
-    "",
-    row("Move", [
-      ["↑↓", ""],
-      ["PgUp/PgDn", ""],
-      ["wheel", ""],
-    ]),
-    row("Panes", [
-      ["tab", ""],
-      ["shift+tab", ""],
-      ["click", ""],
-    ]),
-    row("Resize", [
-      ["shift+←→", "width"],
-      ["shift+↑↓", "height"],
-    ]),
-    row("Select", [
-      ["space", ""],
-      ["dbl-click", ""],
-      ["ctrl-u", "clear"],
-    ]),
-    row("Search", [["/", "or type a name"]]),
-    row("Views", [
-      ["ctrl-t", "or click a view"],
-      ["esc", "back"],
-    ]),
-    row("App", [
+  const actions: readonly (readonly [string, string])[] =
+    view === "trash"
+      ? [
+          ["enter", "restore"],
+          ["p", "purge"],
+        ]
+      : view === "disabled"
+        ? [
+            ["e", "enable"],
+            ["u", "update"],
+          ]
+        : [
+            ["enter", "remove"],
+            ["d", "disable"],
+            ["u", "update"],
+          ];
+  const groups: readonly (readonly (readonly [string, string])[])[] = [
+    actions,
+    [
+      ["↑↓  wheel", "move"],
+      ["PgUp/PgDn", "page"],
+      ["tab  click", "next pane"],
+      ["space  dbl-click", "select"],
+      ["ctrl-u", "clear selection"],
+      ["/", "search, or type a name"],
+    ],
+    [
+      ["ctrl-t", "next view"],
       ["ctrl-p", "theme"],
-      ["?", "help"],
+      ["shift+←→", "pane width"],
+      ["shift+↑↓", "detail height"],
+      ["esc", "back"],
       ["q", "quit"],
-    ]),
-    "",
+    ],
   ];
+  const keyWidth =
+    Math.max(...groups.flat().map(([key]) => [...key].length)) + 3;
+  return groups.flatMap((group, index) => [
+    ...(index === 0 ? [] : [""]),
+    ...group.map(([key, text]) => `${style.title(fit(key, keyWidth))}${text}`),
+  ]);
 }
 
 function renderHelp(
@@ -288,20 +262,30 @@ function renderHelp(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const body = helpBody(state.browse.view, style);
-  const inner = Math.min(
-    Math.max(...body.map(visibleLength)),
-    Math.max(0, viewport.columns - 7),
-  );
-  const panel = panelLines("Keys", body, "esc or ? close", inner, style);
-  const lines =
+  const spaced = helpBody(state.browse.view, style);
+  // A short terminal drops the blank lines between groups before the panel.
+  const compact = spaced.filter((line) => line !== "");
+  const frame = dimFrame(browseFrame(state.browse, theme), theme);
+  const panel = (body: readonly string[]) =>
     overlayPanel(
-      dimFrame(browseFrame(state.browse, theme), theme),
-      panel,
+      frame,
+      panelLines(
+        "Keys",
+        body,
+        "esc close",
+        Math.min(
+          Math.max(...body.map(visibleLength)),
+          Math.max(0, viewport.columns - 7),
+        ),
+        style,
+      ),
       viewport,
-    ) ??
+    );
+  const lines =
+    panel(spaced) ??
+    panel(compact) ??
     // Too small for a panel: the keys take the whole screen.
-    [style.title("Lampwright — Keys"), ...body, style.muted("esc or ? close")]
+    [style.title("Lampwright — Keys"), ...compact, style.muted("esc close")]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
   return `${lines.join("\n")}\n`;
@@ -2168,6 +2152,7 @@ export function renderBrowseLines(
   out.push(
     `${views}${" ".repeat(Math.max(0, usable - visibleLength(views) - statusText.length))}${status}`,
   );
+  out.push(browseHints(state, view.entries.total, usable, style));
   out.push(
     style.border(
       `${"─".repeat(leftWidth)}┬${"─".repeat(usable - leftWidth - 1)}`,
@@ -2209,9 +2194,7 @@ export function renderBrowseLines(
   }
 
   out.push(
-    model.notice === null
-      ? browseFooter(state, view.entries.total, usable, style)
-      : style.info(fit(`! ${model.notice}`, usable)),
+    model.notice === null ? "" : style.info(fit(`! ${model.notice}`, usable)),
   );
 
   return out.map((line) => fit(line, usable));
@@ -2275,11 +2258,11 @@ const pinnedKeyHints: readonly KeyHint[] = [
 ];
 
 /**
- * One row: context hints on the left, help and quit pinned to the right. A
- * hint that does not fit leaves whole, from the least useful end, so the row
- * never shows a clipped key.
+ * The row under the header: context hints on the left, help and quit pinned
+ * to the right. A hint that does not fit leaves whole, from the least useful
+ * end, so the row never shows a clipped key.
  */
-function browseFooter(
+function browseHints(
   state: TuiBrowseState,
   visibleEntries: number,
   width: number,

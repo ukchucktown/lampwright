@@ -850,7 +850,7 @@ describe("terminal theme", () => {
     expect(plain).toContain("│");
   });
 
-  it("uses one header row and one footer row around the browse frame", () => {
+  it("puts the header and one row of key hints above the browse frame", () => {
     const inventory = groupedInventory();
     const model = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
@@ -865,18 +865,20 @@ describe("terminal theme", () => {
     expect(plain[0]).toMatch(
       /^Lampwright Inventory \| .* {2,}nothing selected$/u,
     );
-    expect(plain[1]?.[model.viewport.columns - 2]).toBe("─");
-    expect(plain.at(-1)).toMatch(
+    expect(plain[2]?.[model.viewport.columns - 2]).toBe("─");
+    // The last line holds a notice only, so nothing sits under the scrollbar.
+    expect(plain.at(-1)?.trim()).toBe("");
+    expect(plain[1]).toMatch(
       /^enter remove · d disable · u update · space select · \/ search +\? help · q quit$/u,
     );
     for (const line of plain) {
       expect(visibleWidth(line)).toBe(model.viewport.columns - 1);
     }
     expect(plain[0]).not.toContain("…");
-    expect(plain.at(-1)).not.toContain("…");
+    expect(plain[1]).not.toContain("…");
   });
 
-  it("distinguishes footer keys from their action descriptions", () => {
+  it("distinguishes hint keys from their action descriptions", () => {
     const inventory = groupedInventory();
     const model = createBrowseModel(createTuiSections(inventory), {
       rows: 24,
@@ -884,8 +886,8 @@ describe("terminal theme", () => {
     });
     const state: TuiState = { screen: "browse", inventory, model };
     const theme = createNightfallTheme("truecolor");
-    const colored = renderBrowseLines(state, theme).at(-1)!;
-    const plain = renderBrowseLines(state, plainTuiTheme).at(-1)!;
+    const colored = renderBrowseLines(state, theme)[1]!;
+    const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
 
     for (const key of ["enter", "d", "u", "space", "/", "ctrl-t", "?", "q"])
       expect(colored).toContain(styleTui(theme, "title", key));
@@ -909,10 +911,10 @@ describe("terminal theme", () => {
       plainTuiTheme,
     );
 
-    expect(lines.at(-1)).toContain("u update");
+    expect(lines[1]).toContain("u update");
     if (columns === 60) {
-      expect(lines.at(-1)).toContain("enter remove");
-      expect(lines.at(-1)).toContain("? help · q quit");
+      expect(lines[1]).toContain("enter remove");
+      expect(lines[1]).toContain("? help · q quit");
       expect(lines[0]).not.toContain("…");
     }
     for (const line of lines) {
@@ -942,7 +944,7 @@ describe("terminal theme", () => {
     const footer = (
       model: typeof base,
       view?: "inventory" | "disabled" | "trash",
-    ) => frame(model, view).at(-1)!;
+    ) => frame(model, view)[1]!;
     const pinned = /ctrl-t view · \? help · q quit$/u;
 
     expect(footer(base)).toMatch(
@@ -985,7 +987,7 @@ describe("terminal theme", () => {
       expect(line).toMatch(pinned);
   });
 
-  it("shows a notice in place of the footer hints", () => {
+  it("shows a notice on the last line and keeps the key hints", () => {
     const inventory = groupedInventory();
     const model = {
       ...createBrowseModel(createTuiSections(inventory), {
@@ -1002,6 +1004,7 @@ describe("terminal theme", () => {
     expect(lines.at(-1)?.trimEnd()).toBe(
       "! Update requires exactly one target.",
     );
+    expect(lines[1]).toContain("enter remove");
     expect(lines).toHaveLength(23);
   });
 
@@ -1035,37 +1038,44 @@ describe("terminal theme", () => {
     const lines = renderTui(help, plainTuiTheme).split("\n").slice(0, -1);
     // The browse view stays visible behind the panel.
     expect(lines[0]).toMatch(/^Lampwright Inventory /u);
-    expect(lines.at(-1)).toContain("? help · q quit");
+    expect(lines[1]).toContain("? help · q quit");
     expect(lines).toHaveLength(23);
     const text = lines.join("\n");
     expect(text).toContain("┌─ Keys ");
-    expect(text).toContain(" esc or ? close ─┘");
+    expect(text).toContain(" esc close ─┘");
+    // One key to a line: the key, then what it does.
+    expect(text).toMatch(/│ enter +remove +│/u);
+    expect(text).toMatch(/│ space {2}dbl-click +select +│/u);
     // Every key that the four-row header showed is in the reference.
     for (const key of [
       "↑↓",
       "wheel",
       "space",
       "dbl-click",
-      "enter remove",
-      "u update",
+      "enter",
+      "u ",
       "click",
       "tab",
-      "shift+tab",
-      "shift+←→ width",
-      "shift+↑↓ height",
+      "shift+←→",
+      "shift+↑↓",
       "ctrl-t",
-      "esc back",
-      "q quit",
-      "d disable",
-      "/ or type a name",
-      "ctrl-u clear",
-      "ctrl-p theme",
-      "e enable",
-      "enter restore",
-      "p purge",
+      "esc",
+      "q ",
+      "d ",
+      "/ ",
+      "ctrl-u",
+      "ctrl-p",
       "PgUp/PgDn",
     ])
       expect(text).toContain(key);
+    const reference = (view: "disabled" | "trash") =>
+      renderTui(
+        { screen: "help", browse: { ...before, view } } as TuiState,
+        plainTuiTheme,
+      );
+    expect(reference("disabled")).toMatch(/│ e +enable +│/u);
+    expect(reference("trash")).toMatch(/│ enter +restore +│/u);
+    expect(reference("trash")).toMatch(/│ p +purge +│/u);
 
     for (const [value, key] of [
       ["?", browseKey],
@@ -1125,8 +1135,9 @@ describe("terminal theme", () => {
         // From 60 columns, both overlays are panels over the browse view.
         if (viewport.columns >= 60) expect(drawn).toContain("┌─");
         if (viewport.columns <= 20) expect(drawn).not.toContain("┌─");
+        // A panel is drawn over the browse view, which stays around it.
         if (drawn.includes("┌─"))
-          expect(lines[0]?.replace(ansi, "")).toMatch(/^Lampwright Inventory/u);
+          expect(lines[0]?.replace(ansi, "")).toMatch(/^Lampwri/u);
       }
     }
   });
@@ -1732,15 +1743,15 @@ describe("terminal pane navigation", () => {
       delta: 100,
     });
 
-    // The one-row header leaves three more rows for the panes than before.
-    expect(enlarged.detailRows).toBe(16);
-    expect(layout(enlarged).detailRows).toBe(16);
+    // Two rows above the frame leave two more rows for the panes than before.
+    expect(enlarged.detailRows).toBe(15);
+    expect(layout(enlarged).detailRows).toBe(15);
 
     const taller = reduceBrowse(enlarged, {
       kind: "viewport",
       viewport: { rows: 50, columns: 100 },
     });
-    expect(layout(taller).detailRows).toBe(16);
+    expect(layout(taller).detailRows).toBe(15);
   });
 
   it("never draws beyond a terminal that is temporarily too small", () => {
