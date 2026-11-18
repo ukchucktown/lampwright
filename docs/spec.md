@@ -396,6 +396,12 @@ untrusted commands, proven local changes, and incomplete Owner evidence. Force
 does not override these blocks. [Owner-managed Update](./update.md) defines the
 complete target and plan rules.
 
+An Update does not add the target to an agent harness that did not have it.
+When an Owner operation creates a link to the target at a declared path that
+was absent before the operation, Lampwright removes that link after the
+operation. Lampwright does not delete content that the Owner creates at such a
+path. The final verification reports a changed Harness Exposure set.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal
