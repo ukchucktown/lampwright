@@ -48,6 +48,7 @@ import {
   materializeHarnessExposures,
   materializePluginAvailability,
 } from "./availability.js";
+import { readStableRegularFile } from "./evidence.js";
 import { inspectGitProtection } from "./git-protection.js";
 import {
   assignGroupsToLogicalSkills,
@@ -269,7 +270,29 @@ async function scanWithOptions(
   const genericInstallations = records
     .filter(isInstallation)
     .sort(compareRecordPath);
-  const otherFindings = records.filter(isOtherFinding).sort(compareRecordPath);
+  const syncedSources = new Map(
+    (await claudeSyncedSkills(options.environment)).map((skill) => [
+      pathComparisonKey(skill.path),
+      skill.source,
+    ]),
+  );
+  const otherFindings = records
+    .filter(isOtherFinding)
+    .map((finding) => {
+      const source = syncedSources.get(
+        pathComparisonKey(finding.location.path),
+      );
+      return finding.classification === "system-skill" && source !== undefined
+        ? {
+            ...finding,
+            metadata: {
+              ...finding.metadata,
+              [claudeSyncedSkillMetadataKey]: { source },
+            },
+          }
+        : finding;
+    })
+    .sort(compareRecordPath);
   const vercel = await scanVercelSkills(
     options.environment,
     options.commandRunner,
@@ -716,7 +739,104 @@ async function defaultDiscoveryRoots(
     pathComparisonKey(claudeWorkspaceRoot.path)
       ? [claudeWorkspaceRoot]
       : [claudeUserRoot, claudeWorkspaceRoot];
-  return [...genericRoots, codexRoot, ...codexSystemRoots, ...claudeRoots];
+  const claudeSyncedRoots = (await claudeSyncedSkills(environment)).map(
+    (skill): DiscoveryRoot => ({
+      kind: "system",
+      path: skill.path,
+      agentId: "claude-code",
+      adapterId: null,
+    }),
+  );
+  return [
+    ...genericRoots,
+    codexRoot,
+    ...codexSystemRoots,
+    ...claudeRoots,
+    ...claudeSyncedRoots,
+  ];
+}
+
+/** Finding metadata key that carries the source a Claude synced Skill declares. */
+export const claudeSyncedSkillMetadataKey = "claude-code-synced-skill";
+
+/**
+ * Skills that the Claude account service writes into the user Skill root and
+ * keeps up to date. They are System Skills: the user did not install them, and
+ * a removed copy is not Lampwright's to keep removed.
+ *
+ * The boundary is declared, never inferred from a directory name. A bucket
+ * counts only when its marker file and a readable manifest are both present,
+ * and only the directories that the manifest names are protected. Everything
+ * else under `synced` stays an ordinary part of the agent root, so a missing or
+ * damaged manifest never hides a Skill.
+ */
+async function claudeSyncedSkills(
+  environment: InventoryScannerOptions["environment"],
+): Promise<readonly { readonly path: string; readonly source: string }[]> {
+  const syncedPath = join(
+    environment.agentHomeDirectories?.["claude-code"] ??
+      join(environment.homeDirectory, ".claude"),
+    "skills",
+    "synced",
+  );
+  const buckets = await readdir(syncedPath, { withFileTypes: true }).catch(
+    () => [],
+  );
+  const skills: { path: string; source: string }[] = [];
+  for (const bucket of buckets) {
+    if (!bucket.isDirectory()) continue;
+    if (!(await isRegularFile(join(syncedPath, `.bucket-${bucket.name}`)))) {
+      continue;
+    }
+    const bucketPath = join(syncedPath, bucket.name);
+    const manifestPath = join(bucketPath, "manifest.json");
+    const manifestStats = await lstat(manifestPath).catch(() => null);
+    const manifestFile =
+      manifestStats === null
+        ? null
+        : await readStableRegularFile(manifestPath, manifestStats);
+    let manifest: unknown = null;
+    try {
+      manifest =
+        manifestFile === null
+          ? null
+          : JSON.parse(
+              new TextDecoder("utf-8", { fatal: true }).decode(
+                manifestFile.bytes,
+              ),
+            );
+    } catch {
+      manifest = null;
+    }
+    if (
+      typeof manifest !== "object" ||
+      manifest === null ||
+      !Array.isArray((manifest as { skills?: unknown }).skills)
+    ) {
+      continue;
+    }
+    for (const entry of (manifest as { skills: unknown[] }).skills) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { name, source } = entry as { name?: unknown; source?: unknown };
+      if (
+        typeof name !== "string" ||
+        typeof source !== "string" ||
+        source.length === 0 ||
+        name.length === 0 ||
+        name === "." ||
+        name === ".." ||
+        basename(name) !== name ||
+        name.includes("\\")
+      ) {
+        continue;
+      }
+      const path = join(bucketPath, name);
+      const stats = await lstat(path).catch(() => null);
+      if (stats === null || !stats.isDirectory()) continue;
+      skills.push({ path, source });
+    }
+  }
+  return skills.sort((left, right) => compareText(left.path, right.path));
 }
 
 /**

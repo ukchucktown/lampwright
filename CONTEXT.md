@@ -26,7 +26,7 @@ A group of Installations known through strong evidence to share one Skill Identi
 _Avoid_: Duplicate, package
 
 **System Skill**:
-A Skill supplied as an inseparable part of an agent runtime and outside Lampwright's removal boundary.
+A Skill that an agent runtime supplies as an inseparable part of itself, or that the account service of an agent supplies and keeps current. A System Skill is outside Lampwright's removal boundary.
 _Avoid_: Installed skill, managed skill
 
 **Source Artifact**:
