@@ -1041,19 +1041,18 @@ describe("terminal theme", () => {
     expect(lines[1]).toContain("? help · q quit");
     expect(lines).toHaveLength(23);
     const text = lines.join("\n");
-    // The panel has no border: the rule of the first group is its top edge
-    // and carries the way out.
-    expect(text).not.toContain("┌");
-    expect(text).not.toContain("└");
-    expect(text).toMatch(/ {2}Inventory ─+ esc close {2}/u);
+    // The top border names the first group: the actions of the current view.
+    expect(text).toContain("┌─ Inventory ─");
+    expect(text).toContain(" esc close ─┘");
+    expect(text).not.toContain("Keys");
     // One key to a line: the key, its effect, then the matching mouse action.
-    expect(text).toMatch(/ {2}enter +remove +/u);
-    expect(text).toMatch(/ {2}space +select +dbl-click {2}/u);
-    expect(text).toMatch(/ {2}tab +next pane +click +/u);
-    expect(text).toMatch(/ {2}↑↓ +move +wheel +/u);
-    // A labelled rule opens each group; the first names the current view.
-    expect(text).toMatch(/ {2}Move and select ─+ mouse ─+ {2}/u);
-    expect(text).toMatch(/ {2}App ─+ {2}/u);
+    expect(text).toMatch(/│ enter +remove +│/u);
+    expect(text).toMatch(/│ space +select +dbl-click │/u);
+    expect(text).toMatch(/│ tab +next pane +click +│/u);
+    expect(text).toMatch(/│ ↑↓ +move +wheel +│/u);
+    // A labelled rule opens each later group.
+    expect(text).toMatch(/│ Move and select ─+ mouse ─+ │/u);
+    expect(text).toMatch(/│ App ─+ │/u);
     // The mouse actions share one column, under their heading.
     const start = (word: string) =>
       lines.find((line) => line.includes(` ${word}`))!.lastIndexOf(word);
@@ -1087,24 +1086,26 @@ describe("terminal theme", () => {
         { screen: "help", browse: { ...before, view } } as TuiState,
         plainTuiTheme,
       );
-    expect(reference("disabled")).toMatch(/ {2}e +enable +/u);
-    expect(reference("disabled")).toMatch(/ {2}Disabled ─+ esc close {2}/u);
+    expect(reference("disabled")).toMatch(/│ e +enable +│/u);
+    expect(reference("disabled")).toContain("┌─ Disabled ─");
     // Escape is named for what it does in the view, not as a second "close".
-    expect(text).toMatch(/ {2}esc +step back +/u);
-    expect(reference("trash")).toMatch(/ {2}esc +Inventory +/u);
-    // An empty row sets each later group apart from the one above it, and the
-    // panel is 20 rows from its first rule to its last key.
+    expect(text).toMatch(/│ esc +step back +│/u);
+    expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
+    // The keys of the first group start directly under the top border, the
+    // last key sits directly on the bottom border, and an empty row is above
+    // each later group.
+    const blank = /│ +│/u;
+    const top = lines.findIndex((line) => line.includes("┌─ Inventory "));
+    const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
     const row = (label: string) =>
-      lines.findIndex((line) => line.includes(`  ${label} ─`));
-    const panelText = (index: number) =>
-      lines[index]!.slice(
-        lines[row("Inventory")]!.indexOf("  Inventory"),
-        lines[row("Inventory")]!.indexOf("esc close") + "esc close".length + 2,
-      );
-    expect(panelText(row("Move and select") - 1).trim()).toBe("");
-    expect(panelText(row("App") - 1).trim()).toBe("");
-    const last = lines.findIndex((line) => / {2}q +quit/u.test(line));
-    expect(last - row("Inventory") + 1).toBe(20);
+      lines.findIndex((line) => line.includes(`│ ${label} ─`));
+    expect(lines[top + 1]).toMatch(/│ enter +remove +│/u);
+    expect(lines[bottom - 1]).toMatch(/│ q +quit +│/u);
+    expect(lines[row("Move and select") - 1]).toMatch(blank);
+    expect(lines[row("App") - 1]).toMatch(blank);
+    expect(bottom - top + 1).toBe(21);
+    // The header and the key hints stay visible above the panel.
+    expect(top).toBe(2);
     // A destructive action is the one effect in the warning style.
     const nightfall = createNightfallTheme("truecolor");
     const colored = renderTui(help, nightfall);
@@ -1114,9 +1115,9 @@ describe("terminal theme", () => {
     expect(colored).not.toContain(
       styleTui(nightfall, "warning", "update").slice(0, -4),
     );
-    expect(reference("trash")).toMatch(/ {2}Trash ─+ esc close {2}/u);
-    expect(reference("trash")).toMatch(/ {2}enter +restore +/u);
-    expect(reference("trash")).toMatch(/ {2}p +purge +/u);
+    expect(reference("trash")).toContain("┌─ Trash ─");
+    expect(reference("trash")).toMatch(/│ enter +restore +│/u);
+    expect(reference("trash")).toMatch(/│ p +purge +│/u);
 
     for (const [value, key] of [
       ["?", browseKey],
@@ -1174,10 +1175,8 @@ describe("terminal theme", () => {
           expect(visibleWidth(line)).toBeLessThanOrEqual(viewport.columns - 1);
         const drawn = lines.join("\n").replace(ansi, "");
         // From 60 columns, both overlays are panels over the browse view.
-        // From 60 columns, both overlays are panels over the browse view:
-        // the key reference by its first rule, the picker by its border.
-        const panelMark = state.screen === "help" ? " esc close   " : "┌─";
-        if (viewport.columns >= 60) expect(drawn).toContain(panelMark);
+        // From 60 columns, both overlays are panels over the browse view.
+        if (viewport.columns >= 60) expect(drawn).toContain("┌─");
         if (viewport.columns <= 20) expect(drawn).not.toContain("┌─");
         // A panel is drawn over the browse view, which stays around it.
         if (drawn.includes("┌─"))

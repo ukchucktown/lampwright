@@ -220,14 +220,15 @@ interface HelpGroup {
 
 /**
  * Every key, one to a line, in three aligned columns: the key, its effect, and
- * the mouse action that has the same effect. A labelled rule opens each group,
- * and the first group is named after the view whose actions it lists.
+ * the mouse action that has the same effect. The first group lists the actions
+ * of the current view and gives the panel its title. A labelled rule opens
+ * each later group.
  */
 function helpBody(
   view: TuiBrowseState["view"],
   style: TuiPaint,
   spacing: "open" | "ruled" | "bare" = "open",
-): readonly string[] {
+): { readonly title: string; readonly body: readonly string[] } {
   const groups: readonly HelpGroup[] = [
     view === "trash"
       ? {
@@ -290,9 +291,6 @@ function helpBody(
     style.border("─".repeat(Math.max(0, count)));
   const rule = (group: HelpGroup): string => {
     const label = `${group.label} `;
-    // The first rule carries the way out, so the panel needs no footer.
-    if (group === groups[0])
-      return `${style.muted(label)}${dashes(inner - label.length - closeHint.length - 1)} ${style.muted(closeHint)}`;
     // The mouse column gets its heading on the rule of the group that uses it.
     if (!group.rows.some((row) => row[2] !== undefined))
       return `${style.muted(label)}${dashes(inner - label.length)}`;
@@ -303,21 +301,20 @@ function helpBody(
         : ""
     }`;
   };
-  return [
-    ...(spacing === "bare" ? [style.muted(closeHint)] : []),
-    ...groups.flatMap((group, index) => helpGroupLines(group, index)),
-  ];
-  function helpGroupLines(group: HelpGroup, index: number): readonly string[] {
-    return [
-      // An empty row sets each group apart from the one above it.
+  return {
+    // The top border of the panel names the first group, so that group has
+    // no rule of its own and its keys start directly under the border.
+    title: groups[0]!.label,
+    body: groups.flatMap((group, index) => [
+      // An empty row sets each later group apart from the one above it.
       ...(spacing === "open" && index > 0 ? [""] : []),
-      ...(spacing === "bare" ? [] : [rule(group)]),
+      ...(spacing === "bare" || index === 0 ? [] : [rule(group)]),
       ...group.rows.map(
         ([key, effect, mouse]) =>
           `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${style.muted(fit(mouse ?? "", mouseWidth))}`,
       ),
-    ];
-  }
+    ]),
+  };
 }
 
 function renderHelp(
@@ -327,31 +324,32 @@ function renderHelp(
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
-  // No border: the rules of the groups give the panel its shape, and a margin
-  // of three cleared cells on each side sets it apart from the dimmed view.
-  const panel = (body: readonly string[]) => {
+  const panel = (spacing: "open" | "ruled" | "bare") => {
+    const { title, body } = helpBody(state.browse.view, style, spacing);
     const inner = Math.min(
       Math.max(...body.map(visibleLength)),
       Math.max(0, viewport.columns - 7),
     );
     return overlayPanel(
       frame,
-      body.map((line) => `   ${fit(line, inner)}   `),
+      panelLines(title, body, closeHint, inner, style),
       viewport,
-      // Below the header, the hints, and the top rule of the browse view, so
-      // the first rule of the panel does not run into them.
-      3,
+      // Below the header and the key hints when the frame has the rows.
+      2,
     );
   };
-  const bare = helpBody(state.browse.view, style, "bare");
   // A short terminal gives up the empty rows between the groups first, then
   // the group rules.
   const lines =
-    panel(helpBody(state.browse.view, style, "open")) ??
-    panel(helpBody(state.browse.view, style, "ruled")) ??
-    panel(bare) ??
+    panel("open") ??
+    panel("ruled") ??
+    panel("bare") ??
     // Too small for a panel: the keys take the whole screen.
-    [style.title("Lampwright — Keys"), ...bare]
+    [
+      style.title("Lampwright — Keys"),
+      ...helpBody(state.browse.view, style, "bare").body,
+      style.muted(closeHint),
+    ]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
   return `${lines.join("\n")}\n`;

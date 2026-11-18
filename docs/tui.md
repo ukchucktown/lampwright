@@ -241,23 +241,24 @@ The last line of the frame shows a notice when there is one, and is empty in
 all other conditions. No hint is below the detail pane, so the scroll mark of
 the detail pane ends at an empty line.
 
-`?` in a browse view opens the key reference. It is a panel that the terminal
-UI draws over the middle of the browse view. The browse view stays visible
-behind the panel in a dim style. The panel has no border. A margin of three
-empty cells on each side separates it from the browse view, and it starts below
-the header, the key hints, and the top rule when the terminal has the rows.
+`?` in a browse view opens the key reference. It is a panel with a border that
+the terminal UI draws over the middle of the browse view. The browse view stays
+visible behind the panel in a dim style. The panel starts below the header and
+the key hints when the terminal has the rows.
 
 The panel has one key on each line in three columns: the key, its effect, and
-the mouse action that has the same effect. The mouse column is muted. A
-labelled rule opens each of the three groups: the actions of the current view
-under the name of that view, the keys for movement and selection, and the
-application keys. The first rule is the top edge of the panel and ends with
-`esc close`. An empty row is above the second group and the third group. An
-effect that removes content, `remove` or `purge`, is in the warning style. The
-`esc` row names the effect of Escape in the current view.
+the mouse action that has the same effect. The mouse column is muted. The panel
+has three groups. The first group lists the actions of the current view. The
+top border of the panel shows the name of that view, and the keys of the group
+start directly under the border. A labelled rule opens each of the other two
+groups: the keys for movement and selection, and the application keys. An empty
+row is above each of those two groups. The last key is directly above the
+bottom border, which ends with `esc close`. An effect that removes content,
+`remove` or `purge`, is in the warning style. The `esc` row names the effect of
+Escape in the current view.
 
 `?`, `q`, Escape, or Enter closes the panel and keeps the browse position. The
-complete panel has 20 rows. A shorter terminal drops the empty rows between the
+complete panel has 21 rows. A shorter terminal drops the empty rows between the
 groups first, then the rules, before the key reference fills the screen.
 
 A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
