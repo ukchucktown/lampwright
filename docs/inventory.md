@@ -448,9 +448,12 @@ from the Codex clone at `.tmp/marketplaces/<marketplace>`. The scan reads
 `.agents/plugins/marketplace.json` first and `.claude-plugin/marketplace.json`
 second.
 
-A configuration file that is linked, hard-linked, unstable, or not valid TOML
-gives no Codex Plugins. The scan then reports each cache version as a
-non-removable finding with the state `invalid-configuration`. A Plugin table
+The scan follows a symbolic link at the configuration path and reads the
+target. The Plugins from a linked configuration stay visible, but Managed
+Removal is unavailable for them. A configuration file that is hard-linked,
+unstable, a broken link, or not valid TOML gives no Codex Plugins. The scan
+then reports each cache version as a non-removable finding with the state
+`invalid-configuration`. A Plugin table
 that the scan cannot interpret, or a cache directory with no Plugin table, also
 gives no Plugin. The remote plugins that the Codex desktop app enables have no
 Plugin table, so they stay outside each plan.

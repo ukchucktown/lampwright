@@ -197,7 +197,21 @@ async function readInstalledPlugins(home: string): Promise<ListState> {
       ? { kind: "valid", entries: [] }
       : { kind: "invalid-configuration" };
   }
-  const file = await readStableRegularFile(path, stats);
+  // Discovery only reads, so it follows a linked configuration to its target.
+  // `configEvidence` still reports the link, which keeps mutation blocked.
+  const target = stats.isSymbolicLink()
+    ? await realpath(path).catch(() => null)
+    : path;
+  const targetStats =
+    target === null
+      ? null
+      : target === path
+        ? stats
+        : await lstat(target).catch(() => null);
+  const file =
+    target === null || targetStats === null
+      ? null
+      : await readStableRegularFile(target, targetStats);
   if (file === null) return { kind: "invalid-configuration" };
   let root: unknown;
   try {

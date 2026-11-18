@@ -709,7 +709,7 @@ describe("Codex plugin adapter", () => {
     expect(defaulted.plugins[0]?.availability.status).toBe("enabled");
   });
 
-  it("reports no Plugin when the configuration is linked or hard-linked", async () => {
+  it("reads a linked configuration but blocks removal, and reports no Plugin for a hard-linked or broken one", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
@@ -717,12 +717,56 @@ describe("Codex plugin adapter", () => {
     await writeFile(configTarget, pluginTable);
     await symlink(configTarget, configPath(environment), "file");
     const linked = await scanner(environment, commandRunner()).scan({});
+    const plugin = linked.plugins.find(
+      (boundary) => boundary.adapterId === "codex.plugins",
+    )!;
+    expect(plugin.removal).toMatchObject({
+      managed: {
+        availability: {
+          kind: "unavailable",
+          reason: expect.stringContaining("linked"),
+        },
+      },
+      fallback: { kind: "unavailable" },
+    });
+    expect(linked.installations).toContainEqual(
+      expect.objectContaining({
+        classification: "managed-plugin-resource",
+        ownership: expect.objectContaining({
+          kind: "plugin",
+          independentlySelectable: false,
+        }),
+      }),
+    );
+    const blockedPlan = plan(linked, {
+      kind: "targets",
+      targets: [pluginTarget(plugin)],
+      force: false,
+      mode: "managed-first",
+    });
+    expect(blockedPlan.actions).toEqual([]);
+    expect(blockedPlan.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "managed-removal-unavailable",
+        target: pluginTarget(plugin),
+        reason: expect.stringContaining("linked"),
+        fallback: { kind: "unavailable", reason: expect.any(String) },
+      }),
+    );
 
     await rm(configPath(environment));
     await link(configTarget, configPath(environment));
     const hardLinked = await scanner(environment, commandRunner()).scan({});
 
-    for (const inventory of [linked, hardLinked]) {
+    await rm(configPath(environment));
+    await symlink(
+      join(fixture.temporary, "missing-config.toml"),
+      configPath(environment),
+      "file",
+    );
+    const broken = await scanner(environment, commandRunner()).scan({});
+
+    for (const inventory of [hardLinked, broken]) {
       expect(inventory.plugins).toEqual([]);
       expect(
         inventory.installations.filter(
