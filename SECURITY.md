@@ -2,11 +2,12 @@
 
 ## Supported versions
 
-The current supported release line is `0.2.x`. Security fixes also support the
-published `0.1.x` line when the fix applies to that line.
+The current supported release line is `0.3.x`. Security fixes also support the
+published `0.2.x` and `0.1.x` lines when the fix applies to those lines.
 
 | Version | Supported |
 | --- | --- |
+| `0.3.x` | Yes |
 | `0.2.x` | Yes |
 | `0.1.x` | Yes |
 | `< 0.1.0` | No |
