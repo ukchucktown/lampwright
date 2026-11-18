@@ -247,8 +247,9 @@ visible behind the panel in a dim style. The panel starts below the header and
 the key hints when the terminal has the rows.
 
 The panel has one key on each line in three columns: the key, its effect, and
-the mouse action that has the same effect. The mouse column is muted. The panel
-has three groups. The first group lists the actions of the current view. The
+the mouse action that has the same effect. The keys are in the title style. The
+effects and the mouse actions are plain text. The three group headings and the
+`mouse` heading are muted. The panel has three groups. The first group lists the actions of the current view. The
 top border of the panel shows the name of that view, and the keys of the group
 start directly under the border. A labelled rule opens each of the other two
 groups: the keys for movement and selection, and the application keys. An empty

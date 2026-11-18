@@ -166,12 +166,14 @@ function panelLines(
   hint: string,
   inner: number,
   style: TuiPaint,
+  /** A title that is a group heading takes the style of the other headings. */
+  titlePaint: (value: string) => string = style.title,
 ): readonly string[] {
   const rule = (label: string, start: string, end: string, lead: boolean) => {
     const text = label === "" ? "" : ` ${label} `;
     const fill = "─".repeat(Math.max(0, inner + 2 - [...text].length - 1));
     return lead
-      ? `${style.border(`${start}─`)}${style.title(text)}${style.border(`${fill}${end}`)}`
+      ? `${style.border(`${start}─`)}${titlePaint(text)}${style.border(`${fill}${end}`)}`
       : `${style.border(`${start}${fill}`)}${style.muted(text)}${style.border(`─${end}`)}`;
   };
   return [
@@ -311,7 +313,7 @@ function helpBody(
       ...(spacing === "bare" || index === 0 ? [] : [rule(group)]),
       ...group.rows.map(
         ([key, effect, mouse]) =>
-          `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${style.muted(fit(mouse ?? "", mouseWidth))}`,
+          `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
       ),
     ]),
   };
@@ -332,7 +334,7 @@ function renderHelp(
     );
     return overlayPanel(
       frame,
-      panelLines(title, body, closeHint, inner, style),
+      panelLines(title, body, closeHint, inner, style, style.muted),
       viewport,
       // Below the header and the key hints when the frame has the rows.
       2,

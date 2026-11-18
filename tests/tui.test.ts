@@ -1115,6 +1115,19 @@ describe("terminal theme", () => {
     expect(colored).not.toContain(
       styleTui(nightfall, "warning", "update").slice(0, -4),
     );
+    // The three group headings share the muted style, and the mouse actions
+    // are plain text like the effects.
+    for (const heading of [" Inventory ", "Move and select ", "App ", "mouse"])
+      expect(colored).toContain(styleTui(nightfall, "muted", heading));
+    expect(colored).not.toContain(styleTui(nightfall, "title", " Inventory "));
+    for (const mouse of ["wheel", "click", "dbl-click"]) {
+      expect(colored).not.toContain(
+        styleTui(nightfall, "muted", mouse).slice(0, -4),
+      );
+      expect(colored).not.toContain(
+        styleTui(nightfall, "title", mouse).slice(0, -4),
+      );
+    }
     expect(reference("trash")).toContain("┌─ Trash ─");
     expect(reference("trash")).toMatch(/│ enter +restore +│/u);
     expect(reference("trash")).toMatch(/│ p +purge +│/u);
