@@ -948,30 +948,32 @@ describe("terminal theme", () => {
     const pinned = /ctrl\+t view · \? help · q quit$/u;
 
     expect(footer(base)).toMatch(
-      /^space select · enter remove · u update · d disable · \/ search /u,
+      /^space select · enter remove · u update · d disable · \/ search · ctrl\+u clear /u,
     );
 
     const entries = reduceBrowse(base, { kind: "focus", pane: "entries" });
     const one = reduceBrowse(entries, { kind: "toggle-select" });
     expect(footer(one)).toMatch(
-      /^space select · enter remove · u update · d disable · ctrl\+u clear · \/ search /u,
+      /^space select · enter remove · u update · d disable · \/ search · ctrl\+u clear /u,
     );
     const two = reduceBrowse(reduceBrowse(one, { kind: "move", delta: 1 }), {
       kind: "toggle-select",
     });
-    // Update accepts one target, so its hint leaves with two selected.
+    // The row is the same with nothing, one row, or two rows selected.
     expect(footer(two)).toMatch(
-      /^space select · enter remove · d disable · ctrl\+u clear · \/ search /u,
+      /^space select · enter remove · u update · d disable · \/ search · ctrl\+u clear /u,
     );
     // The header alone gives the number of selected rows.
     expect(frame(two)[0]).toMatch(/ 2 selected$/u);
     expect(footer(two)).not.toMatch(/\d/u);
+    expect(footer(one)).toBe(footer(base));
+    expect(footer(two)).toBe(footer(base));
 
     expect(
       footer(reduceBrowse(base, { kind: "focus", pane: "detail" })),
     ).toMatch(/^↑↓ scroll · PgUp PgDn page · tab pane /u);
     expect(footer(base, "disabled")).toMatch(
-      /^space select · e enable · u update · \/ search /u,
+      /^space select · e enable · u update · \/ search · ctrl\+u clear /u,
     );
     expect(footer(base, "trash")).toMatch(
       /^enter restore · p purge · esc inventory /u,

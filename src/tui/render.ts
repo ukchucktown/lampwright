@@ -2304,21 +2304,23 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
       { key: "/", label: "search" },
       { key: "tab", label: "pane" },
     ];
-  // Select leads because the other actions work on the selection. Update
-  // accepts one target, so its hint leaves when it cannot apply.
-  const update: readonly KeyHint[] =
-    selected <= 1 ? [{ key: "u", label: "update" }] : [];
+  // Select leads because the other actions work on the selection. The list
+  // does not depend on the selection, so the row stays still while the user
+  // selects rows. Clear comes last and is the first hint to leave a narrow row.
   return [
     { key: "space", label: "select" },
     ...(state.view === "disabled"
-      ? [{ key: "e", label: "enable" }, ...update]
+      ? [
+          { key: "e", label: "enable" },
+          { key: "u", label: "update" },
+        ]
       : [
           { key: "enter", label: "remove" },
-          ...update,
+          { key: "u", label: "update" },
           { key: "d", label: "disable" },
         ]),
-    ...(selected > 0 ? [{ key: "ctrl+u", label: "clear" }] : []),
     { key: "/", label: "search" },
+    { key: "ctrl+u", label: "clear" },
   ];
 }
 

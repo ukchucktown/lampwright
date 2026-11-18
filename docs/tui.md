@@ -221,15 +221,19 @@ The second row shows the key hints that apply in the current context. Each key
 is in the title style and its description is muted. The view, the focused pane,
 and the selection decide the hints:
 
-- Inventory: `space select`, `enter remove`, `u update`, `d disable`, and
-  `/ search`. With a selection, `ctrl+u clear` joins the row. The hints do not
-  show the number of selected rows, because the header status shows it. Update
-  accepts one target, so `u update` leaves the row when two or more rows are
-  selected.
-- Disabled: `space select`, `e enable`, `u update`, and `/ search`.
+- Inventory: `space select`, `enter remove`, `u update`, `d disable`,
+  `/ search`, and `ctrl+u clear`.
+- Disabled: `space select`, `e enable`, `u update`, `/ search`, and
+  `ctrl+u clear`.
 - Trash: `enter restore`, `p purge`, and `esc inventory`.
 - A focused detail pane: `↑↓ scroll`, `PgUp PgDn page`, and `tab pane`.
 - A focused row that no plan can contain: `/ search` and `tab pane`.
+
+The hints of a view do not change with the selection: the row is the same with
+no rows, one row, or more rows selected, and it does not show the number of
+selected rows, because the header status shows it. `u update` stays in the row
+when two or more rows are selected. Update accepts one target, and the terminal
+UI shows a notice when the user presses `u` with more.
 
 `? help` and `q quit` stay at the right edge of the hint row. From 100 columns,
 `ctrl+t view` joins them. The right group depends on the width only, so it does
