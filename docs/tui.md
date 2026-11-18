@@ -343,10 +343,12 @@ Sections come from declared evidence, never from a name or a path:
   the source that the synced manifest declares. Its rows draw no checkbox,
   because offering one would invite a click that can only be refused.
 
-A section header carries what its entries share — how many, the Owner, the
-Scope, the path count, and the agents that can load them. A row repeats none of
-that; it shows a note only where it departs from the section, such as an
-unusual exposure, `protected`, `broken`, or `spans groups`. Descriptions are too
+A section header carries what its entries share: how many, the Owner, the
+Scope, and the path count. Each row shows the agents that can load its Skill.
+A row shows its agents in each condition, so a section whose rows have the same
+agents and a section whose rows have different agents use the same layout. A
+row also shows a note where it departs from the section, such as `protected`,
+`broken`, or `spans groups`. Descriptions are too
 long to read in a row, so they are word-wrapped in the detail area with the
 physical paths.
 

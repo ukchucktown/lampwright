@@ -21,7 +21,6 @@ import {
   detailPane,
   layout,
   panes,
-  sharedExposure,
   sharedPathCount,
 } from "./browse.js";
 import { searchLayout } from "./search.js";
@@ -2435,7 +2434,6 @@ function entryCell(
   if (width <= 0) return "";
   if (row === 0) {
     if (section === null) return " ".repeat(width);
-    const exposure = sharedExposure(section);
     const paths = sharedPathCount(section);
     const pluginSkills = section.entries.filter(
       (entry) => entry.rowKind === "plugin-skill",
@@ -2449,7 +2447,6 @@ function entryCell(
       entrySummary,
       section.detail,
       paths === null || paths <= 1 ? null : `${String(paths)} paths each`,
-      exposure === null || exposure === "" ? null : exposure,
     ]
       .filter((value): value is string => value !== null)
       .join(" · ");
@@ -2481,17 +2478,15 @@ function entryCell(
     if (focused) return style.focus(compact);
     return model.selected.has(entry.key) ? style.selected(compact) : compact;
   }
-  const exposure = section === null ? null : sharedExposure(section);
-  const differs = exposure === null || entry.exposedTo.join(" ") !== exposure;
+  // Every row names its own agents, so a section whose rows agree reads the
+  // same way as one whose rows differ.
   const exposureNote = entry.exposedTo.join(" ");
   const note =
     entry.showNoteInRow === false
       ? ""
       : [
           entry.note,
-          differs && !(entry.note?.includes(exposureNote) ?? false)
-            ? exposureNote
-            : null,
+          (entry.note?.includes(exposureNote) ?? false) ? null : exposureNote,
         ]
           .filter((value): value is string => value !== null && value !== "")
           .join(" · ");

@@ -987,6 +987,29 @@ describe("terminal theme", () => {
       expect(line).toMatch(pinned);
   });
 
+  it("names the agents on every row, also when all rows have the same agents", () => {
+    const inventory = groupedInventory();
+    const model = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 110,
+    });
+    const lines = renderBrowseLines(
+      { screen: "browse", inventory, model },
+      plainTuiTheme,
+    );
+    const entryPane = (line: string) => line.slice(line.indexOf("│") + 1);
+    const header = entryPane(lines[3]!);
+    const rows = [lines[4]!, lines[5]!].map(entryPane);
+
+    // The fixture gives both Skills the same two agents.
+    for (const row of rows) expect(row).toMatch(/claude-code codex/u);
+    expect(rows[0]).toMatch(/^\[ \] alpha /u);
+    expect(rows[1]).toMatch(/^\[ \] beta /u);
+    // The section header keeps the shared facts and leaves the agents to the rows.
+    expect(header).toContain("2 entries");
+    expect(header).not.toContain("claude-code");
+  });
+
   it("shows a notice on the last line and keeps the key hints", () => {
     const inventory = groupedInventory();
     const model = {
