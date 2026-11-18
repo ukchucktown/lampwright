@@ -27,6 +27,7 @@ import {
   runTui,
   searchLayout,
   searchRows,
+  searchResults,
   selectionTargets,
   styleTui,
   TuiController,
@@ -1060,6 +1061,128 @@ describe("terminal section projection", () => {
     expect(
       sections.at(-1)?.entries.every((entry) => entry.target === null),
     ).toBe(true);
+  });
+
+  it("shows identical copies of one Skill as one row that targets every copy", () => {
+    const inventory = copiesInventory([
+      { agent: "claude-code", digest: "a".repeat(64) },
+      { agent: "codex", digest: "a".repeat(64) },
+      { agent: "gemini-cli", digest: "a".repeat(64) },
+    ]);
+    const sections = createTuiSections(inventory);
+    const rows = sections.find((section) => section.key === "ungrouped")!;
+
+    expect(rows.entries).toHaveLength(1);
+    const row = rows.entries[0]!;
+    expect(row).toMatchObject({
+      name: "shared-skill",
+      exposedTo: ["claude-code", "codex", "gemini-cli"],
+      paths: [
+        "/fixtures/claude-code/shared-skill",
+        "/fixtures/codex/shared-skill",
+        "/fixtures/gemini-cli/shared-skill",
+      ],
+      note: null,
+    });
+    const targets = selectionTargets(sections, new Set([row.key]));
+    expect(targets).toEqual([
+      { kind: "logical-skill", logicalSkillId: "logical-claude-code" },
+      { kind: "logical-skill", logicalSkillId: "logical-codex" },
+      { kind: "logical-skill", logicalSkillId: "logical-gemini-cli" },
+    ]);
+    expect(row.availabilityTargets).toEqual(targets);
+    expect(
+      plan(inventory, {
+        kind: "targets",
+        targets,
+        force: false,
+        mode: "managed-first",
+      }).targets,
+    ).toEqual(targets);
+    expect(
+      searchResults(sections, "shared").map((result) => result.entry.key),
+    ).toEqual([row.key]);
+    // Presentation only: the Inventory still holds one record for each copy.
+    expect(inventory.logicalSkills).toHaveLength(3);
+    expect(inventory.installations).toHaveLength(3);
+  });
+
+  it("keeps same-named Skills with different content as separate rows", () => {
+    const sections = createTuiSections(
+      copiesInventory([
+        { agent: "claude-code", digest: "a".repeat(64) },
+        { agent: "codex", digest: "b".repeat(64) },
+        { agent: "gemini-cli", digest: null },
+      ]),
+    );
+    const rows = sections.find((section) => section.key === "ungrouped")!;
+
+    expect(rows.entries.map((entry) => entry.exposedTo)).toEqual([
+      ["claude-code"],
+      ["codex"],
+      ["gemini-cli"],
+    ]);
+    expect(rows.entries.every((entry) => entry.targets === undefined)).toBe(
+      true,
+    );
+  });
+
+  it("combines only the copies that match and leaves an edited copy alone", () => {
+    const sections = createTuiSections(
+      copiesInventory([
+        { agent: "claude-code", digest: "a".repeat(64) },
+        { agent: "codex", digest: "a".repeat(64) },
+        { agent: "gemini-cli", digest: "b".repeat(64) },
+      ]),
+    );
+    const rows = sections.find((section) => section.key === "ungrouped")!;
+
+    expect(rows.entries.map((entry) => entry.exposedTo)).toEqual([
+      ["claude-code", "codex"],
+      ["gemini-cli"],
+    ]);
+  });
+
+  it("never combines a Plugin-owned Skill with an identical standalone copy", () => {
+    const base = copiesInventory([
+      { agent: "claude-code", digest: "a".repeat(64) },
+      { agent: "codex", digest: "a".repeat(64) },
+    ]);
+    const owned = buildInstallation({
+      ...base.installations[1]!,
+      suspension: {
+        kind: "unavailable",
+        reason: "fixture ownership has no declared suspension authority",
+      },
+      classification: "managed-plugin-resource",
+      plugin: { id: "fixture-plugin", version: "1.0.0" },
+      pluginBoundaryId: "fixture-plugin",
+      ownership: {
+        kind: "plugin",
+        pluginId: "fixture-plugin",
+        independentlySelectable: false,
+        confidence: "declared",
+      },
+    });
+    const sections = createTuiSections(
+      buildInventory({
+        installations: [base.installations[0]!, owned],
+        logicalSkills: base.logicalSkills,
+        identityHints: base.identityHints,
+        plugins: [
+          {
+            ...buildPluginBoundary(),
+            exposedTo: ["codex"],
+            installationIds: [owned.id],
+          },
+        ],
+      }),
+    );
+    const rows = sections.find((section) => section.key === "ungrouped")!;
+
+    expect(rows.entries).toHaveLength(1);
+    expect(rows.entries[0]).toMatchObject({ exposedTo: ["claude-code"] });
+    expect(rows.entries[0]?.targets).toBeUndefined();
   });
 
   it("collapses a fully selected Group into one Source Group target", () => {
@@ -3435,3 +3558,77 @@ describe("raw terminal pointer input", () => {
     terminal.close();
   });
 });
+
+/** Separate copies of one Skill, one per agent, with hints as a scan records them. */
+function copiesInventory(
+  copies: readonly { readonly agent: string; readonly digest: string | null }[],
+): Inventory {
+  const name = {
+    strength: "weak" as const,
+    kind: "name" as const,
+    normalizedName: "shared-skill",
+  };
+  const hash = (digest: string) => ({
+    strength: "weak" as const,
+    kind: "content-hash" as const,
+    algorithm: "sha256" as const,
+    digest,
+  });
+  const identity = (copy: (typeof copies)[number]) => {
+    const path = `/fixtures/${copy.agent}/shared-skill`;
+    return {
+      strongEvidence: [
+        {
+          strength: "strong" as const,
+          kind: "canonical-target" as const,
+          canonicalPath: path,
+        },
+      ] as const,
+      weakEvidence: copy.digest === null ? [name] : [name, hash(copy.digest)],
+    };
+  };
+  const installations = copies.map((copy) => {
+    const path = `/fixtures/${copy.agent}/shared-skill`;
+    return buildInstallation({
+      id: `installation-${copy.agent}`,
+      skill: { name: "shared-skill", description: "Fixture skill" },
+      identity: identity(copy),
+      agentId: copy.agent,
+      exposedTo: [copy.agent],
+      location: {
+        path,
+        canonicalPath: path,
+        artifactType: { kind: "directory" },
+      },
+      ownership: { kind: "filesystem", confidence: "inferred" },
+    });
+  });
+  const digests = [
+    ...new Set(copies.flatMap((copy) => copy.digest ?? [])),
+  ].sort();
+  return buildInventory({
+    installations,
+    logicalSkills: copies.map((copy) =>
+      buildLogicalSkill({
+        id: `logical-${copy.agent}`,
+        skill: { name: "shared-skill", description: "Fixture skill" },
+        identity: identity(copy),
+        installationIds: [`installation-${copy.agent}`],
+      }),
+    ),
+    identityHints: [
+      {
+        evidence: name,
+        installationIds: copies.map((copy) => `installation-${copy.agent}`),
+      },
+      ...digests.flatMap((digest) => {
+        const ids = copies
+          .filter((copy) => copy.digest === digest)
+          .map((copy) => `installation-${copy.agent}`);
+        return ids.length > 1
+          ? [{ evidence: hash(digest), installationIds: ids }]
+          : [];
+      }),
+    ],
+  });
+}

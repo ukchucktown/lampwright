@@ -168,6 +168,8 @@ Installations may be grouped into a Logical Skill only with strong evidence:
 
 Matching names or hashes are displayed as possible relationships but never merge records automatically.
 
+The terminal UI shows one row for the Installations with no shared source that have both the same normalized name and the same content hash. This row is presentation only. The Inventory and the JSON output keep one record for each copy, and a plan from the row names each copy as a separate target. A matching name with different content, or a matching hash with a different name, does not combine rows.
+
 Installation Groups are a separate navigational batch-selection mechanism. In v1 they form only from declared manager-and-source evidence in one Scope; structural grouping is deferred until a concrete discovery path and safety boundary justify it.
 
 ## 7. Search and terminal UI
