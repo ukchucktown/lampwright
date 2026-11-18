@@ -132,16 +132,18 @@ function overlayPanel(
   frame: readonly string[],
   panel: readonly string[],
   viewport: { readonly rows: number; readonly columns: number },
+  /** The first row the panel may use when the frame has rows to spare. */
+  firstRow = 1,
 ): readonly string[] | null {
   const width = visibleLength(panel[0] ?? "");
   const usable = Math.max(0, viewport.columns - 1);
   const rows = Math.max(0, viewport.rows - 1);
   if (width + 2 > usable || panel.length > rows) return null;
   const left = Math.floor((usable - width) / 2);
-  // Centered, but below the header whenever the frame has a row to spare.
+  // Centered, but below `firstRow` whenever the frame has rows to spare.
   const top = Math.min(
     rows - panel.length,
-    Math.max(1, Math.floor((rows - panel.length) / 2)),
+    Math.max(firstRow, Math.floor((rows - panel.length) / 2)),
   );
   const lines = Array.from({ length: Math.max(rows, frame.length) }, (_, row) =>
     fit(frame[row] ?? "", usable),
@@ -207,6 +209,8 @@ function browseFrame(
     theme,
   );
 }
+
+const closeHint = "esc close";
 
 interface HelpGroup {
   readonly label: string;
@@ -286,6 +290,9 @@ function helpBody(
     style.border("─".repeat(Math.max(0, count)));
   const rule = (group: HelpGroup): string => {
     const label = `${group.label} `;
+    // The first rule carries the way out, so the panel needs no footer.
+    if (group === groups[0])
+      return `${style.muted(label)}${dashes(inner - label.length - closeHint.length - 1)} ${style.muted(closeHint)}`;
     // The mouse column gets its heading on the rule of the group that uses it.
     if (!group.rows.some((row) => row[2] !== undefined))
       return `${style.muted(label)}${dashes(inner - label.length)}`;
@@ -296,15 +303,21 @@ function helpBody(
         : ""
     }`;
   };
-  return groups.flatMap((group, index) => [
-    // An empty row sets each group apart from the one above it.
-    ...(spacing === "open" && index > 0 ? [""] : []),
-    ...(spacing === "bare" ? [] : [rule(group)]),
-    ...group.rows.map(
-      ([key, effect, mouse]) =>
-        `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${style.muted(fit(mouse ?? "", mouseWidth))}`,
-    ),
-  ]);
+  return [
+    ...(spacing === "bare" ? [style.muted(closeHint)] : []),
+    ...groups.flatMap((group, index) => helpGroupLines(group, index)),
+  ];
+  function helpGroupLines(group: HelpGroup, index: number): readonly string[] {
+    return [
+      // An empty row sets each group apart from the one above it.
+      ...(spacing === "open" && index > 0 ? [""] : []),
+      ...(spacing === "bare" ? [] : [rule(group)]),
+      ...group.rows.map(
+        ([key, effect, mouse]) =>
+          `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${style.muted(fit(mouse ?? "", mouseWidth))}`,
+      ),
+    ];
+  }
 }
 
 function renderHelp(
@@ -313,34 +326,32 @@ function renderHelp(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const open = helpBody(state.browse.view, style, "open");
-  const ruled = helpBody(state.browse.view, style, "ruled");
-  const bare = helpBody(state.browse.view, style, "bare");
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
-  const panel = (body: readonly string[]) =>
-    overlayPanel(
-      frame,
-      panelLines(
-        "Keys",
-        body,
-        "esc close",
-        Math.min(
-          Math.max(...body.map(visibleLength)),
-          Math.max(0, viewport.columns - 7),
-        ),
-        style,
-      ),
-      viewport,
+  // No border: the rules of the groups give the panel its shape, and a margin
+  // of three cleared cells on each side sets it apart from the dimmed view.
+  const panel = (body: readonly string[]) => {
+    const inner = Math.min(
+      Math.max(...body.map(visibleLength)),
+      Math.max(0, viewport.columns - 7),
     );
-  // A short terminal gives up the padding inside the border first, then the
-  // empty rows between the groups, then the group rules.
+    return overlayPanel(
+      frame,
+      body.map((line) => `   ${fit(line, inner)}   `),
+      viewport,
+      // Below the header, the hints, and the top rule of the browse view, so
+      // the first rule of the panel does not run into them.
+      3,
+    );
+  };
+  const bare = helpBody(state.browse.view, style, "bare");
+  // A short terminal gives up the empty rows between the groups first, then
+  // the group rules.
   const lines =
-    panel(["", ...open, ""]) ??
-    panel(open) ??
-    panel(ruled) ??
+    panel(helpBody(state.browse.view, style, "open")) ??
+    panel(helpBody(state.browse.view, style, "ruled")) ??
     panel(bare) ??
     // Too small for a panel: the keys take the whole screen.
-    [style.title("Lampwright — Keys"), ...bare, style.muted("esc close")]
+    [style.title("Lampwright — Keys"), ...bare]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
   return `${lines.join("\n")}\n`;
