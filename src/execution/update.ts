@@ -1,4 +1,5 @@
-import { posix, win32 } from "node:path";
+import { lstat, rmdir, unlink } from "node:fs/promises";
+import { dirname, posix, win32 } from "node:path";
 
 import { stringifyModel } from "../model/json.js";
 import type {
@@ -226,15 +227,17 @@ async function executeAction(
           reason: `declared Update effect became Git-protected: ${effect.path}`,
         };
     }
+    const absentBefore = await absentMutationRoots(action.operation);
     const details = await invoke(action.operation, options, () =>
       attempted.add(action.id),
     );
+    const removedAgentLinks = await removeAddedLinks(absentBefore);
     return {
       actionId: action.id,
       status: "succeeded",
       startedAt,
       completedAt: timestamp(options.now()),
-      details,
+      details: { ...details, removedAgentLinks },
     };
   } catch (error: unknown) {
     return {
@@ -325,6 +328,74 @@ async function invoke(
     stderr: result.stderr,
     temporaryCleanupSucceeded: cleanupSucceeded,
   };
+}
+
+/** A declared path that the Owner can create, and where its parents begin. */
+interface AbsentMutationRoot {
+  readonly path: string;
+  /** The nearest directory that existed before the Owner ran. */
+  readonly existingAncestor: string;
+}
+
+/**
+ * The declared mutation roots that do not exist yet. For a Vercel-managed
+ * Skill these are the agent directories that do not have the Skill, where the
+ * Manager can add a link when it installs a new version.
+ */
+async function absentMutationRoots(
+  operation: ManagedUpdateEvidence,
+): Promise<readonly AbsentMutationRoot[]> {
+  const roots: AbsentMutationRoot[] = [];
+  for (const effect of operation.effects) {
+    if (effect.kind !== "mutation-root" || effect.exists) continue;
+    if ((await lstat(effect.path).catch(() => null)) !== null) continue;
+    let ancestor = dirname(effect.path);
+    while (
+      dirname(ancestor) !== ancestor &&
+      (await lstat(ancestor).catch(() => null)) === null
+    )
+      ancestor = dirname(ancestor);
+    roots.push({ path: effect.path, existingAncestor: ancestor });
+  }
+  return roots;
+}
+
+/**
+ * Keeps the Harness Exposures of the target as they were. An Owner can link an
+ * updated Skill into agents that did not have it, and Update must not widen
+ * where a Skill is exposed.
+ *
+ * Only a link that the Owner created at a path that was absent is removed, and
+ * then each directory that the Owner created only to hold it. Content is never
+ * deleted: a directory or a file at such a path stays, because a link removal
+ * loses nothing and a content removal belongs to Quarantine.
+ */
+async function removeAddedLinks(
+  absentBefore: readonly AbsentMutationRoot[],
+): Promise<number> {
+  let removed = 0;
+  for (const root of absentBefore) {
+    const stats = await lstat(root.path).catch(() => null);
+    if (stats === null || !stats.isSymbolicLink()) continue;
+    // A Windows junction is a directory link that `unlink` can refuse.
+    await unlink(root.path).catch(() => rmdir(root.path));
+    removed += 1;
+    for (
+      let directory = dirname(root.path);
+      directory !== root.existingAncestor && dirname(directory) !== directory;
+      directory = dirname(directory)
+    ) {
+      // `rmdir` removes an empty directory only, so other content is safe.
+      if (
+        !(await rmdir(directory).then(
+          () => true,
+          () => false,
+        ))
+      )
+        break;
+    }
+  }
+  return removed;
 }
 
 class UpdateOwnerProcessError extends Error {
