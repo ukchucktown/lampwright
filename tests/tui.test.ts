@@ -1090,11 +1090,33 @@ describe("terminal theme", () => {
     // Escape is named for what it does in the view, not as a second "close".
     expect(text).toMatch(/│ esc +step back +│/u);
     expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
-    // The panel has a blank row inside its top and its bottom border.
-    const top = lines.findIndex((line) => line.includes("┌─ Keys "));
-    const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
-    expect(lines[top + 1]).toMatch(/│ +│/u);
-    expect(lines[bottom - 1]).toMatch(/│ +│/u);
+    // An empty row sets each later group apart from the one above it.
+    const blank = /│ +│/u;
+    const row = (label: string) =>
+      lines.findIndex((line) => line.includes(`│ ${label} ─`));
+    expect(lines[row("Move and select") - 1]).toMatch(blank);
+    expect(lines[row("App") - 1]).toMatch(blank);
+    // A terminal with rows to spare also pads the inside of the border.
+    const opened = help as Extract<TuiState, { screen: "help" }>;
+    const tall = renderTui(
+      {
+        screen: "help",
+        browse: {
+          ...opened.browse,
+          model: reduceBrowse(opened.browse.model, {
+            kind: "viewport",
+            viewport: { rows: 30, columns: 80 },
+          }),
+        },
+      } as TuiState,
+      plainTuiTheme,
+    ).split("\n");
+    const top = tall.findIndex((line) => line.includes("┌─ Keys "));
+    const bottom = tall.findIndex((line) => line.includes(" esc close ─┘"));
+    expect(bottom - top + 1).toBe(24);
+    expect(tall[top + 1]).toMatch(blank);
+    expect(tall[bottom - 1]).toMatch(blank);
+    expect(tall[top + 2]).toMatch(/│ Inventory ─+ │/u);
     // A destructive action is the one effect in the warning style.
     const nightfall = createNightfallTheme("truecolor");
     const colored = renderTui(help, nightfall);

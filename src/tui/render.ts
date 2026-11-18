@@ -222,7 +222,7 @@ interface HelpGroup {
 function helpBody(
   view: TuiBrowseState["view"],
   style: TuiPaint,
-  rules = true,
+  spacing: "open" | "ruled" | "bare" = "open",
 ): readonly string[] {
   const groups: readonly HelpGroup[] = [
     view === "trash"
@@ -296,8 +296,10 @@ function helpBody(
         : ""
     }`;
   };
-  return groups.flatMap((group) => [
-    ...(rules ? [rule(group)] : []),
+  return groups.flatMap((group, index) => [
+    // An empty row sets each group apart from the one above it.
+    ...(spacing === "open" && index > 0 ? [""] : []),
+    ...(spacing === "bare" ? [] : [rule(group)]),
     ...group.rows.map(
       ([key, effect, mouse]) =>
         `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${style.muted(fit(mouse ?? "", mouseWidth))}`,
@@ -311,8 +313,9 @@ function renderHelp(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const ruled = helpBody(state.browse.view, style);
-  const bare = helpBody(state.browse.view, style, false);
+  const open = helpBody(state.browse.view, style, "open");
+  const ruled = helpBody(state.browse.view, style, "ruled");
+  const bare = helpBody(state.browse.view, style, "bare");
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
   const panel = (body: readonly string[]) =>
     overlayPanel(
@@ -329,9 +332,11 @@ function renderHelp(
       ),
       viewport,
     );
-  // A short terminal gives up the padding first, then the group rules.
+  // A short terminal gives up the padding inside the border first, then the
+  // empty rows between the groups, then the group rules.
   const lines =
-    panel(["", ...ruled, ""]) ??
+    panel(["", ...open, ""]) ??
+    panel(open) ??
     panel(ruled) ??
     panel(bare) ??
     // Too small for a panel: the keys take the whole screen.

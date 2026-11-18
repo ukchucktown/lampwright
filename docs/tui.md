@@ -247,11 +247,12 @@ visible behind the panel in a dim style. The panel has one key on each line in
 three columns: the key, its effect, and the mouse action that has the same
 effect. The mouse column is muted. A labelled rule opens each of the three
 groups: the actions of the current view under the name of that view, the keys
-for movement and selection, and the application keys. The panel has an empty row inside its top border and its bottom border. An
-effect that removes content, `remove` or `purge`, is in the warning style. The
-`esc` row names the effect of Escape in the current view. A short terminal
-drops the empty rows first and then the rules before the key reference fills
-the screen.
+for movement and selection, and the application keys. An empty row is above the second group and the third group, and inside the top
+border and the bottom border. An effect that removes content, `remove` or
+`purge`, is in the warning style. The `esc` row names the effect of Escape in
+the current view. The complete panel has 24 rows. A shorter terminal drops the
+empty rows inside the border first, then the empty rows between the groups,
+then the rules, before the key reference fills the screen.
 
 A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
 one effect have a space between them, for example `PgUp PgDn`. `?`,
