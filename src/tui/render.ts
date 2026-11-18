@@ -204,55 +204,97 @@ function browseFrame(
   );
 }
 
+interface HelpGroup {
+  readonly label: string;
+  /** Key, effect, and the mouse action with the same effect, if any. */
+  readonly rows: readonly (readonly [string, string, string?])[];
+}
+
 /**
- * Every key, one to a line, in two aligned columns: the key, then what it
- * does. Three short groups: the actions of the current view, the ways to move
- * and select, and the rest. The mouse equivalents share the line of their key.
+ * Every key, one to a line, in three aligned columns: the key, its effect, and
+ * the mouse action that has the same effect. A labelled rule opens each group,
+ * and the first group is named after the view whose actions it lists.
  */
 function helpBody(
   view: TuiBrowseState["view"],
   style: TuiPaint,
+  rules = true,
 ): readonly string[] {
-  const actions: readonly (readonly [string, string])[] =
+  const groups: readonly HelpGroup[] = [
     view === "trash"
-      ? [
-          ["enter", "restore"],
-          ["p", "purge"],
-        ]
+      ? {
+          label: "Trash",
+          rows: [
+            ["enter", "restore"],
+            ["p", "purge"],
+          ],
+        }
       : view === "disabled"
-        ? [
-            ["e", "enable"],
-            ["u", "update"],
-          ]
-        : [
-            ["enter", "remove"],
-            ["d", "disable"],
-            ["u", "update"],
-          ];
-  const groups: readonly (readonly (readonly [string, string])[])[] = [
-    actions,
-    [
-      ["↑↓  wheel", "move"],
-      ["PgUp/PgDn", "page"],
-      ["tab  click", "next pane"],
-      ["space  dbl-click", "select"],
-      ["ctrl-u", "clear selection"],
-      ["/", "search, or type a name"],
-    ],
-    [
-      ["ctrl-t", "next view"],
-      ["ctrl-p", "theme"],
-      ["shift+←→", "pane width"],
-      ["shift+↑↓", "detail height"],
-      ["esc", "back"],
-      ["q", "quit"],
-    ],
+        ? {
+            label: "Disabled",
+            rows: [
+              ["e", "enable"],
+              ["u", "update"],
+            ],
+          }
+        : {
+            label: "Inventory",
+            rows: [
+              ["enter", "remove"],
+              ["u", "update"],
+              ["d", "disable"],
+            ],
+          },
+    {
+      label: "Move and select",
+      rows: [
+        ["↑↓", "move", "wheel"],
+        ["PgUp/PgDn", "page"],
+        ["tab", "next pane", "click"],
+        ["space", "select", "dbl-click"],
+        ["ctrl-u", "clear selection"],
+        ["/", "search, or just type"],
+        ["ctrl-t", "next view"],
+      ],
+    },
+    {
+      label: "App",
+      rows: [
+        ["ctrl-p", "theme"],
+        ["shift+←→", "pane width"],
+        ["shift+↑↓", "detail height"],
+        ["esc", "back"],
+        ["q", "quit"],
+      ],
+    },
   ];
-  const keyWidth =
-    Math.max(...groups.flat().map(([key]) => [...key].length)) + 3;
-  return groups.flatMap((group, index) => [
-    ...(index === 0 ? [] : [""]),
-    ...group.map(([key, text]) => `${style.title(fit(key, keyWidth))}${text}`),
+  const rows = groups.flatMap((group) => group.rows);
+  const width = (column: 0 | 1 | 2): number =>
+    Math.max(...rows.map((row) => [...(row[column] ?? "")].length));
+  const keyWidth = width(0) + 2;
+  const effectWidth = width(1) + 2;
+  const mouseWidth = Math.max(width(2), "mouse".length);
+  const inner = keyWidth + effectWidth + mouseWidth;
+  const dashes = (count: number): string =>
+    style.border("─".repeat(Math.max(0, count)));
+  const rule = (group: HelpGroup): string => {
+    const label = `${group.label} `;
+    // The mouse column gets its heading on the rule of the group that uses it.
+    if (!group.rows.some((row) => row[2] !== undefined))
+      return `${style.muted(label)}${dashes(inner - label.length)}`;
+    const lead = keyWidth + effectWidth - label.length - 1;
+    return `${style.muted(label)}${dashes(lead)} ${style.muted("mouse")}${
+      mouseWidth > "mouse".length
+        ? ` ${dashes(mouseWidth - "mouse".length - 1)}`
+        : ""
+    }`;
+  };
+  return groups.flatMap((group) => [
+    ...(rules ? [rule(group)] : []),
+    ...group.rows.map(
+      ([key, effect, mouse]) =>
+        `${style.title(fit(key, keyWidth))}${fit(effect, effectWidth)}${style.muted(fit(mouse ?? "", mouseWidth))}`,
+    ),
   ]);
 }
 
@@ -263,8 +305,8 @@ function renderHelp(
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
   const spaced = helpBody(state.browse.view, style);
-  // A short terminal drops the blank lines between groups before the panel.
-  const compact = spaced.filter((line) => line !== "");
+  // A short terminal drops the group rules before the panel.
+  const compact = helpBody(state.browse.view, style, false);
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
   const panel = (body: readonly string[]) =>
     overlayPanel(

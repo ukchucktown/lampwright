@@ -1043,9 +1043,21 @@ describe("terminal theme", () => {
     const text = lines.join("\n");
     expect(text).toContain("┌─ Keys ");
     expect(text).toContain(" esc close ─┘");
-    // One key to a line: the key, then what it does.
+    // One key to a line: the key, its effect, then the matching mouse action.
     expect(text).toMatch(/│ enter +remove +│/u);
-    expect(text).toMatch(/│ space {2}dbl-click +select +│/u);
+    expect(text).toMatch(/│ space +select +dbl-click │/u);
+    expect(text).toMatch(/│ tab +next pane +click +│/u);
+    expect(text).toMatch(/│ ↑↓ +move +wheel +│/u);
+    // A labelled rule opens each group; the first names the current view.
+    expect(text).toMatch(/│ Inventory ─+ │/u);
+    expect(text).toMatch(/│ Move and select ─+ mouse ─+ │/u);
+    expect(text).toMatch(/│ App ─+ │/u);
+    // The mouse actions share one column, under their heading.
+    const start = (word: string) =>
+      lines.find((line) => line.includes(` ${word}`))!.lastIndexOf(word);
+    expect(
+      new Set(["mouse", "wheel", "click", "dbl-click"].map(start)).size,
+    ).toBe(1);
     // Every key that the four-row header showed is in the reference.
     for (const key of [
       "↑↓",
@@ -1074,6 +1086,8 @@ describe("terminal theme", () => {
         plainTuiTheme,
       );
     expect(reference("disabled")).toMatch(/│ e +enable +│/u);
+    expect(reference("disabled")).toMatch(/│ Disabled ─+ │/u);
+    expect(reference("trash")).toMatch(/│ Trash ─+ │/u);
     expect(reference("trash")).toMatch(/│ enter +restore +│/u);
     expect(reference("trash")).toMatch(/│ p +purge +│/u);
 
@@ -1137,7 +1151,7 @@ describe("terminal theme", () => {
         if (viewport.columns <= 20) expect(drawn).not.toContain("┌─");
         // A panel is drawn over the browse view, which stays around it.
         if (drawn.includes("┌─"))
-          expect(lines[0]?.replace(ansi, "")).toMatch(/^Lampwri/u);
+          expect(lines[0]?.replace(ansi, "")).toMatch(/^Lamp/u);
       }
     }
   });

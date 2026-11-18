@@ -244,9 +244,11 @@ the detail pane ends at an empty line.
 `?` in a browse view opens the key reference. It is a panel with a border that
 the terminal UI draws over the middle of the browse view. The browse view stays
 visible behind the panel in a dim style. The panel has one key on each line in
-two columns: the key, then its effect. A mouse action is on the line of the key
-that has the same effect. The panel has three groups: the actions of the
-current view, the keys for movement and selection, and the other keys. `?`,
+three columns: the key, its effect, and the mouse action that has the same
+effect. The mouse column is muted. A labelled rule opens each of the three
+groups: the actions of the current view under the name of that view, the keys
+for movement and selection, and the application keys. A short terminal drops
+the rules before the key reference fills the screen. `?`,
 `q`, Escape, or Enter closes the panel and keeps the browse position. When the
 terminal is too small for the panel, the key reference fills the screen.
 
