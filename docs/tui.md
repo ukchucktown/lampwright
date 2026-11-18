@@ -268,6 +268,11 @@ Escape in the current view.
 complete panel has 21 rows. A shorter terminal drops the empty rows between the
 groups first, then the rules, before the key reference fills the screen.
 
+Escape is the first byte of each arrow key and each function key, so the
+terminal waits for the rest of a key sequence before it reports a lone Escape.
+The wait is 50 ms. The default of Node.js is 500 ms, which made Escape slower
+than each other key.
+
 A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
 one effect have a space between them, for example `PgUp PgDn`. `?`,
 `q`, Escape, or Enter closes the panel and keeps the browse position. When the

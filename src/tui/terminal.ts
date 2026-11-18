@@ -1,5 +1,5 @@
 import { emitKeypressEvents } from "node:readline";
-import type { Key } from "node:readline";
+import type { Interface as ReadlineInterface, Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
@@ -277,6 +277,9 @@ function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
   return index < view.entries.total ? { pane, index } : null;
 }
 
+/** How long a lone Escape waits for the rest of a key sequence. */
+const ESCAPE_KEY_WAIT_MS = 50;
+
 type TerminalInput = NodeJS.ReadStream;
 type TerminalOutput = NodeJS.WriteStream;
 
@@ -481,7 +484,13 @@ class RawTuiTerminal implements TuiTerminal {
     // mouse reports is claimed here and the keypresses readline shreds it into
     // are ignored rather than typed into the filter.
     input.on("data", this.onData);
-    emitKeypressEvents(input);
+    // A lone Escape is also the first byte of every arrow and function key, so
+    // readline waits before it reports one. Its default wait is 500 ms, which
+    // makes Escape feel slow beside every other key. A complete key sequence
+    // arrives in one read, so a short wait is enough to tell the two apart.
+    emitKeypressEvents(input, {
+      escapeCodeTimeout: ESCAPE_KEY_WAIT_MS,
+    } as unknown as ReadlineInterface);
     input.on("keypress", this.onKeypress);
     output.on("resize", this.onResize);
     input.setRawMode(true);

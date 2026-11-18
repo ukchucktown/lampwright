@@ -3532,6 +3532,40 @@ describe("raw terminal pointer input", () => {
     colorTerminal.close();
   });
 
+  it("reports a lone Escape quickly and still reads a complete arrow key", async () => {
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+    const inventory = groupedInventory();
+    const state: TuiState = {
+      screen: "help",
+      browse: {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 24,
+          columns: 100,
+        }),
+      },
+    };
+    const browse: TuiState = { screen: "browse", ...state.browse };
+
+    // Escape is the first byte of every arrow key, so the terminal waits for
+    // the rest of a sequence. The wait must stay far below the 500 ms default.
+    const started = Date.now();
+    const closing = terminal.readAction(state);
+    input.write("\u001B");
+    await expect(closing).resolves.toEqual({ kind: "cancel" });
+    expect(Date.now() - started).toBeLessThan(300);
+
+    // A complete sequence in one read is one key, not Escape and two letters.
+    const moving = terminal.readAction(browse);
+    input.write("\u001B[B");
+    await expect(moving).resolves.toEqual({ kind: "move", delta: 1 });
+    terminal.close();
+  });
+
   it("delivers terminal resizes immediately so the controller can repaint", async () => {
     const { input, output } = fakeTty();
     const terminal = createNodeTuiTerminal(
