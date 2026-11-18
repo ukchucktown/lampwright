@@ -98,8 +98,9 @@ results/preview split and shows the active regular expression in the theme's
 active-input color. Match status follows the panes, so typed input cannot be
 mistaken for header status or help text.
 
-When detail content overflows, its right edge draws a thin, non-bold cyan
-scrollbar over the muted border track. The status row remains blank unless the
+When pane content overflows, the right edge of the pane draws a thin, non-bold
+cyan thumb for the visible part. The scrollbar has no track, and the panes have
+no right border, so the thumb is the only mark in that column. The status row remains blank unless the
 TUI has an operator-facing notice; internal focus, index, and visible-range
 counters are never shown. Moving to another entry resets detail scrolling to
 the top. Resizing the window or detail pane clamps the range to the content, so
@@ -220,11 +221,11 @@ The second row shows the key hints that apply in the current context. Each key
 is in the title style and its description is muted. The view, the focused pane,
 and the selection decide the hints:
 
-- Inventory: `enter remove`, `d disable`, `u update`, `space select`, and
+- Inventory: `space select`, `enter remove`, `u update`, `d disable`, and
   `/ search`. With a selection, `remove` and `disable` show the number of
   selected rows and `ctrl-u clear` joins the row. Update accepts one target, so
   `u update` leaves the row when two or more rows are selected.
-- Disabled: `e enable`, `u update`, `space select`, and `/ search`.
+- Disabled: `space select`, `e enable`, `u update`, and `/ search`.
 - Trash: `enter restore`, `p purge`, and `esc inventory`.
 - A focused detail pane: `↑↓ scroll`, `PgUp/PgDn page`, and `tab pane`.
 - A focused row that no plan can contain: `/ search` and `tab pane`.

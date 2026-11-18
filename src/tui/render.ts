@@ -2235,19 +2235,20 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
       { key: "/", label: "search" },
       { key: "tab", label: "pane" },
     ];
-  const act: KeyHint[] =
-    state.view === "disabled"
-      ? [{ key: "e", label: `enable${count}` }]
+  // Select leads because the other actions work on the selection. Update
+  // accepts one target, so its hint leaves when it cannot apply.
+  const update: readonly KeyHint[] =
+    selected <= 1 ? [{ key: "u", label: "update" }] : [];
+  return [
+    { key: "space", label: "select" },
+    ...(state.view === "disabled"
+      ? [{ key: "e", label: `enable${count}` }, ...update]
       : [
           { key: "enter", label: `remove${count}` },
+          ...update,
           { key: "d", label: `disable${count}` },
-        ];
-  // Update accepts one target, so the hint leaves when it cannot apply.
-  if (selected <= 1) act.push({ key: "u", label: "update" });
-  return [
-    ...act,
+        ]),
     ...(selected > 0 ? [{ key: "ctrl-u", label: "clear" }] : []),
-    { key: "space", label: "select" },
     { key: "/", label: "search" },
   ];
 }
@@ -2486,9 +2487,9 @@ function scrollMark(
     Math.round((pane.height / pane.total) * pane.height),
   );
   const start = Math.round((pane.offset / pane.total) * pane.height);
-  return row >= start && row < start + span
-    ? style.path("▕")
-    : style.border("│");
+  // The thumb alone: a track in the border style reads as a pane border that
+  // the thumb then sits beside, and the panes have no right border.
+  return row >= start && row < start + span ? style.path("│") : " ";
 }
 
 const escape = String.fromCharCode(27);

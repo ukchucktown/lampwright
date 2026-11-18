@@ -869,7 +869,7 @@ describe("terminal theme", () => {
     // The last line holds a notice only, so nothing sits under the scrollbar.
     expect(plain.at(-1)?.trim()).toBe("");
     expect(plain[1]).toMatch(
-      /^enter remove · d disable · u update · space select · \/ search +\? help · q quit$/u,
+      /^space select · enter remove · u update · d disable · \/ search +\? help · q quit$/u,
     );
     for (const line of plain) {
       expect(visibleWidth(line)).toBe(model.viewport.columns - 1);
@@ -948,20 +948,20 @@ describe("terminal theme", () => {
     const pinned = /ctrl-t view · \? help · q quit$/u;
 
     expect(footer(base)).toMatch(
-      /^enter remove · d disable · u update · space select · \/ search /u,
+      /^space select · enter remove · u update · d disable · \/ search /u,
     );
 
     const entries = reduceBrowse(base, { kind: "focus", pane: "entries" });
     const one = reduceBrowse(entries, { kind: "toggle-select" });
     expect(footer(one)).toMatch(
-      /^enter remove 1 · d disable 1 · u update · ctrl-u clear · space select /u,
+      /^space select · enter remove 1 · u update · d disable 1 · ctrl-u clear /u,
     );
     const two = reduceBrowse(reduceBrowse(one, { kind: "move", delta: 1 }), {
       kind: "toggle-select",
     });
     // Update accepts one target, so its hint leaves with two selected.
     expect(footer(two)).toMatch(
-      /^enter remove 2 · d disable 2 · ctrl-u clear · space select · \/ search /u,
+      /^space select · enter remove 2 · d disable 2 · ctrl-u clear · \/ search /u,
     );
     expect(frame(two)[0]).toMatch(/ 2 selected$/u);
 
@@ -969,7 +969,7 @@ describe("terminal theme", () => {
       footer(reduceBrowse(base, { kind: "focus", pane: "detail" })),
     ).toMatch(/^↑↓ scroll · PgUp\/PgDn page · tab pane /u);
     expect(footer(base, "disabled")).toMatch(
-      /^e enable · u update · space select · \/ search /u,
+      /^space select · e enable · u update · \/ search /u,
     );
     expect(footer(base, "trash")).toMatch(
       /^enter restore · p purge · esc inventory /u,
@@ -1642,9 +1642,11 @@ describe("terminal pane navigation", () => {
     expect(rendered).not.toContain("focus=");
     expect(rendered).not.toContain("section=");
     expect(rendered).not.toContain("entry=");
-    expect(rendered).toContain("▕");
+    expect(rendered).not.toContain("▕");
     expect(rendered).not.toContain("█");
-    expect(colored).toContain(styleTui(theme, "path", "▕"));
+    expect(colored).toContain(styleTui(theme, "path", "│"));
+    // The thumb has no track: only the pane divider is in the border style.
+    expect(colored).not.toContain(styleTui(theme, "border", "│") + "\n");
   });
 
   it("leaves the browse status row free of navigation diagnostics", () => {
