@@ -244,7 +244,8 @@ browse width of nine columns whenever Update can apply.
 
 The last line of the frame shows a notice when there is one, and is empty in
 all other conditions. No hint is below the detail pane, so the scroll mark of
-the detail pane ends at an empty line.
+the detail pane ends at an empty line. A selection or a cleared selection gives no notice, because the
+checkboxes and the header status show the result.
 
 `?` in a browse view opens the key reference. It is a panel with a border that
 the terminal UI draws over the middle of the browse view. The browse view stays

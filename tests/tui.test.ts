@@ -1014,6 +1014,33 @@ describe("terminal theme", () => {
     expect(header).not.toContain("claude-code");
   });
 
+  it("selects and clears a whole section without a notice", () => {
+    const inventory = groupedInventory();
+    const base = createBrowseModel(createTuiSections(inventory), {
+      rows: 24,
+      columns: 80,
+    });
+    const lastLine = (model: typeof base) =>
+      renderBrowseLines({ screen: "browse", inventory, model }, plainTuiTheme)
+        .at(-1)!
+        .trim();
+
+    // Space on a section row takes the whole section.
+    const taken = reduceBrowse(base, { kind: "toggle-select" });
+    expect(taken.selected.size).toBe(2);
+    expect(taken.notice).toBeNull();
+    expect(lastLine(taken)).toBe("");
+
+    const cleared = reduceBrowse(taken, { kind: "toggle-select" });
+    expect(cleared.selected.size).toBe(0);
+    expect(cleared.notice).toBeNull();
+    expect(lastLine(cleared)).toBe("");
+
+    const emptied = reduceBrowse(taken, { kind: "clear-selection" });
+    expect(emptied.selected.size).toBe(0);
+    expect(emptied.notice).toBeNull();
+  });
+
   it("shows a notice on the last line and keeps the key hints", () => {
     const inventory = groupedInventory();
     const model = {

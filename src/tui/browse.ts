@@ -426,14 +426,8 @@ function toggleSelect(model: TuiBrowseModel): TuiBrowseModel {
     if (everyTaken) selected.delete(key);
     else selected.add(key);
   }
-  return {
-    ...model,
-    selected,
-    notice:
-      model.focus === "sections"
-        ? `${everyTaken ? "Cleared" : "Selected"} ${String(keys.length)} in ${section.label}.`
-        : null,
-  };
+  // No notice: the checkboxes and the header status already show the result.
+  return { ...model, selected, notice: null };
 }
 
 /** Clamps indices to current contents, then brings both viewports into range. */
