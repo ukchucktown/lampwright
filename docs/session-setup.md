@@ -48,7 +48,7 @@ Hard Dependencies block by default. A required App Binding is a Hard Dependency 
 
 ## TUI integration
 
-The area row is `Skills & plugins | Session setup`. The default area remains Skills & plugins. `ctrl-o` cycles areas and both labels accept a click. `ctrl-t` cycles the views inside the active area:
+The area row is `Skills & plugins | Session setup`. The default area remains Skills & plugins. `ctrl+o` cycles areas and both labels accept a click. `ctrl+t` cycles the views inside the active area:
 
 | Area             | Views                      |
 | ---------------- | -------------------------- |
@@ -62,8 +62,8 @@ Session setup keeps the existing two navigation panes and lower detail pane. The
 ```text
 Lampwright   Skills & plugins | [Session setup]
 Workspace: /work/example       [Inventory] | Disabled (7)
-ctrl-o area   ctrl-t view   tab pane   / search
-d disable   e enable   space select   ctrl-a select view
+ctrl+o area   ctrl+t view   tab pane   / search
+d disable   e enable   space select   ctrl+a select view
 ┌ Harnesses ───────┬ Capabilities ───────────────────────┐
 │ > Codex         │ Skills                              │
 │   Claude Code   │ [ ] code-review          enabled    │
@@ -87,7 +87,7 @@ Inventory includes effectively enabled and unresolved targets. Disabled includes
 
 `d` and `e` open their respective reviews from either setup view. With a staged selection, the action uses exactly those targets. Without a selection, it uses the focused target. Enter on a browse row opens its availability details, never removal. `y` confirms an unblocked review and Escape cancels it. Removal, Update, Restore, and Purge are unavailable in Session setup.
 
-Search uses the existing name-only, case-insensitive regular expression behavior within the selected harness and setup view. Space stages a row, `ctrl-a` stages every target row in that filtered view, and Enter applies additive search selection. Invalid and empty-match expressions remain invalid. Unsupported targets can enter review and appear as blocks, so a batch never silently omits them. Protected System rows and informational children have no checkbox.
+Search uses the existing name-only, case-insensitive regular expression behavior within the selected harness and setup view. Space stages a row, `ctrl+a` stages every target row in that filtered view, and Enter applies additive search selection. Invalid and empty-match expressions remain invalid. Unsupported targets can enter review and appear as blocks, so a batch never silently omits them. Protected System rows and informational children have no checkbox.
 
 Each area, view, and harness retains its own cursor, search, selection, pane focus, dimensions, and scroll positions. A harness change cannot carry a previous harness's selection into a new action. Area changes cannot reuse legacy lifecycle targets as setup targets. A review freezes its harness and workspace context. Escape returns to the exact prior browse state.
 

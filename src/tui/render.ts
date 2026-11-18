@@ -56,7 +56,7 @@ export function renderTui(
   if (state.screen === "loading")
     return `${style.title("Lampwright")}\n\n${style.info("Scanning known skill roots…")}\n`;
   if (state.screen === "error")
-    return `${style.title("Lampwright")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or ctrl-c to exit.")}\n`;
+    return `${style.title("Lampwright")}\n\n${style.error(`Unable to continue: ${state.message}`)}\n\n${style.muted("Press q or ctrl+c to exit.")}\n`;
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
@@ -138,7 +138,11 @@ function overlayPanel(
   const rows = Math.max(0, viewport.rows - 1);
   if (width + 2 > usable || panel.length > rows) return null;
   const left = Math.floor((usable - width) / 2);
-  const top = Math.floor((rows - panel.length) / 2);
+  // Centered, but below the header whenever the frame has a row to spare.
+  const top = Math.min(
+    rows - panel.length,
+    Math.max(1, Math.floor((rows - panel.length) / 2)),
+  );
   const lines = Array.from({ length: Math.max(rows, frame.length) }, (_, row) =>
     fit(frame[row] ?? "", usable),
   );
@@ -249,21 +253,24 @@ function helpBody(
       label: "Move and select",
       rows: [
         ["↑↓", "move", "wheel"],
-        ["PgUp/PgDn", "page"],
+        ["PgUp PgDn", "page"],
         ["tab", "next pane", "click"],
         ["space", "select", "dbl-click"],
-        ["ctrl-u", "clear selection"],
+        ["ctrl+u", "clear selection"],
         ["/", "search, or just type"],
-        ["ctrl-t", "next view"],
+        ["ctrl+t", "next view"],
       ],
     },
     {
       label: "App",
       rows: [
-        ["ctrl-p", "theme"],
+        ["ctrl+p", "theme"],
         ["shift+←→", "pane width"],
         ["shift+↑↓", "detail height"],
-        ["esc", "back"],
+        [
+          "esc",
+          view === "disabled" || view === "trash" ? "Inventory" : "step back",
+        ],
         ["q", "quit"],
       ],
     },
@@ -293,7 +300,7 @@ function helpBody(
     ...(rules ? [rule(group)] : []),
     ...group.rows.map(
       ([key, effect, mouse]) =>
-        `${style.title(fit(key, keyWidth))}${fit(effect, effectWidth)}${style.muted(fit(mouse ?? "", mouseWidth))}`,
+        `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${style.muted(fit(mouse ?? "", mouseWidth))}`,
     ),
   ]);
 }
@@ -304,9 +311,8 @@ function renderHelp(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const spaced = helpBody(state.browse.view, style);
-  // A short terminal drops the group rules before the panel.
-  const compact = helpBody(state.browse.view, style, false);
+  const ruled = helpBody(state.browse.view, style);
+  const bare = helpBody(state.browse.view, style, false);
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
   const panel = (body: readonly string[]) =>
     overlayPanel(
@@ -323,11 +329,13 @@ function renderHelp(
       ),
       viewport,
     );
+  // A short terminal gives up the padding first, then the group rules.
   const lines =
-    panel(spaced) ??
-    panel(compact) ??
+    panel(["", ...ruled, ""]) ??
+    panel(ruled) ??
+    panel(bare) ??
     // Too small for a panel: the keys take the whole screen.
-    [style.title("Lampwright — Keys"), ...compact, style.muted("esc close")]
+    [style.title("Lampwright — Keys"), ...bare, style.muted("esc close")]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
   return `${lines.join("\n")}\n`;
@@ -449,7 +457,7 @@ function renderTrashScrollable(
     metrics.maximumOffset === 0
       ? []
       : [
-          `${rangeLabel} ${String(clamped + 1)}-${String(Math.min(body.length, clamped + metrics.pageRows))}/${String(body.length)}  ↑↓/PgUp/PgDn scroll`,
+          `${rangeLabel} ${String(clamped + 1)}-${String(Math.min(body.length, clamped + metrics.pageRows))}/${String(body.length)}  ↑↓ PgUp PgDn scroll`,
         ];
   return `${[...visible, ...range, ...footer]
     .slice(0, Math.max(0, viewport.rows - 1))
@@ -2050,15 +2058,15 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
         { text: " move · ", paint: style.muted },
         { text: "space", paint: style.title },
         { text: " stage · ", paint: style.muted },
-        { text: "ctrl-a", paint: style.title },
+        { text: "ctrl+a", paint: style.title },
         { text: " all · ", paint: style.muted },
         { text: "enter", paint: style.title },
         { text: " done · ", paint: style.muted },
         { text: "esc", paint: style.title },
         { text: " cancel · ", paint: style.muted },
-        { text: "ctrl-u", paint: style.title },
+        { text: "ctrl+u", paint: style.title },
         { text: " clear · ", paint: style.muted },
-        { text: "ctrl-c", paint: style.title },
+        { text: "ctrl+c", paint: style.title },
         { text: " quit", paint: style.muted },
       ],
       usable,
@@ -2264,7 +2272,7 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
   if (model.focus === "detail")
     return [
       { key: "↑↓", label: "scroll" },
-      { key: "PgUp/PgDn", label: "page" },
+      { key: "PgUp PgDn", label: "page" },
       { key: "tab", label: "pane" },
     ];
   const entry = model.focus === "entries" ? currentEntry(model) : null;
@@ -2290,7 +2298,7 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
           ...update,
           { key: "d", label: `disable${count}` },
         ]),
-    ...(selected > 0 ? [{ key: "ctrl-u", label: "clear" }] : []),
+    ...(selected > 0 ? [{ key: "ctrl+u", label: "clear" }] : []),
     { key: "/", label: "search" },
   ];
 }
@@ -2333,7 +2341,7 @@ function browseHints(
   // selection changes. The view key leaves first: the views are click targets.
   const pinned: readonly KeyHint[] =
     [
-      [{ key: "ctrl-t", label: "view" }, ...pinnedKeyHints],
+      [{ key: "ctrl+t", label: "view" }, ...pinnedKeyHints],
       pinnedKeyHints,
     ].find(
       (group, index) =>
@@ -2618,7 +2626,7 @@ function renderPlan(state: TuiPlanState, style: TuiPaint): string {
   const range = overflow
     ? [
         style.muted(
-          `review ${String(offset + 1)}-${String(Math.min(body.length, offset + metrics.pageRows))}/${String(body.length)}  ↑↓/PgUp/PgDn scroll`,
+          `review ${String(offset + 1)}-${String(Math.min(body.length, offset + metrics.pageRows))}/${String(body.length)}  ↑↓ PgUp PgDn scroll`,
         ),
       ]
     : [];
@@ -3203,7 +3211,7 @@ function renderReport(state: TuiReportState, style: TuiPaint): string {
     metrics.maximumOffset > 0
       ? [
           style.muted(
-            `report ${String(offset + 1)}-${String(Math.min(body.length, offset + metrics.pageRows))}/${String(body.length)}  ↑↓/PgUp/PgDn scroll`,
+            `report ${String(offset + 1)}-${String(Math.min(body.length, offset + metrics.pageRows))}/${String(body.length)}  ↑↓ PgUp PgDn scroll`,
           ),
         ]
       : [];

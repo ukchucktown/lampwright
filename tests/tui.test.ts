@@ -889,7 +889,7 @@ describe("terminal theme", () => {
     const colored = renderBrowseLines(state, theme)[1]!;
     const plain = renderBrowseLines(state, plainTuiTheme)[1]!;
 
-    for (const key of ["enter", "d", "u", "space", "/", "ctrl-t", "?", "q"])
+    for (const key of ["enter", "d", "u", "space", "/", "ctrl+t", "?", "q"])
       expect(colored).toContain(styleTui(theme, "title", key));
     expect(colored).toContain(styleTui(theme, "muted", "remove"));
     expect(colored).toContain(styleTui(theme, "muted", " · "));
@@ -945,7 +945,7 @@ describe("terminal theme", () => {
       model: typeof base,
       view?: "inventory" | "disabled" | "trash",
     ) => frame(model, view)[1]!;
-    const pinned = /ctrl-t view · \? help · q quit$/u;
+    const pinned = /ctrl\+t view · \? help · q quit$/u;
 
     expect(footer(base)).toMatch(
       /^space select · enter remove · u update · d disable · \/ search /u,
@@ -954,20 +954,20 @@ describe("terminal theme", () => {
     const entries = reduceBrowse(base, { kind: "focus", pane: "entries" });
     const one = reduceBrowse(entries, { kind: "toggle-select" });
     expect(footer(one)).toMatch(
-      /^space select · enter remove 1 · u update · d disable 1 · ctrl-u clear /u,
+      /^space select · enter remove 1 · u update · d disable 1 · ctrl\+u clear /u,
     );
     const two = reduceBrowse(reduceBrowse(one, { kind: "move", delta: 1 }), {
       kind: "toggle-select",
     });
     // Update accepts one target, so its hint leaves with two selected.
     expect(footer(two)).toMatch(
-      /^space select · enter remove 2 · d disable 2 · ctrl-u clear · \/ search /u,
+      /^space select · enter remove 2 · d disable 2 · ctrl\+u clear · \/ search /u,
     );
     expect(frame(two)[0]).toMatch(/ 2 selected$/u);
 
     expect(
       footer(reduceBrowse(base, { kind: "focus", pane: "detail" })),
-    ).toMatch(/^↑↓ scroll · PgUp\/PgDn page · tab pane /u);
+    ).toMatch(/^↑↓ scroll · PgUp PgDn page · tab pane /u);
     expect(footer(base, "disabled")).toMatch(
       /^space select · e enable · u update · \/ search /u,
     );
@@ -1070,14 +1070,14 @@ describe("terminal theme", () => {
       "tab",
       "shift+←→",
       "shift+↑↓",
-      "ctrl-t",
+      "ctrl+t",
       "esc",
       "q ",
       "d ",
       "/ ",
-      "ctrl-u",
-      "ctrl-p",
-      "PgUp/PgDn",
+      "ctrl+u",
+      "ctrl+p",
+      "PgUp PgDn",
     ])
       expect(text).toContain(key);
     const reference = (view: "disabled" | "trash") =>
@@ -1087,6 +1087,23 @@ describe("terminal theme", () => {
       );
     expect(reference("disabled")).toMatch(/│ e +enable +│/u);
     expect(reference("disabled")).toMatch(/│ Disabled ─+ │/u);
+    // Escape is named for what it does in the view, not as a second "close".
+    expect(text).toMatch(/│ esc +step back +│/u);
+    expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
+    // The panel has a blank row inside its top and its bottom border.
+    const top = lines.findIndex((line) => line.includes("┌─ Keys "));
+    const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
+    expect(lines[top + 1]).toMatch(/│ +│/u);
+    expect(lines[bottom - 1]).toMatch(/│ +│/u);
+    // A destructive action is the one effect in the warning style.
+    const nightfall = createNightfallTheme("truecolor");
+    const colored = renderTui(help, nightfall);
+    expect(colored).toContain(
+      styleTui(nightfall, "warning", "remove").slice(0, -4),
+    );
+    expect(colored).not.toContain(
+      styleTui(nightfall, "warning", "update").slice(0, -4),
+    );
     expect(reference("trash")).toMatch(/│ Trash ─+ │/u);
     expect(reference("trash")).toMatch(/│ enter +restore +│/u);
     expect(reference("trash")).toMatch(/│ p +purge +│/u);
@@ -2139,7 +2156,7 @@ describe("global name-regex search", () => {
     const lines = rendered.split("\n");
     expect(lines[0]).toContain("Lampwright search");
     expect(lines[1]).toContain("↑↓ move");
-    expect(lines[1]).toContain("ctrl-a");
+    expect(lines[1]).toContain("ctrl+a");
     expect(lines[2]!.trimEnd()).toMatch(/^┌─+┐$/u);
     expect(lines[3]!.trimEnd()).toMatch(/^│> alpha +│$/u);
     expect(lines[4]!.trimEnd()).toMatch(/^├─+┬─+┤$/u);
@@ -2242,9 +2259,9 @@ describe("global name-regex search", () => {
       },
       plainTuiTheme,
     );
-    expect(wide.split("\n")[1]).toContain("ctrl-a");
-    expect(wide.split("\n")[1]).toContain("ctrl-u");
-    expect(wide.split("\n")[1]).toContain("ctrl-c");
+    expect(wide.split("\n")[1]).toContain("ctrl+a");
+    expect(wide.split("\n")[1]).toContain("ctrl+u");
+    expect(wide.split("\n")[1]).toContain("ctrl+c");
     const invalid = renderTui(
       {
         ...blank,

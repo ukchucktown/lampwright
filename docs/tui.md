@@ -14,13 +14,13 @@ the Skills & plugins contract. Setup delivery adds a harness list, typed
 capability rows, and Inventory/Disabled views through the same pane components.
 It preserves the current theme and lifecycle selection behavior.
 
-`ctrl-o` changes areas and `ctrl-t` changes views within an area. Each setup
+`ctrl+o` changes areas and `ctrl+t` changes views within an area. Each setup
 harness and view owns its selection and position. Setup `d` and `e` open native
 availability reviews. Enter never invokes removal in that area. The linked
 design defines the exact key behavior, source warnings, scope review, owner
 routes, wireframe, and report refresh requirements.
 
-The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl-t` cycles the
+The header provides `Inventory | Disabled (N) | Trash (N)`. `ctrl+t` cycles the
 three views and each header label is clickable. Each view retains its own
 cursor, panes, scrolling, search, and additive selection through search,
 review, report, resize, and tab round-trips.
@@ -177,7 +177,7 @@ usable.
 
 ### Theme picker
 
-`ctrl-p` in a browse view opens the theme picker. The key reference lists this
+`ctrl+p` in a browse view opens the theme picker. The key reference lists this
 key. The picker is a panel over the middle of the browse view. It lists the
 built-in themes and then the custom themes. The terminal UI draws the browse
 view behind the panel with the highlighted theme, so a move to another row is a
@@ -223,15 +223,15 @@ and the selection decide the hints:
 
 - Inventory: `space select`, `enter remove`, `u update`, `d disable`, and
   `/ search`. With a selection, `remove` and `disable` show the number of
-  selected rows and `ctrl-u clear` joins the row. Update accepts one target, so
+  selected rows and `ctrl+u clear` joins the row. Update accepts one target, so
   `u update` leaves the row when two or more rows are selected.
 - Disabled: `space select`, `e enable`, `u update`, and `/ search`.
 - Trash: `enter restore`, `p purge`, and `esc inventory`.
-- A focused detail pane: `↑↓ scroll`, `PgUp/PgDn page`, and `tab pane`.
+- A focused detail pane: `↑↓ scroll`, `PgUp PgDn page`, and `tab pane`.
 - A focused row that no plan can contain: `/ search` and `tab pane`.
 
 `? help` and `q quit` stay at the right edge of the hint row. From 100 columns,
-`ctrl-t view` joins them. The right group depends on the width only, so it does
+`ctrl+t view` joins them. The right group depends on the width only, so it does
 not move when the selection changes. A hint that does not fit leaves the row
 whole, from the end of the list, so the row never shows a clipped key.
 Inventory and Disabled keep the complete `u update` hint down to the minimum
@@ -247,8 +247,14 @@ visible behind the panel in a dim style. The panel has one key on each line in
 three columns: the key, its effect, and the mouse action that has the same
 effect. The mouse column is muted. A labelled rule opens each of the three
 groups: the actions of the current view under the name of that view, the keys
-for movement and selection, and the application keys. A short terminal drops
-the rules before the key reference fills the screen. `?`,
+for movement and selection, and the application keys. The panel has an empty row inside its top border and its bottom border. An
+effect that removes content, `remove` or `purge`, is in the warning style. The
+`esc` row names the effect of Escape in the current view. A short terminal
+drops the empty rows first and then the rules before the key reference fills
+the screen.
+
+A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
+one effect have a space between them, for example `PgUp PgDn`. `?`,
 `q`, Escape, or Enter closes the panel and keeps the browse position. When the
 terminal is too small for the panel, the key reference fills the screen.
 
@@ -350,12 +356,12 @@ preview but cannot make an unrelated Skill appear. Explicit field syntax such
 as `category:` and `agent:` is deferred for later prototyping.
 
 Up and down move through matches. Space stages the focused removable Skill and
-Ctrl-A stages every visible removable match. System Skills stay visible without
+Ctrl+A stages every visible removable match. System Skills stay visible without
 a selectable marker. Enter adds the staged Skills to the existing inventory
 selection and returns to the exact inventory position that opened search;
 another `/` starts another additive search. Escape cancels search and discards
-its staging without changing the inventory selection. Ctrl-U clears the regex
-while preserving staging. From the inventory, Ctrl-U clears the complete
+its staging without changing the inventory selection. Ctrl+U clears the regex
+while preserving staging. From the inventory, Ctrl+U clears the complete
 selection.
 
 `space` on an entry selects it. `space` on a section takes or clears the whole
@@ -376,7 +382,7 @@ no mutable target. With nothing selected, `enter` reviews the removable row
 under the cursor and does nothing on an informational row.
 
 `q` exits the TUI immediately from every screen except search, where it is valid
-regex input; Ctrl-C remains an alternate exit everywhere. In the inventory,
+regex input; Ctrl+C remains an alternate exit everywhere. In the inventory,
 `esc` unwinds pane focus and then selection before leaving, so a stray keypress
 cannot discard a selection.
 
