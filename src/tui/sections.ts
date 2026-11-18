@@ -253,7 +253,6 @@ function combineIdenticalCopies(
       continue;
     }
     const members = ordered.flatMap((row) => row.members);
-    const note = entryNote(null, members);
     single.push({
       key: `copies:${ordered.map((row) => row.entry.key).join("+")}`,
       name: first.name,
@@ -263,9 +262,7 @@ function combineIdenticalCopies(
       ].sort(compare),
       paths: ordered.flatMap((row) => row.entry.paths),
       owner: [...new Set(ordered.map((row) => row.entry.owner))].join(", "),
-      note: [`${String(ordered.length)} identical copies`, note]
-        .filter((value): value is string => value !== null)
-        .join(" · "),
+      note: entryNote(null, members),
       target: first.target,
       targets: ordered.flatMap((row) =>
         row.entry.target === null ? [] : [row.entry.target],

@@ -1082,7 +1082,7 @@ describe("terminal section projection", () => {
         "/fixtures/codex/shared-skill",
         "/fixtures/gemini-cli/shared-skill",
       ],
-      note: "3 identical copies",
+      note: null,
     });
     const targets = selectionTargets(sections, new Set([row.key]));
     expect(targets).toEqual([

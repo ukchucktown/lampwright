@@ -192,7 +192,7 @@ Sections come from declared evidence, never from a name or a path:
   Identical copies of one Skill in this section show as one row. Two rows are
   identical copies when the identity hints of the Inventory give them both the
   same normalized name and the same content hash. The row lists the agents and
-  the paths of all copies, and its note gives the number of copies. Removal,
+  the paths of all copies, as each other row does. Removal,
   Disable, and Enable from the row use one target for each copy, and the review
   screen lists each copy. Update is not available from a combined row, because
   Update accepts one target. The Inventory does not merge the copies. When the
