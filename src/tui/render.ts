@@ -16,6 +16,7 @@ import type {
   UpdateWarning,
 } from "../update/types.js";
 import {
+  currentEntry,
   currentSection,
   detailPane,
   layout,
@@ -60,6 +61,7 @@ export function renderTui(
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
   if (state.screen === "theme") return renderThemePicker(state, theme);
+  if (state.screen === "help") return renderHelp(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
   if (state.screen === "executing") return renderExecuting(state, style);
   if (state.screen === "availability-plan")
@@ -79,9 +81,236 @@ export function renderTui(
   return renderReport(state, style);
 }
 
+/** A styled line as cells, so one layer can be drawn on top of another. */
+interface StyledCell {
+  readonly text: string;
+  /** The active SGR sequence, or "" for unstyled text. */
+  readonly style: string;
+}
+
+const escapeCharacter = String.fromCharCode(27);
+const sgrPattern = new RegExp(`${escapeCharacter}\\[([0-9;]*)m`, "uy");
+
+function styledCells(line: string): readonly StyledCell[] {
+  const cells: StyledCell[] = [];
+  let style = "";
+  let index = 0;
+  while (index < line.length) {
+    sgrPattern.lastIndex = index;
+    const sequence = sgrPattern.exec(line);
+    if (sequence !== null) {
+      style = sequence[1] === "0" || sequence[1] === "" ? "" : sequence[0];
+      index = sgrPattern.lastIndex;
+      continue;
+    }
+    const text = String.fromCodePoint(line.codePointAt(index)!);
+    cells.push({ text, style });
+    index += text.length;
+  }
+  return cells;
+}
+
+function joinStyledCells(cells: readonly StyledCell[]): string {
+  let out = "";
+  let style = "";
+  for (const cell of cells) {
+    if (cell.style !== style) {
+      if (style !== "") out += `${escapeCharacter}[0m`;
+      out += cell.style;
+      style = cell.style;
+    }
+    out += cell.text;
+  }
+  return style === "" ? out : `${out}${escapeCharacter}[0m`;
+}
+
 /**
- * The picker draws with the highlighted theme, so the sample lines are the
- * preview. A theme with a problem keeps the previous theme and names the cause.
+ * Draws a panel over the middle of a frame. Every panel line has the same
+ * visible width. Returns null when the frame cannot hold the panel.
+ */
+function overlayPanel(
+  frame: readonly string[],
+  panel: readonly string[],
+  viewport: { readonly rows: number; readonly columns: number },
+): readonly string[] | null {
+  const width = visibleLength(panel[0] ?? "");
+  const usable = Math.max(0, viewport.columns - 1);
+  const rows = Math.max(0, viewport.rows - 1);
+  if (width + 2 > usable || panel.length + 2 > rows) return null;
+  const left = Math.floor((usable - width) / 2);
+  const top = Math.max(1, Math.floor((rows - panel.length) / 2));
+  const lines = Array.from({ length: Math.max(rows, frame.length) }, (_, row) =>
+    fit(frame[row] ?? "", usable),
+  );
+  panel.forEach((panelLine, offset) => {
+    const base = styledCells(lines[top + offset] ?? "");
+    lines[top + offset] = joinStyledCells([
+      ...base.slice(0, left),
+      ...styledCells(panelLine),
+      ...base.slice(left + width),
+    ]);
+  });
+  return lines;
+}
+
+/** A bordered panel: a title in the top rule and a hint in the bottom rule. */
+function panelLines(
+  title: string,
+  body: readonly string[],
+  hint: string,
+  inner: number,
+  style: TuiPaint,
+): readonly string[] {
+  const rule = (label: string, start: string, end: string, lead: boolean) => {
+    const text = label === "" ? "" : ` ${label} `;
+    const fill = "─".repeat(Math.max(0, inner + 2 - [...text].length - 1));
+    return lead
+      ? `${style.border(`${start}─`)}${style.title(text)}${style.border(`${fill}${end}`)}`
+      : `${style.border(`${start}${fill}`)}${style.muted(text)}${style.border(`─${end}`)}`;
+  };
+  return [
+    rule(title, "┌", "┐", true),
+    ...body.map(
+      (line) => `${style.border("│")} ${fit(line, inner)} ${style.border("│")}`,
+    ),
+    rule(hint, "└", "┘", false),
+  ];
+}
+
+/**
+ * Recedes a frame behind a panel: every cell, styled or plain, becomes dim, so
+ * the panel is the one thing at full strength. Monochrome output stays as is.
+ */
+function dimFrame(
+  frame: readonly string[],
+  theme: TuiTheme,
+): readonly string[] {
+  if (theme.mode === "none") return frame;
+  const dim = `${escapeCharacter}[2m`;
+  return frame.map((line) =>
+    joinStyledCells(
+      styledCells(line).map((cell) => ({ text: cell.text, style: dim })),
+    ),
+  );
+}
+
+function browseFrame(
+  browse: Extract<TuiState, { screen: "help" }>["browse"],
+  theme: TuiTheme,
+): readonly string[] {
+  return renderBrowseLines(
+    { screen: "browse", ...browse, model: { ...browse.model, notice: null } },
+    theme,
+  );
+}
+
+/** Every key, grouped by purpose. The current view's actions lead. */
+function helpBody(
+  view: TuiBrowseState["view"],
+  style: TuiPaint,
+): readonly string[] {
+  const row = (
+    label: string,
+    hints: readonly (readonly [string, string])[],
+    current = false,
+  ): string =>
+    `${(current ? style.active : style.muted)(fit(label, 11))}${hints
+      .map(
+        ([key, text]) =>
+          `${style.title(key)}${text === "" ? "" : ` ${style.muted(text)}`}`,
+      )
+      .join("   ")}`;
+  const active = view ?? "inventory";
+  return [
+    "",
+    row(
+      "Inventory",
+      [
+        ["enter", "remove"],
+        ["d", "disable"],
+        ["u", "update"],
+      ],
+      active === "inventory",
+    ),
+    row(
+      "Disabled",
+      [
+        ["e", "enable"],
+        ["u", "update"],
+      ],
+      active === "disabled",
+    ),
+    row(
+      "Trash",
+      [
+        ["enter", "restore"],
+        ["p", "purge"],
+      ],
+      active === "trash",
+    ),
+    "",
+    row("Move", [
+      ["↑↓", ""],
+      ["PgUp/PgDn", ""],
+      ["wheel", ""],
+    ]),
+    row("Panes", [
+      ["tab", ""],
+      ["shift+tab", ""],
+      ["click", ""],
+    ]),
+    row("Resize", [
+      ["shift+←→", "width"],
+      ["shift+↑↓", "height"],
+    ]),
+    row("Select", [
+      ["space", ""],
+      ["dbl-click", ""],
+      ["ctrl-u", "clear"],
+    ]),
+    row("Search", [["/", "or type a name"]]),
+    row("Views", [
+      ["ctrl-t", "or click a view"],
+      ["esc", "back"],
+    ]),
+    row("App", [
+      ["ctrl-p", "theme"],
+      ["?", "help"],
+      ["q", "quit"],
+    ]),
+    "",
+  ];
+}
+
+function renderHelp(
+  state: Extract<TuiState, { screen: "help" }>,
+  theme: TuiTheme,
+): string {
+  const style = createPaint(theme);
+  const viewport = state.browse.model.viewport;
+  const body = helpBody(state.browse.view, style);
+  const inner = Math.min(
+    Math.max(...body.map(visibleLength)),
+    Math.max(0, viewport.columns - 7),
+  );
+  const panel = panelLines("Keys", body, "esc or ? close", inner, style);
+  const lines =
+    overlayPanel(
+      dimFrame(browseFrame(state.browse, theme), theme),
+      panel,
+      viewport,
+    ) ??
+    // Too small for a panel: the keys take the whole screen.
+    [style.title("Lampwright — Keys"), ...body, style.muted("esc or ? close")]
+      .slice(0, Math.max(1, viewport.rows - 1))
+      .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * The picker floats over the browse view, which is drawn with the highlighted
+ * theme: the view itself is the preview. A theme with a problem keeps the
+ * previous theme and names the cause.
  */
 function renderThemePicker(
   state: Extract<TuiState, { screen: "theme" }>,
@@ -89,39 +318,21 @@ function renderThemePicker(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const width = Math.max(20, viewport.columns - 1);
-  const clip = (value: string): string =>
-    [...value].length > width
-      ? `${[...value].slice(0, Math.max(0, width - 1)).join("")}…`
-      : value;
   const choice = state.choices[state.index];
-  const sample = [
-    `${style.title("Title")}  ${style.active("active")}  ${style.selected("selected")}  ${style.muted("muted")}`,
-    `${style.success("success")}  ${style.info("info")}  ${style.warning("warning")}  ${style.error("error")}`,
-    `${style.path("/path/to/skill")}  ${style.border("─────")}  ${style.focus(" focused row ")}`,
-  ];
-  const detail =
-    choice === undefined
-      ? []
-      : [
-          style.muted(
-            clip(
-              choice.source === "built-in"
-                ? "Built-in theme"
-                : `Custom theme: ${choice.path ?? choice.name}`,
-            ),
-          ),
-          ...(choice.problem === null
-            ? []
-            : [style.error(clip(`Not usable: ${choice.problem}`))]),
-        ];
-  const footer = [
-    ...(state.notice === null ? [] : [style.warning(clip(state.notice))]),
-    `${style.title("↑↓")} ${style.muted("preview")}  ${style.title("enter")} ${style.muted("use and save")}  ${style.title("esc")} ${style.muted("cancel")}  ${style.title("q")} ${style.muted("quit")}`,
-  ];
-  const fixedRows =
-    2 + 1 + sample.length + 1 + detail.length + 1 + footer.length;
-  const listRows = Math.max(1, viewport.rows - fixedRows);
+  const label = (item: (typeof state.choices)[number]): string =>
+    `${item.name}${item.source === "custom" ? "  custom" : ""}${item.problem === null ? "" : "  not usable"}`;
+  const inner = Math.min(
+    Math.max(0, viewport.columns - 7),
+    Math.max(
+      48,
+      ...state.choices.map((item) => [...label(item)].length + 3),
+      [...(state.notice ?? choice?.problem ?? "")].length,
+    ),
+  );
+  const listRows = Math.max(
+    1,
+    Math.min(state.choices.length, viewport.rows - 10),
+  );
   const offset = Math.min(
     Math.max(0, state.index - Math.floor(listRows / 2)),
     Math.max(0, state.choices.length - listRows),
@@ -130,26 +341,46 @@ function renderThemePicker(
     .slice(offset, offset + listRows)
     .map((item, position) => {
       const index = offset + position;
-      const label = clip(
-        ` ${index === state.index ? "›" : " "} ${item.name}${item.source === "custom" ? " (custom)" : ""}${item.problem === null ? "" : " — not usable"} `,
+      const text = fit(
+        `${index === state.index ? "›" : " "} ${label(item)}`,
+        inner,
       );
       return index === state.index
-        ? style.focus(label)
+        ? style.focus(text)
         : item.problem === null
-          ? label
-          : style.muted(label);
+          ? text
+          : style.muted(text);
     });
-  return `${[
-    style.title("Lampwright — Theme"),
-    "",
-    ...rows,
-    "",
-    ...sample,
-    "",
-    ...detail,
-    "",
-    ...footer,
-  ].join("\n")}\n`;
+  const message =
+    state.notice !== null
+      ? style.warning(fit(state.notice, inner))
+      : choice === undefined
+        ? ""
+        : choice.problem !== null
+          ? style.error(fit(choice.problem, inner))
+          : style.muted(
+              fit(
+                choice.source === "built-in"
+                  ? "Built-in theme"
+                  : (choice.path ?? choice.name),
+                inner,
+              ),
+            );
+  const body = ["", ...rows, "", message, ""];
+  const hint = "↑↓ preview · enter use and save · esc cancel";
+  const panel = panelLines(
+    "Theme",
+    body,
+    [...hint].length + 4 <= inner ? hint : "enter use · esc cancel",
+    inner,
+    style,
+  );
+  const lines =
+    overlayPanel(browseFrame(state.browse, theme), panel, viewport) ??
+    [style.title("Lampwright — Theme"), ...body, style.muted(hint)]
+      .slice(0, Math.max(1, viewport.rows - 1))
+      .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
+  return `${lines.join("\n")}\n`;
 }
 
 function renderTrashReport(
@@ -1920,149 +2151,22 @@ export function renderBrowseLines(
 
   const selected = model.selected.size;
   const trashCount = state.operations?.size ?? 0;
-  const paneControls = [
-    { text: "click", paint: style.title },
-    { text: " focus · ", paint: style.muted },
-    { text: "tab/shift+tab", paint: style.title },
-    { text: " pane · ", paint: style.muted },
-    { text: "shift+←→", paint: style.title },
-    { text: " width · ", paint: style.muted },
-    { text: "shift+↑↓", paint: style.title },
-    { text: " height", paint: style.muted },
-  ] as const;
-  const globalControls = [
-    { text: "ctrl-t", paint: style.title },
-    { text: " view · ", paint: style.muted },
-    { text: "esc", paint: style.title },
-    { text: isTrash ? " Inventory · " : " back · ", paint: style.muted },
-    { text: "q", paint: style.title },
-    { text: " quit", paint: style.muted },
-  ] as const;
-  const navigationControls = [
-    { text: "↑↓/wheel", paint: style.title },
-    { text: " move · ", paint: style.muted },
-    { text: "space/dbl-click", paint: style.title },
-    { text: " select", paint: style.muted },
-  ];
-  const updateControls = [
-    { text: "u", paint: style.title },
-    { text: " update", paint: style.muted },
-  ] as const;
-  const lifecycleControls = isDisabled
-    ? updateControls
-    : [
-        { text: "enter", paint: style.title },
-        { text: " remove · ", paint: style.muted },
-        ...updateControls,
-      ];
-  out.push(
-    `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}  ${
-      isTrash
-        ? style.muted("read-only recovery")
-        : selected > 0
-          ? style.selected(`${String(selected)} selected`)
-          : style.muted("nothing selected")
-    }`,
+  const views = `${style.title("Lampwright")} ${state.view === "inventory" || state.view === undefined ? style.selected("Inventory") : style.muted("Inventory")} ${style.muted("|")} ${isDisabled ? style.selected(`Disabled (${String(disabledCount(state))})`) : style.muted(`Disabled (${String(disabledCount(state))})`)} ${style.muted("|")} ${state.view === "trash" ? style.selected(`Trash (${String(trashCount)})`) : style.muted(`Trash (${String(trashCount)})`)}`;
+  // The status sits at the right edge so the views keep their click targets.
+  // A narrow terminal gets a shorter status instead of a clipped one.
+  const statusRoom = usable - visibleLength(views) - 2;
+  const statusText =
+    (isTrash
+      ? ["read-only recovery", "read-only"]
+      : selected > 0
+        ? [`${String(selected)} selected`, `${String(selected)} sel`]
+        : ["nothing selected"]
+    ).find((text) => text.length <= statusRoom) ?? "";
+  const status = (selected > 0 && !isTrash ? style.selected : style.muted)(
+    statusText,
   );
   out.push(
-    isTrash
-      ? fitStyledSegments(
-          [
-            { text: "↑↓/wheel", paint: style.title },
-            { text: " move · ", paint: style.muted },
-            { text: "enter/dbl-click", paint: style.title },
-            { text: " restore · ", paint: style.muted },
-            { text: "p", paint: style.title },
-            { text: " purge", paint: style.muted },
-          ],
-          usable,
-          style.muted,
-        )
-      : model.focus === "detail"
-        ? fitStyledSegments(
-            [
-              { text: "↑↓/wheel", paint: style.title },
-              { text: " scroll · ", paint: style.muted },
-              { text: "PgUp/PgDn", paint: style.title },
-              { text: " page", paint: style.muted },
-            ],
-            usable,
-            style.muted,
-          )
-        : fitPrioritizedStyledSegments(
-            [
-              ...navigationControls,
-              ...(isDisabled
-                ? []
-                : [
-                    { text: " · enter", paint: style.title },
-                    { text: " remove", paint: style.muted },
-                  ]),
-              { text: " · u", paint: style.title },
-              { text: " update", paint: style.muted },
-            ],
-            navigationControls,
-            lifecycleControls,
-            updateControls,
-            usable,
-            { text: " · ", paint: style.muted },
-            style.muted,
-          ),
-  );
-  out.push(fitStyledSegments(paneControls, usable, style.muted));
-  out.push(
-    isTrash
-      ? fitStyledSegments(
-          [
-            ...globalControls,
-            { text: " · recoverable · reviews read-only", paint: style.muted },
-          ],
-          usable,
-          style.muted,
-        )
-      : model.query === ""
-        ? fitStyledSegments(
-            withOptionalSegments(
-              [
-                ...globalControls,
-                { text: " · ", paint: style.muted },
-                ...(isDisabled
-                  ? [
-                      { text: "e", paint: style.title },
-                      { text: " enable · ", paint: style.muted },
-                    ]
-                  : [
-                      { text: "d", paint: style.title },
-                      { text: " disable · ", paint: style.muted },
-                    ]),
-                { text: "/", paint: style.title },
-                { text: " regex search · ", paint: style.muted },
-                { text: "ctrl-u", paint: style.title },
-                { text: " clear", paint: style.muted },
-              ],
-              [
-                { text: " · ", paint: style.muted },
-                { text: "ctrl-p", paint: style.title },
-                { text: " theme", paint: style.muted },
-              ],
-              usable,
-            ),
-            usable,
-            style.muted,
-          )
-        : fitStyledSegments(
-            [
-              ...globalControls,
-              { text: " · filter ", paint: style.muted },
-              { text: model.query, paint: style.active },
-              {
-                text: ` · ${String(view.entries.total)} here`,
-                paint: style.muted,
-              },
-            ],
-            usable,
-            style.muted,
-          ),
+    `${views}${" ".repeat(Math.max(0, usable - visibleLength(views) - statusText.length))}${status}`,
   );
   out.push(
     style.border(
@@ -2105,10 +2209,122 @@ export function renderBrowseLines(
   }
 
   out.push(
-    model.notice === null ? "" : style.info(fit(`! ${model.notice}`, usable)),
+    model.notice === null
+      ? browseFooter(state, view.entries.total, usable, style)
+      : style.info(fit(`! ${model.notice}`, usable)),
   );
 
   return out.map((line) => fit(line, usable));
+}
+
+interface KeyHint {
+  readonly key: string;
+  readonly label: string;
+}
+
+/**
+ * The actions that apply right now, most useful first. The view, the focused
+ * pane, and the selection decide the list; every other key is in the help.
+ */
+export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
+  const model = state.model;
+  const selected = model.selected.size;
+  const count = selected > 0 ? ` ${String(selected)}` : "";
+  if (state.view === "trash")
+    return [
+      { key: "enter", label: "restore" },
+      { key: "p", label: "purge" },
+      { key: "esc", label: "inventory" },
+    ];
+  if (model.focus === "detail")
+    return [
+      { key: "↑↓", label: "scroll" },
+      { key: "PgUp/PgDn", label: "page" },
+      { key: "tab", label: "pane" },
+    ];
+  const entry = model.focus === "entries" ? currentEntry(model) : null;
+  const readOnlyRow =
+    selected === 0 &&
+    entry !== null &&
+    !(entry.selectable ?? entry.target !== null);
+  if (readOnlyRow)
+    return [
+      { key: "/", label: "search" },
+      { key: "tab", label: "pane" },
+    ];
+  const act: KeyHint[] =
+    state.view === "disabled"
+      ? [{ key: "e", label: `enable${count}` }]
+      : [
+          { key: "enter", label: `remove${count}` },
+          { key: "d", label: `disable${count}` },
+        ];
+  // Update accepts one target, so the hint leaves when it cannot apply.
+  if (selected <= 1) act.push({ key: "u", label: "update" });
+  return [
+    ...act,
+    ...(selected > 0 ? [{ key: "ctrl-u", label: "clear" }] : []),
+    { key: "space", label: "select" },
+    { key: "/", label: "search" },
+  ];
+}
+
+const pinnedKeyHints: readonly KeyHint[] = [
+  { key: "?", label: "help" },
+  { key: "q", label: "quit" },
+];
+
+/**
+ * One row: context hints on the left, help and quit pinned to the right. A
+ * hint that does not fit leaves whole, from the least useful end, so the row
+ * never shows a clipped key.
+ */
+function browseFooter(
+  state: TuiBrowseState,
+  visibleEntries: number,
+  width: number,
+  style: TuiPaint,
+): string {
+  const separator = " · ";
+  const hintLength = (hint: KeyHint): number =>
+    [...hint.key].length + 1 + [...hint.label].length;
+  const rowLength = (hints: readonly KeyHint[]): number =>
+    hints.reduce((total, hint) => total + hintLength(hint), 0) +
+    Math.max(0, hints.length - 1) * separator.length;
+  const paint = (hints: readonly KeyHint[]): string =>
+    hints
+      .map((hint) => `${style.title(hint.key)} ${style.muted(hint.label)}`)
+      .join(style.muted(separator));
+  const filter =
+    state.model.query === ""
+      ? ""
+      : `filter ${state.model.query} · ${String(visibleEntries)} here`;
+  const filterLength = filter === "" ? 0 : [...filter].length + 2;
+  const hints = browseKeyHints(state);
+  // Update keeps its complete hint down to the minimum width; see docs/tui.md.
+  const required = hints.filter((hint) => hint.label === "update");
+  // The right group depends on the width alone, so it never moves while the
+  // selection changes. The view key leaves first: the views are click targets.
+  const pinned: readonly KeyHint[] =
+    [
+      [{ key: "ctrl-t", label: "view" }, ...pinnedKeyHints],
+      pinnedKeyHints,
+    ].find(
+      (group, index) =>
+        (index === 1 || width >= 100) &&
+        rowLength(group) + 2 + rowLength(required) <= width,
+    ) ?? [];
+  const room = width - rowLength(pinned) - (pinned.length > 0 ? 2 : 0);
+  const kept = new Set<KeyHint>(required);
+  for (const hint of hints) {
+    if (kept.has(hint)) continue;
+    if (filterLength + rowLength([...kept, hint]) > room) break;
+    kept.add(hint);
+  }
+  const left = hints.filter((hint) => kept.has(hint));
+  const leftText = `${filter === "" || filterLength > room ? "" : `${style.active(filter)}  `}${paint(left)}`;
+  const gap = width - visibleLength(leftText) - rowLength(pinned);
+  return `${leftText}${" ".repeat(Math.max(0, gap))}${paint(pinned)}`;
 }
 
 function sectionCell(
@@ -2320,19 +2536,6 @@ function createPaint(theme: TuiTheme): TuiPaint {
   };
 }
 
-/** Adds a secondary hint only when the row holds it without clipping. */
-function withOptionalSegments<Segment extends { readonly text: string }>(
-  segments: readonly Segment[],
-  optional: readonly Segment[],
-  width: number,
-): readonly Segment[] {
-  const length = (values: readonly Segment[]): number =>
-    values.reduce((total, value) => total + [...value.text].length, 0);
-  return length(segments) + length(optional) <= width
-    ? [...segments, ...optional]
-    : segments;
-}
-
 function fitStyledSegments(
   segments: readonly {
     readonly text: string;
@@ -2358,59 +2561,6 @@ function fitStyledSegments(
   }
   if (truncated) return result + paintEllipsis("…");
   return result + " ".repeat(remaining);
-}
-
-function fitPrioritizedStyledSegments(
-  wideSegments: readonly {
-    readonly text: string;
-    readonly paint: (value: string) => string;
-  }[],
-  secondarySegments: readonly {
-    readonly text: string;
-    readonly paint: (value: string) => string;
-  }[],
-  lifecycleSegments: readonly {
-    readonly text: string;
-    readonly paint: (value: string) => string;
-  }[],
-  requiredSegments: readonly {
-    readonly text: string;
-    readonly paint: (value: string) => string;
-  }[],
-  width: number,
-  separator: {
-    readonly text: string;
-    readonly paint: (value: string) => string;
-  },
-  paintEllipsis: (value: string) => string,
-): string {
-  const wideLength = wideSegments.reduce(
-    (total, segment) => total + [...segment.text].length,
-    0,
-  );
-  if (wideLength <= width)
-    return fitStyledSegments(wideSegments, width, paintEllipsis);
-
-  const lifecycleLength = lifecycleSegments.reduce(
-    (total, segment) => total + [...segment.text].length,
-    0,
-  );
-  if (width < lifecycleLength)
-    return fitStyledSegments(requiredSegments, width, paintEllipsis);
-
-  const separatorLength = [...separator.text].length;
-  if (width < lifecycleLength + separatorLength + 1)
-    return fitStyledSegments(lifecycleSegments, width, paintEllipsis);
-  const secondaryWidth = width - lifecycleLength - separatorLength;
-  return `${fitStyledSegments(
-    lifecycleSegments,
-    lifecycleLength,
-    paintEllipsis,
-  )}${separator.paint(separator.text)}${fitStyledSegments(
-    secondarySegments,
-    secondaryWidth,
-    paintEllipsis,
-  )}`;
 }
 
 /** Fits to an exact visible width. Styling is applied after, never before. */

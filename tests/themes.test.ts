@@ -556,9 +556,10 @@ describe("theme picker", () => {
       controller.state,
       createTuiTheme(terminalThemeDefinition, "none"),
     );
-    expect(rendered).toContain("› broken (custom) — not usable");
-    expect(rendered).toContain("Custom theme: /themes/broken.toml");
-    expect(rendered).toContain("ocean (custom)");
+    expect(rendered).toContain("┌─ Theme ");
+    expect(rendered).toContain("› broken  custom  not usable");
+    expect(rendered).toContain("ocean  custom");
+    expect(rendered).toContain('"broken" cannot be used: title: "x" is not');
     expect(rendered).toContain("enter use and save");
   });
 

@@ -332,6 +332,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "inventory")
       return { kind: "switch-view", view: "inventory" };
     if (value === "theme") return { kind: "open-theme-picker" };
+    if (value === "help" || value === "?") return { kind: "open-help" };
     if (value === "restore") return { kind: "restore-review" };
     if (value === "purge" || value === "p") return { kind: "purge-review" };
     if (value === "clear") return { kind: "clear-selection" };
@@ -353,6 +354,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "append-query", value: value.slice(1) };
     return { kind: "append-query", value };
   }
+  if (state.screen === "help")
+    return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
   if (state.screen === "theme") {
     if (value === "" || value === "select" || value === "use")
       return { kind: "select" };
@@ -632,6 +635,14 @@ export function parseRawTuiAction(
   key: Key,
 ): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
+  if (state.screen === "help")
+    return key.name === "escape" ||
+      key.name === "return" ||
+      key.name === "enter" ||
+      text === "?" ||
+      text === "q"
+      ? { kind: "cancel" }
+      : { kind: "noop" };
   if (state.screen !== "search" && !key.ctrl && !key.meta && text === "q")
     return { kind: "quit" };
   if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
@@ -681,6 +692,7 @@ export function parseRawTuiAction(
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
+    if (text === "?") return { kind: "open-help" };
     if (state.view === "trash") return { kind: "noop" };
     if (text === "u") return { kind: "update-review" };
     if (text === "d")

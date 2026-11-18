@@ -176,10 +176,12 @@ usable.
 
 ### Theme picker
 
-`ctrl-p` in a browse view opens the theme picker. The header shows this key
-when the row has room for it. The picker lists the built-in themes and then the
-custom themes. The picker draws itself with the highlighted theme, and it shows
-a sample of each role, so a move to another row is a live preview.
+`ctrl-p` in a browse view opens the theme picker. The key reference lists this
+key. The picker is a panel over the middle of the browse view. It lists the
+built-in themes and then the custom themes. The terminal UI draws the browse
+view behind the panel with the highlighted theme, so a move to another row is a
+live preview of the real screen. When the terminal is too small for the panel,
+the picker fills the screen.
 
 - Up and down move the highlight. PgUp and PgDn move by a page.
 - Enter applies the highlighted theme and saves the selection.
@@ -207,23 +209,41 @@ available, Lampwright uses `terminal` and shows a notice.
 Lampwright changes only the top-level `theme` line of `config.toml`. It keeps
 all other lines and the line endings, and it writes through a symbolic link.
 
-The inventory header uses four rows: title and view status; pane-local movement;
-stable pane controls; and primary actions plus search. Each navigation or action
-key is bold cyan and its description is muted. The active view is gold while
-inactive views are muted. `tab/shift+tab` cycles panes,
-`shift+←→` changes pane width, and `shift+↑↓` changes detail height.
-Navigation panes show movement and selection, while detail shows scrolling and
-paging. Pointer focus, view changes, review, back, and quit remain separate
-key/action pairs. Separators remain muted, so the header does not conflate
-navigation with selection. Segment styling is applied after clipping,
-preserving emphasis and reset boundaries on narrow terminals.
+The browse views use one header row and one footer row. The header shows the
+title, the three views, and the selection status. The active view is in the
+selected style and the other views are muted. The status is at the right edge:
+`nothing selected`, the number of selected rows, or `read-only recovery` in
+Trash. A narrow terminal shows a shorter status, and it never shows a clipped
+status.
 
-Inventory and Disabled always retain the complete `u update` key/action pair
-at supported terminal widths. When the action row must shrink, it removes or
-shortens secondary navigation hints before it shortens a lifecycle command.
-A 60-column render includes `u update` without an ellipsis.
-The browse grid supports a minimum of nine terminal columns. The margin guard
-leaves eight columns for `u update`.
+The footer shows the key hints that apply in the current context. Each key is
+in the title style and its description is muted. The view, the focused pane,
+and the selection decide the hints:
+
+- Inventory: `enter remove`, `d disable`, `u update`, `space select`, and
+  `/ search`. With a selection, `remove` and `disable` show the number of
+  selected rows and `ctrl-u clear` joins the row. Update accepts one target, so
+  `u update` leaves the row when two or more rows are selected.
+- Disabled: `e enable`, `u update`, `space select`, and `/ search`.
+- Trash: `enter restore`, `p purge`, and `esc inventory`.
+- A focused detail pane: `↑↓ scroll`, `PgUp/PgDn page`, and `tab pane`.
+- A focused row that no plan can contain: `/ search` and `tab pane`.
+
+`? help` and `q quit` stay at the right edge of the footer. From 100 columns,
+`ctrl-t view` joins them. The right group depends on the width only, so it does
+not move when the selection changes. A hint that does not fit leaves the row
+whole, from the end of the list, so the footer never shows a clipped key.
+Inventory and Disabled keep the complete `u update` hint down to the minimum
+browse width of nine columns whenever Update can apply. A notice replaces the
+footer hints until the next action.
+
+`?` in a browse view opens the key reference. It is a panel with a border that
+the terminal UI draws over the middle of the browse view. The browse view stays
+visible behind the panel in a dim style. The panel lists each key in groups:
+the actions of each view, then movement, panes, pane size, selection, search,
+views, and application keys. The row of the current view is highlighted. `?`,
+`q`, Escape, or Enter closes the panel and keeps the browse position. When the
+terminal is too small for the panel, the key reference fills the screen.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
@@ -472,7 +492,7 @@ with its result. The refresh preserves the other view snapshots.
 When raw terminal controls are unavailable, the same UI uses line-oriented
 commands. In the inventory, use `search <regex>`, `up`, `down`, `in`, `out`,
 `detail`, `pageup`, `pagedown`, `grow-detail`, `shrink-detail`, `take`, `clear`,
-`disable`, `update`, `disabled`, `trash`, `theme`, and `quit`. In Disabled, `enable` opens
+`disable`, `update`, `disabled`, `trash`, `theme`, `help`, and `quit`. In Disabled, `enable` opens
 review. `update` opens Update review in Inventory or Disabled. The `inventory`
 and `trash` commands switch peer views. Navigation, selection, and
 `search <regex>` match Inventory. Search accepts a regex, `up`, `down`, `take`,
@@ -484,7 +504,8 @@ accept `up`, `down`, `pageup`, `pagedown`, `details`, and `quit`. Availability
 reports also accept `back`. This command refreshes Inventory and Disabled, and
 then returns to Inventory. Update reports accept `back` and use the same refresh.
 Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
-`up`, `down`, `select`, `back`, and `quit`. End-of-input cancels safely.
+`up`, `down`, `select`, `back`, and `quit`. Any command except `quit` closes the
+key reference. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 

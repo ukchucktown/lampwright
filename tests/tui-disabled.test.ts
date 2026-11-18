@@ -569,7 +569,7 @@ describe("Disabled TUI projection", () => {
       plainTuiTheme,
     );
 
-    expect(lines[1]).toContain("u update");
+    expect(lines.at(-1)).toContain("u update");
     for (const line of lines) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(columns - 1);
     }

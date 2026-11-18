@@ -57,6 +57,7 @@ import type {
   TuiUpdatePlanState,
   TuiUpdateReportState,
   TuiTrashReviewState,
+  TuiHelpState,
   TuiSearchState,
   TuiThemeState,
   TuiState,
@@ -192,7 +193,17 @@ export class TuiController {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "search") this.searchAction(state, action);
       else if (state.screen === "theme") await this.themeAction(state, action);
-      else if (state.screen === "plan") await this.planAction(state, action);
+      else if (state.screen === "help") {
+        // Any closing key returns to the exact browse position.
+        if (
+          action.kind === "cancel" ||
+          action.kind === "open-help" ||
+          action.kind === "select"
+        )
+          this.stateValue = { screen: "browse", ...state.browse };
+        else if (action.kind === "quit")
+          this.stateValue = { screen: "done", report: null };
+      } else if (state.screen === "plan") await this.planAction(state, action);
       else if (state.screen === "availability-plan")
         await this.availabilityPlanAction(state, action);
       else if (state.screen === "availability-report")
@@ -433,6 +444,10 @@ export class TuiController {
       return;
     }
 
+    if (action.kind === "open-help") {
+      this.stateValue = { screen: "help", browse: browseSnapshot(state) };
+      return;
+    }
     if (action.kind === "open-theme-picker") {
       const themes = this.dependencies.themes;
       if (themes === undefined) {
@@ -1402,6 +1417,7 @@ function resizeState(
     | TuiBrowseState
     | TuiSearchState
     | TuiThemeState
+    | TuiHelpState
     | TuiPlanState
     | TuiExecutingState
     | TuiReportState
@@ -1416,6 +1432,7 @@ function resizeState(
   | TuiBrowseState
   | TuiSearchState
   | TuiThemeState
+  | TuiHelpState
   | TuiPlanState
   | TuiExecutingState
   | TuiReportState
@@ -1427,7 +1444,7 @@ function resizeState(
   | import("./types.js").TuiUpdateExecutingState {
   if (state.screen === "browse")
     return { screen: "browse", ...resizeBrowse(state, viewport) };
-  if (state.screen === "theme")
+  if (state.screen === "theme" || state.screen === "help")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "search")
     return {
