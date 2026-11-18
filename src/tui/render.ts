@@ -2282,7 +2282,6 @@ interface KeyHint {
 export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
   const model = state.model;
   const selected = model.selected.size;
-  const count = selected > 0 ? ` ${String(selected)}` : "";
   if (state.view === "trash")
     return [
       { key: "enter", label: "restore" },
@@ -2312,11 +2311,11 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
   return [
     { key: "space", label: "select" },
     ...(state.view === "disabled"
-      ? [{ key: "e", label: `enable${count}` }, ...update]
+      ? [{ key: "e", label: "enable" }, ...update]
       : [
-          { key: "enter", label: `remove${count}` },
+          { key: "enter", label: "remove" },
           ...update,
-          { key: "d", label: `disable${count}` },
+          { key: "d", label: "disable" },
         ]),
     ...(selected > 0 ? [{ key: "ctrl+u", label: "clear" }] : []),
     { key: "/", label: "search" },

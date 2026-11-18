@@ -954,16 +954,18 @@ describe("terminal theme", () => {
     const entries = reduceBrowse(base, { kind: "focus", pane: "entries" });
     const one = reduceBrowse(entries, { kind: "toggle-select" });
     expect(footer(one)).toMatch(
-      /^space select · enter remove 1 · u update · d disable 1 · ctrl\+u clear /u,
+      /^space select · enter remove · u update · d disable · ctrl\+u clear · \/ search /u,
     );
     const two = reduceBrowse(reduceBrowse(one, { kind: "move", delta: 1 }), {
       kind: "toggle-select",
     });
     // Update accepts one target, so its hint leaves with two selected.
     expect(footer(two)).toMatch(
-      /^space select · enter remove 2 · d disable 2 · ctrl\+u clear · \/ search /u,
+      /^space select · enter remove · d disable · ctrl\+u clear · \/ search /u,
     );
+    // The header alone gives the number of selected rows.
     expect(frame(two)[0]).toMatch(/ 2 selected$/u);
+    expect(footer(two)).not.toMatch(/\d/u);
 
     expect(
       footer(reduceBrowse(base, { kind: "focus", pane: "detail" })),
