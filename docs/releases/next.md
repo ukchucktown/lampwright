@@ -32,6 +32,28 @@ part of the Installation. The `remove` command of `skills@1.9.0` deletes the
 Skill and leaves the link. After a Managed Removal, Lampwright removes each
 such link that has no target.
 
+### Managed Update for the agents of a Skill
+
+A Managed Update of a Skill from a GitHub source now runs the `add` command of
+the Manager with the exact agents that have the Skill:
+
+```text
+skills add <source> --skill <name> --agent <agent>... --global --yes
+```
+
+The `update` command of the Manager has no option that selects agents, and it
+can link an updated Skill into each agent that it detects on the machine.
+Lampwright 0.4.0 removed such links after the command. With the `add` command,
+the Manager does not create them. The removal after the command stays as a
+safeguard.
+
+The Manager keeps the recorded source, ref, and Skill path. When the source has
+no new revision, the result is `unchanged`.
+
+For a source that is not a GitHub source, for a Skill that was installed under
+a different name, and for an Eve agent, Lampwright continues to use the
+`update` command.
+
 ### Project locks
 
 `skills@1.9.0` writes version 2 of `skills-lock.json` with a new content hash.

@@ -221,6 +221,11 @@ export function vercelLegacyAgentPaths(
   }));
 }
 
+/** True when the pinned Manager accepts the value as an `--agent` name. */
+export function isVercelAgentId(agentId: string): boolean {
+  return definitions.some((definition) => definition.agentId === agentId);
+}
+
 /** Every bounded agent path the pinned nested `add` operation may select. */
 export async function vercelUpdateCandidatePaths(
   scope: "global" | "project",

@@ -21,6 +21,7 @@ import {
   VERCEL_SKILLS_PACKAGE_VERSION,
   VERCEL_SKILLS_UPDATE_AUTHORITY_HASH,
   vercelSkillsRemovalArguments,
+  vercelSkillsAgentUpdateArguments,
   vercelSkillsUpdateArguments,
 } from "../adapter/built-ins.js";
 import { parseWindowsReparseKind } from "../filesystem/windows-reparse.js";
@@ -54,6 +55,7 @@ import { inspectGitProtection } from "./git-protection.js";
 import { stableId } from "./identity.js";
 import { readSkillMetadata } from "./metadata.js";
 import {
+  isVercelAgentId,
   vercelAgentPaths,
   vercelCanonicalPath,
   vercelLegacyAgentPaths,
@@ -357,6 +359,12 @@ async function materializeLockEntry(input: {
     sourceBaseUrl: urlField(input.entry.sourceBaseUrl),
     skillPath,
     ref: stringField(input.entry.ref),
+    agentTargetedArguments: agentTargetedUpdateArguments({
+      scope: input.lock.format,
+      lockKey: input.lockKey,
+      entry: input.entry,
+      agentIds: artifacts.map((artifact) => artifact.agentId),
+    }),
     revision: updateRecordRevision(input.lock, input.lockKey, input.entry),
     contentHash,
     artifactPaths: allArtifactPaths,
@@ -622,6 +630,7 @@ function managedUpdate(input: {
   readonly sourceBaseUrl: string | null;
   readonly skillPath: string | null;
   readonly ref: string | null;
+  readonly agentTargetedArguments: readonly string[] | null;
   readonly revision: UpdateRecordRevision | null;
   readonly contentHash: string | null;
   readonly artifactPaths: readonly string[];
@@ -661,12 +670,15 @@ function managedUpdate(input: {
             !supportsPinnedPackage(input.environment.nodeVersion)
           ? `skills@${VERCEL_SKILLS_PACKAGE_VERSION} requires Node.js 22.20 or newer`
           : null;
+  const ownerArguments =
+    input.agentTargetedArguments ??
+    vercelSkillsUpdateArguments(input.scope, input.externalId);
   const invocation: ManagedUpdateEvidence["invocation"] = input.managerAvailable
     ? {
         kind: "direct",
         command: {
           executable: VERCEL_SKILLS_EXECUTABLE,
-          arguments: vercelSkillsUpdateArguments(input.scope, input.externalId),
+          arguments: ownerArguments,
         },
         workingDirectory:
           input.scope === "project"
@@ -681,10 +693,7 @@ function managedUpdate(input: {
           kind: "direct",
           command: {
             executable: VERCEL_SKILLS_EXECUTABLE,
-            arguments: vercelSkillsUpdateArguments(
-              input.scope,
-              input.externalId,
-            ),
+            arguments: ownerArguments,
           },
           workingDirectory: {
             kind: "exact",
@@ -700,10 +709,7 @@ function managedUpdate(input: {
             adapterHash: VERCEL_SKILLS_UPDATE_AUTHORITY_HASH,
             mayDownload: true,
           },
-          packageArguments: vercelSkillsUpdateArguments(
-            input.scope,
-            input.externalId,
-          ),
+          packageArguments: ownerArguments,
           workingDirectory: { kind: "isolated-temporary" },
         };
   const revisions: ManagedUpdateEvidence["currentRevision"] = [
@@ -795,6 +801,87 @@ function managedUpdate(input: {
       ],
     },
   };
+}
+
+/**
+ * The arguments of the Manager `add` command that updates one Skill for
+ * exactly the agents that have it, or null when only the `update` command of
+ * the Manager can do the Update.
+ *
+ * The `update` command has no option that selects agents, so it can add the
+ * Skill to each agent that it detects. An `add` of a Skill that is installed
+ * is the same Owner operation with an explicit agent list. It applies when the
+ * Manager can express the recorded source, the lock key, and each agent:
+ *
+ * - The source is a GitHub source. The Manager records the same source, ref,
+ *   and Skill path for it again.
+ * - The lock key is the name of the Skill in the source.
+ * - Each artifact belongs to an agent that the Manager accepts by name. An
+ *   Eve subagent is not such an agent.
+ */
+function agentTargetedUpdateArguments(input: {
+  readonly scope: "global" | "project";
+  readonly lockKey: string;
+  readonly entry: Record<string, unknown>;
+  readonly agentIds: readonly string[];
+}): readonly string[] | null {
+  const sourceType = stringField(input.entry.sourceType);
+  if (sourceType !== null && sourceType !== "github") return null;
+  if (input.entry.skillName !== undefined) return null;
+  if (input.entry.subagents !== undefined) return null;
+  const agents = [...new Set(input.agentIds)];
+  if (
+    agents.length === 0 ||
+    agents.includes("eve") ||
+    !agents.every(isVercelAgentId)
+  )
+    return null;
+  const recordedSource = stringField(input.entry.source);
+  const skillPath = stringField(input.entry.skillPath);
+  if (recordedSource === null || skillPath === null) return null;
+  const ref = stringField(input.entry.ref);
+  const folder = sourceAcceptsSkillFolder(recordedSource)
+    ? skillFolder(skillPath)
+    : "";
+  const source = `${recordedSource}${folder.length > 0 ? `/${folder}` : ""}${
+    ref === null || ref.length === 0 ? "" : `#${ref}`
+  }`;
+  const owned = [source, input.lockKey];
+  if (
+    owned.some(
+      (value) =>
+        value.startsWith("-") || resolvedArgumentSafetyIssue(value) !== null,
+    )
+  )
+    return null;
+  return vercelSkillsAgentUpdateArguments(input.scope, {
+    source,
+    externalId: input.lockKey,
+    agents,
+    copy: stringField(input.entry.installMode) === "copy",
+  });
+}
+
+/** The Manager adds a Skill folder to a shorthand or to a hosted HTTPS URL. */
+function sourceAcceptsSkillFolder(source: string): boolean {
+  if (source.startsWith("git@") || source.startsWith("ssh://")) return false;
+  if (source.endsWith(".git")) return false;
+  if (source.startsWith("http://") || source.startsWith("https://")) {
+    try {
+      const host = new URL(source).hostname;
+      return host === "github.com" || host === "gitlab.com";
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function skillFolder(skillPath: string): string {
+  let folder = skillPath;
+  if (folder.endsWith("/SKILL.md")) folder = folder.slice(0, -9);
+  else if (folder.endsWith("SKILL.md")) folder = folder.slice(0, -8);
+  return folder.endsWith("/") ? folder.slice(0, -1) : folder;
 }
 
 function updateSourceIssue(input: {

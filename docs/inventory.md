@@ -333,6 +333,11 @@ record with a supported source type. A direct operation uses the installed
 the exact `skills@1.9.0` package through `npx`. A project operation has no
 package fallback because the Manager derives Scope from the workspace.
 
+The process request is the `add` command of the Manager with the exact agents
+of the Installation when the Manager can express the target in that command.
+In each other condition it is the `update` command.
+[Owner-managed Update](./update.md) gives the conditions and the arguments.
+
 The evidence records the exact lock key, source, ref, Scope, revision values,
 network use, and process request. The effect set includes the lock file and
 every bounded agent path that `skills@1.9.0` can change or create. Existing

@@ -48,6 +48,12 @@ an independent Installation or Plugin outside that boundary.
 10. Lampwright MUST keep `--all` and remote update discovery outside the first version.
 11. Lampwright MUST NOT let an Update add the target to an agent harness that did not have it.
 
+Rule 3 forbids an Update that Lampwright builds from two Owner operations,
+where the first operation removes the target. It does not forbid one Owner
+operation that installs a new revision of a target that is installed. In such
+an operation, the Owner keeps its record of the target and replaces the content
+in place.
+
 The newest revision means the newest revision that the recorded Owner policy
 permits. It does not mean the newest branch, tag, release, or marketplace entry
 that exists outside the recorded policy.
@@ -295,11 +301,53 @@ artifacts that existed before Update. The plan warns when Inventory cannot
 prove that the installed content matches the Owner record. Proven local changes
 block Update.
 
-An Update does not add the Skill to an agent harness. The `update` command of
-the Manager has no option that selects agents. When it installs a new version,
-it can create a link to the Skill in each agent directory that it uses as a
-default target. Lampwright records each declared mutation root that is absent
-before the Owner command. After the command, Lampwright removes each symbolic
+An Update does not add the Skill to an agent harness. The Manager has two
+commands that install the newest permitted revision of a Skill that is
+installed, and Lampwright selects one of them for each target.
+
+The `add` command has an `--agent` option. When the option names agents, the
+Manager uses that list and does not detect agents. Lampwright names each agent
+that has the Skill and no other agent:
+
+```text
+skills add <source> --skill <lock key> --agent <agent>... [--global] [--copy] --yes
+```
+
+- `<source>` is the recorded source, with the folder of the Skill and the
+  recorded ref, in the form that the `update` command of the Manager gives to
+  its own installer. An example is `owner/repository/skills/name#ref`. When
+  the Manager cannot add a folder to the source, as for an SSH address,
+  `<source>` is the recorded source and the ref.
+- `--global` is present for the global Scope. For the project Scope, the option
+  is absent and the command runs in the recorded workspace.
+- `--copy` is present when the lock records the `copy` install mode.
+
+The Manager writes the same source, ref, and Skill path to the lock again. It
+installs the Skill also when the source has no new revision. The lock revision
+and the content are then the same as before, and the result is `unchanged`.
+
+Lampwright uses the `add` command only when each of these conditions is true:
+
+- The recorded source type is `github`, or the lock records no source type.
+- The lock key is the name of the Skill in the source. A lock record with a
+  `skillName` field does not satisfy this condition.
+- The Manager accepts each agent of the target by name. An Eve agent or an Eve
+  subagent does not satisfy this condition.
+- The source and the lock key are safe arguments, and neither starts with `-`.
+
+For each other target, Lampwright uses the `update` command:
+
+```text
+skills update <lock key> --global|--project --yes
+```
+
+The `update` command has no option that selects agents. When it installs a new
+version, it can create a link to the Skill in each agent directory that it uses
+as a default target.
+
+For the two commands, Lampwright records each declared mutation root that is
+absent before the Owner command. This is the only correction for the `update`
+command, and it is a safeguard for the `add` command. After the command, Lampwright removes each symbolic
 link or junction that the Owner created at one of those paths. It then removes
 each directory that the Owner created only to hold that link. The action result
 gives the number of removed links in `removedAgentLinks`.

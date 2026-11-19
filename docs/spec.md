@@ -1,7 +1,7 @@
 # Lampwright v1 specification
 
 Status: Accepted product direction; implementation under active refinement
-Last updated: 2026-09-19
+Last updated: 2026-11-18
 
 ## 1. Summary
 
@@ -395,6 +395,10 @@ entries, Git-protected effects, read-only effects, ambiguous selectors,
 untrusted commands, proven local changes, and incomplete Owner evidence. Force
 does not override these blocks. [Owner-managed Update](./update.md) defines the
 complete target and plan rules.
+
+One Owner operation that installs a new revision of a target that is installed
+is a supported Update operation. It is not Remove followed by Install, because
+the Owner keeps its record of the target and replaces the content in place.
 
 An Update does not add the target to an agent harness that did not have it.
 When an Owner operation creates a link to the target at a declared path that

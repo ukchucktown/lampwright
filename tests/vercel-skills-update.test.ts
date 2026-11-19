@@ -334,7 +334,16 @@ describe("Vercel Managed Update evidence", () => {
         kind: "direct",
         command: {
           executable: "skills",
-          arguments: ["update", "review-tools", "--global", "--yes"],
+          arguments: [
+            "add",
+            "acme/review-tools/skills/review-tools#main",
+            "--skill",
+            "review-tools",
+            "--agent",
+            "universal",
+            "--global",
+            "--yes",
+          ],
         },
         workingDirectory: { kind: "isolated-temporary" },
       },
@@ -566,7 +575,16 @@ describe("Vercel Managed Update evidence", () => {
             mayDownload: true,
             adapterHash: expect.stringMatching(/^[a-f\d]{64}$/),
           },
-          packageArguments: ["update", "review-tools", "--global", "--yes"],
+          packageArguments: [
+            "add",
+            "acme/review-tools/skills/review-tools#main",
+            "--skill",
+            "review-tools",
+            "--agent",
+            "universal",
+            "--global",
+            "--yes",
+          ],
           workingDirectory: { kind: "isolated-temporary" },
         },
         packageDownload: {
@@ -638,8 +656,12 @@ describe("Vercel Managed Update evidence", () => {
           arguments: [
             "--yes",
             "skills@1.9.0",
-            "update",
+            "add",
+            "acme/review-tools/skills/review-tools#main",
+            "--skill",
             "review-tools",
+            "--agent",
+            "universal",
             "--global",
             "--yes",
           ],
@@ -731,7 +753,16 @@ describe("Vercel Managed Update execution", () => {
       expect(request).toEqual({
         command: {
           executable: "skills",
-          arguments: ["update", "review-tools", "--global", "--yes"],
+          arguments: [
+            "add",
+            "acme/review-tools/skills/review-tools#main",
+            "--skill",
+            "review-tools",
+            "--agent",
+            "universal",
+            "--global",
+            "--yes",
+          ],
         },
         cwd: expect.stringContaining("lampwright-owner-"),
         environment: {
@@ -945,6 +976,186 @@ describe("Vercel Managed Update execution", () => {
     await expect(
       readFile(join(value.skillPath, "SKILL.md"), "utf8"),
     ).resolves.toBe(beforeSkill);
+  });
+});
+
+describe("Vercel Managed Update for the agents of the target", () => {
+  const githubEntry = (name: string) => ({
+    source: "acme/review-tools",
+    sourceType: "github",
+    sourceUrl: "https://github.com/acme/review-tools.git",
+    skillPath: `skills/${name}/SKILL.md`,
+    skillFolderHash: "old-source-tree",
+  });
+
+  async function ownerArguments(
+    scope: "global" | "project",
+    entry: (name: string) => Record<string, unknown>,
+    name = "review-tools",
+  ): Promise<readonly string[]> {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await writeSkill(
+      scope === "global"
+        ? globalSkillPath(environment, name)
+        : projectSkillPath(environment, name),
+      name,
+    );
+    await writeJson(
+      scope === "global"
+        ? globalLockPath(environment)
+        : projectLockPath(environment),
+      scope === "global"
+        ? { version: 3, skills: { [name]: entry(name) } }
+        : {
+            version: 1,
+            skills: {
+              [name]: { ...entry(name), computedHash: projectCopyHash(name) },
+            },
+          },
+    );
+    const inventory = await scanner(environment, true).scan({});
+    const update = inventory.installations[0]!.update;
+    if (
+      update.kind !== "managed" ||
+      update.operation.invocation.kind !== "direct"
+    )
+      throw new Error("expected a direct managed Vercel Update");
+    return update.operation.invocation.command.arguments;
+  }
+
+  it("names each agent of the target and no agent that is only detected", async () => {
+    const value = await globalFixture(true);
+    const home = value.environment.homeDirectory;
+    await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    await symlink(
+      value.skillPath,
+      join(home, ".claude", "skills", "review-tools"),
+      linkType,
+    );
+    // Grok is present on the machine, and the Skill is not exposed to it.
+    await mkdir(join(home, ".grok"), { recursive: true });
+
+    const inventory = await value.inventoryScanner.scan({});
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === value.skillPath,
+    )!;
+    expect([...installation.exposedTo].sort()).toEqual([
+      "claude-code",
+      "universal",
+    ]);
+    if (
+      installation.update.kind !== "managed" ||
+      installation.update.operation.invocation.kind !== "direct"
+    )
+      throw new Error("expected a direct managed Vercel Update");
+    expect(installation.update.operation.invocation.command.arguments).toEqual([
+      "add",
+      "acme/review-tools/skills/review-tools#main",
+      "--skill",
+      "review-tools",
+      "--agent",
+      "universal",
+      "claude-code",
+      "--global",
+      "--yes",
+    ]);
+  });
+
+  it("uses the workspace Scope for a project Skill and keeps a recorded copy mode", async () => {
+    await expect(
+      ownerArguments("project", (name) => ({
+        ...githubEntry(name),
+        installMode: "copy",
+      })),
+    ).resolves.toEqual([
+      "add",
+      "acme/review-tools/skills/review-tools",
+      "--skill",
+      "review-tools",
+      "--agent",
+      "universal",
+      "--copy",
+      "--yes",
+    ]);
+  });
+
+  it("gives the complete source when the Manager cannot add a folder to it", async () => {
+    await expect(
+      ownerArguments("global", (name) => ({
+        ...githubEntry(name),
+        source: "git@github.com:acme/review-tools.git",
+        ref: "v2",
+      })),
+    ).resolves.toEqual([
+      "add",
+      "git@github.com:acme/review-tools.git#v2",
+      "--skill",
+      "review-tools",
+      "--agent",
+      "universal",
+      "--global",
+      "--yes",
+    ]);
+  });
+
+  it.each([
+    {
+      name: "a source that is not a GitHub source",
+      entry: (name: string) => ({
+        ...githubEntry(name),
+        sourceType: "gitlab",
+        sourceUrl: "https://gitlab.com/acme/review-tools.git",
+      }),
+    },
+    {
+      name: "a lock key that is not the name of the Skill in the source",
+      entry: (name: string) => ({
+        ...githubEntry(name),
+        skillName: "original-name",
+      }),
+    },
+    {
+      name: "a source that the Manager would read as an option",
+      entry: (name: string) => ({
+        ...githubEntry(name),
+        source: "--agent/review-tools",
+      }),
+    },
+  ])("keeps the update command of the Manager for $name", async ({ entry }) => {
+    await expect(ownerArguments("global", entry)).resolves.toEqual([
+      "update",
+      "review-tools",
+      "--global",
+      "--yes",
+    ]);
+  });
+
+  it("reports unchanged when the Manager installs the same revision again", async () => {
+    const value = await globalFixture(true);
+    const planned = planUpdate(
+      value.inventory,
+      updateIntent(value.installation),
+    );
+    const run = vi.fn(async (request: ExecutionProcessRequest) => {
+      expect(request.command.arguments[0]).toBe("add");
+      // The `add` command writes the same content and the same revision.
+      await writeSkill(value.skillPath, "review-tools");
+      const lock = JSON.parse(await readFile(value.lockPath, "utf8")) as {
+        skills: Record<string, Record<string, unknown>>;
+      };
+      lock.skills["review-tools"]!.updatedAt = "2026-08-22T00:00:00.000Z";
+      await writeJson(value.lockPath, lock);
+      return { exitCode: 0, stdout: "installed", stderr: "" };
+    });
+
+    const report = await execution(value.inventoryScanner, value.environment, {
+      run,
+    }).executeUpdate(planned, { grants: [{ kind: "confirmation" }] });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(report.status).toBe("succeeded");
+    expect(report.targetResults[0]).toMatchObject({ status: "unchanged" });
   });
 });
 

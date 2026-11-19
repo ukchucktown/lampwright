@@ -263,6 +263,55 @@ export function vercelSkillsUpdateArguments(
   );
 }
 
+function agentUpdateArgumentTemplates(scope: "global" | "project") {
+  return [
+    { kind: "literal" as const, value: "add" },
+    { kind: "value" as const, from: "recordedSource" as const },
+    { kind: "literal" as const, value: "--skill" },
+    { kind: "value" as const, from: "externalId" as const },
+    { kind: "literal" as const, value: "--agent" },
+    { kind: "values" as const, from: "targetAgents" as const },
+    ...(scope === "global"
+      ? [{ kind: "literal" as const, value: "--global" }]
+      : []),
+    {
+      kind: "optional-literal" as const,
+      value: "--copy",
+      when: "the lock records the copy install mode" as const,
+    },
+    { kind: "literal" as const, value: "--yes" },
+  ];
+}
+
+/**
+ * The Owner command that installs the newest permitted revision of one Skill
+ * for exactly the agents that have it.
+ */
+export function vercelSkillsAgentUpdateArguments(
+  scope: "global" | "project",
+  input: {
+    readonly source: string;
+    readonly externalId: string;
+    readonly agents: readonly string[];
+    readonly copy: boolean;
+  },
+): readonly string[] {
+  return agentUpdateArgumentTemplates(scope).flatMap((argument) => {
+    switch (argument.kind) {
+      case "literal":
+        return [argument.value];
+      case "optional-literal":
+        return input.copy ? [argument.value] : [];
+      case "values":
+        return [...input.agents];
+      case "value":
+        return [
+          argument.from === "recordedSource" ? input.source : input.externalId,
+        ];
+    }
+  });
+}
+
 const vercelSkills = {
   schemaVersion: 1,
   id: VERCEL_SKILLS_ADAPTER_ID,
@@ -347,6 +396,9 @@ const vercelSkillsUpdateAuthority = {
         : null,
     workingDirectory:
       scope === "project" ? "exact-recorded-workspace" : "isolated-temporary",
+    // The same envelope runs these arguments when the Manager can name each
+    // agent of the target and the recorded source is a GitHub source.
+    agentTargetedArguments: agentUpdateArgumentTemplates(scope),
   })),
   effects: {
     mutationRoots:
