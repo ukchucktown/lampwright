@@ -64,7 +64,7 @@ function commandRunner(
       if (command.executable === "skills")
         return {
           exitCode: managerAvailable ? 0 : null,
-          stdout: managerAvailable ? "1.5.22\n" : "",
+          stdout: managerAvailable ? "1.9.0\n" : "",
         };
       if (
         command.executable === "git" &&
@@ -562,7 +562,7 @@ describe("Vercel Managed Update evidence", () => {
           packageExecution: {
             runner: "npx",
             packageName: "skills",
-            packageVersion: "1.5.22",
+            packageVersion: "1.9.0",
             mayDownload: true,
             adapterHash: expect.stringMatching(/^[a-f\d]{64}$/),
           },
@@ -572,7 +572,7 @@ describe("Vercel Managed Update evidence", () => {
         packageDownload: {
           kind: "possible",
           packageName: "skills",
-          packageVersion: "1.5.22",
+          packageVersion: "1.9.0",
         },
       },
     });
@@ -586,7 +586,7 @@ describe("Vercel Managed Update evidence", () => {
         kind: "package-trust",
         runner: "npx",
         packageName: "skills",
-        packageVersion: "1.5.22",
+        packageVersion: "1.9.0",
       }),
     ]);
 
@@ -637,7 +637,7 @@ describe("Vercel Managed Update evidence", () => {
           executable: "npx",
           arguments: [
             "--yes",
-            "skills@1.5.22",
+            "skills@1.9.0",
             "update",
             "review-tools",
             "--global",
@@ -775,7 +775,7 @@ describe("Vercel Managed Update execution", () => {
       await mkdir(join(home, ".claude", "skills"), { recursive: true });
       await symlink(value.skillPath, existingLink, linkType);
       // Three more agents have a home directory, so the Manager can link there.
-      for (const agentHome of [".grok", ".factory", ".vibe"])
+      for (const agentHome of [".grok", ".junie", ".vibe"])
         await mkdir(join(home, agentHome), { recursive: true });
       const scanSelected = async () => {
         const inventory = await value.inventoryScanner.scan({});
@@ -1144,6 +1144,40 @@ describe("Vercel Update safety blocks", () => {
         path: join(environment.homeDirectory, ".adal", "skills", name),
         exists: false,
       }),
+    );
+  });
+
+  it("declares a global link only for a detected agent that does not read the shared directory", async () => {
+    const value = await globalFixture(true);
+    const home = value.environment.homeDirectory;
+    // Each of these agents is present on the machine.
+    for (const agentHome of [
+      [".grok"],
+      [".gemini", "antigravity"],
+      [".pi", "agent"],
+      [".factory"],
+      [".kilo"],
+      [".fx"],
+    ])
+      await mkdir(join(home, ...agentHome), { recursive: true });
+
+    const inventory = await value.inventoryScanner.scan({});
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === value.skillPath,
+    )!;
+    if (installation.update.kind !== "managed")
+      throw new Error("expected managed Vercel Update");
+    const absent = installation.update.operation.effects
+      .filter((effect) => effect.kind === "mutation-root" && !effect.exists)
+      .map((effect) => effect.path);
+
+    // Grok has a directory of its own. Antigravity uses the shared project
+    // directory, but in the global scope it reads a directory of its own.
+    expect(absent.sort()).toEqual(
+      [
+        join(home, ".gemini", "config", "skills", "review-tools"),
+        join(home, ".grok", "skills", "review-tools"),
+      ].sort(),
     );
   });
 

@@ -390,7 +390,7 @@ describe("Adapter loading", () => {
     ).toMatchObject({
       runner: "npx",
       packageName: "skills",
-      packageVersion: "1.5.22",
+      packageVersion: "1.9.0",
       mayDownload: true,
     });
     expect(Object.isFrozen(first)).toBe(true);
