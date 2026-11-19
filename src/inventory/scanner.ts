@@ -123,6 +123,8 @@ export function defaultInventoryScanEnvironment(): InventoryScanEnvironment {
         ["grok", process.env.GROK_HOME],
         ["hermes-agent", process.env.HERMES_HOME],
         ["mistral-vibe", process.env.VIBE_HOME],
+        ["reasonix", process.env.REASONIX_HOME],
+        ["sarvam-code", process.env.SARVAM_HOME],
       ].flatMap(([agentId, path]) =>
         typeof path === "string" && path.trim().length > 0
           ? [[agentId, path]]
@@ -137,6 +139,7 @@ function agentProcessEnvironment(): Readonly<Record<string, string>> {
   const valueBearing = new Set([
     "AI_AGENT",
     "CURSOR_EXTENSION_HOST_ROLE",
+    "OPENCODE",
     "APPDATA",
     "FLATPAK_XDG_CONFIG_HOME",
   ]);
@@ -152,6 +155,7 @@ function agentProcessEnvironment(): Readonly<Record<string, string>> {
       "CODEX_THREAD_ID",
       "ANTIGRAVITY_AGENT",
       "AUGMENT_AGENT",
+      "OPENCODE",
       "OPENCODE_CLIENT",
       "CLAUDECODE",
       "CLAUDE_CODE",

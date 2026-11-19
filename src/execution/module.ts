@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { lstat, rmdir, stat, unlink } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import { stringifyModel } from "../model/json.js";
@@ -442,7 +442,12 @@ async function executeManagedRemoval(
       }
     }
     requireSuccessfulOwnerExit(result.exitCode);
-    return ownerSuccess(action, result.exitCode, temporaryCleanupSucceeded);
+    return ownerSuccess(
+      action,
+      result.exitCode,
+      temporaryCleanupSucceeded,
+      await removeBrokenDeclaredLinks(action),
+    );
   }
 
   const packageExecution = action.invocation.packageExecution;
@@ -479,7 +484,12 @@ async function executeManagedRemoval(
     }
   }
   requireSuccessfulOwnerExit(result.exitCode);
-  return ownerSuccess(action, result.exitCode, temporaryCleanupSucceeded);
+  return ownerSuccess(
+    action,
+    result.exitCode,
+    temporaryCleanupSucceeded,
+    await removeBrokenDeclaredLinks(action),
+  );
 }
 
 const ownerPrivacyEnvironment = {
@@ -500,6 +510,7 @@ function ownerSuccess(
   action: ManagedRemovalAction,
   exitCode: number,
   temporaryCleanupSucceeded: boolean | null,
+  removedBrokenLinks: number,
 ): {
   readonly status: "succeeded";
   readonly details: Record<string, string | number | boolean | null>;
@@ -511,8 +522,50 @@ function ownerSuccess(
       operationId: action.operationId,
       exitCode,
       temporaryCleanupSucceeded,
+      removedBrokenLinks,
     },
   };
+}
+
+/**
+ * Removes each link that the Owner left without a target at a path that the
+ * plan declared for removal. An Owner can stop the use of an agent path in a
+ * later version, and its removal then deletes the Skill and leaves the old
+ * link.
+ *
+ * Only a link whose target is absent is removed. Content is never deleted: a
+ * directory, a file, or a link to a target that exists stays, and the
+ * verification of the plan then reports it.
+ */
+async function removeBrokenDeclaredLinks(
+  action: ManagedRemovalAction,
+): Promise<number> {
+  let removed = 0;
+  for (const effect of action.effects) {
+    if (effect.kind !== "remove-path") continue;
+    const stats = await lstat(effect.path).catch(() => null);
+    if (stats === null || !stats.isSymbolicLink()) continue;
+    const targetMissing = await stat(effect.path).then(
+      () => false,
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT",
+    );
+    if (!targetMissing) continue;
+    // A Windows junction is a directory link that `unlink` can refuse.
+    const unlinked = await unlink(effect.path).then(
+      () => true,
+      () =>
+        rmdir(effect.path).then(
+          () => true,
+          () => false,
+        ),
+    );
+    if (unlinked) removed += 1;
+  }
+  return removed;
 }
 
 async function executeRecordCleanup(

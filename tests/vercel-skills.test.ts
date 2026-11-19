@@ -56,7 +56,7 @@ function commandRunner(managerAvailable: boolean): InventoryCommandRunner {
       if (command.executable === "skills") {
         return {
           exitCode: managerAvailable ? 0 : null,
-          stdout: managerAvailable ? "1.5.22\n" : "",
+          stdout: managerAvailable ? "1.9.0\n" : "",
         };
       }
       if (command.executable === "fsutil") {
@@ -478,7 +478,7 @@ describe("Vercel skills adapter", () => {
             packageExecution: {
               runner: "npx",
               packageName: "skills",
-              packageVersion: "1.5.22",
+              packageVersion: "1.9.0",
               mayDownload: true,
             },
             packageArguments: expect.arrayContaining([
@@ -507,7 +507,7 @@ describe("Vercel skills adapter", () => {
             kind: "package-trust",
             runner: "npx",
             packageName: "skills",
-            packageVersion: "1.5.22",
+            packageVersion: "1.9.0",
           }),
         ]),
       }),
@@ -548,7 +548,7 @@ describe("Vercel skills adapter", () => {
     )!;
     expect(olderGlobal.removal.managed!.availability).toEqual({
       kind: "unavailable",
-      reason: "skills@1.5.22 requires Node.js 22.20 or newer",
+      reason: "skills@1.9.0 requires Node.js 22.20 or newer",
     });
 
     const legacyFixture = await createTestEnvironment();
@@ -565,7 +565,7 @@ describe("Vercel skills adapter", () => {
       managed: {
         availability: {
           kind: "unavailable",
-          reason: "global lock version 2 is not supported by skills@1.5.22",
+          reason: "global lock version 2 is not supported by skills@1.9.0",
         },
       },
       fallback: { kind: "available" },
@@ -1108,7 +1108,7 @@ describe("Vercel skills adapter", () => {
           availability: {
             kind: "unavailable",
             reason:
-              "the global lock is not the location skills@1.5.22 resolves in this environment",
+              "the global lock is not the location skills@1.9.0 resolves in this environment",
           },
         },
         fallback: { kind: "available" },
@@ -1212,6 +1212,231 @@ describe("Vercel skills adapter", () => {
     expect(inventory.installations[0]).toMatchObject({
       status: "broken",
       exposedTo: [],
+    });
+  });
+});
+
+describe("Vercel skills adapter at the pinned skills version", () => {
+  function removalExecution(
+    environment: FixtureEnvironment,
+    inventoryScanner: ReturnType<typeof scanner>,
+    run: (request: ExecutionProcessRequest) => Promise<{
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    }>,
+  ) {
+    return createExecutionModule({
+      scan: () => inventoryScanner.scan({}),
+      replan: (fresh, intent) => plan(fresh, intent),
+      quarantine: createQuarantineModule({
+        stateRoot: join(environment.stateDirectory, "lampwright"),
+        now: () => fixedTime,
+        createId: () => "pinned-version-unused",
+        fileSystem: nodeQuarantineFileSystem,
+        inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+      }),
+      processRunner: { run },
+      inspectGitProtection: async () => ({ kind: "outside-worktree" }),
+      auditWriter: { write: vi.fn(async () => undefined) },
+      packageTrustStore: {
+        isTrusted: vi.fn(async () => false),
+        trust: vi.fn(async () => undefined),
+      },
+      now: () => fixedTime,
+      stateRoot: join(environment.stateDirectory, "lampwright"),
+    });
+  }
+
+  async function earlierVersionFixture(name: string) {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const canonical = globalCanonicalPath(environment, name);
+    const lockPath = globalLockPath(environment);
+    await writeSkill(canonical, name);
+    await writeJson(lockPath, {
+      version: 3,
+      skills: { [name]: { source: "acme/earlier", skillPath: name } },
+    });
+    const inventoryScanner = scanner(environment, true);
+    // The Manager of the pinned version removes the paths that it knows.
+    const managerRemoves = async (paths: readonly string[]) => {
+      for (const path of paths)
+        await rm(path, { recursive: true, force: true });
+      await writeJson(lockPath, { version: 3, skills: {} });
+      return { exitCode: 0, stdout: "removed", stderr: "" };
+    };
+    return { environment, canonical, inventoryScanner, managerRemoves };
+  }
+
+  it("removes the link that the Manager leaves at a path of an earlier version", async () => {
+    const name = "earlier-link";
+    const { environment, canonical, inventoryScanner, managerRemoves } =
+      await earlierVersionFixture(name);
+    const home = environment.homeDirectory;
+    const currentLink = join(home, ".claude", "skills", name);
+    // skills@1.5.22 linked Pi here, and skills@1.9.0 does not visit the path.
+    const earlierLink = join(home, ".pi", "agent", "skills", name);
+    const neighbor = join(home, ".pi", "agent", "skills", "other-skill");
+    await createDirectoryLink(canonical, currentLink);
+    await createDirectoryLink(canonical, earlierLink);
+    await writeSkill(neighbor, "other-skill");
+
+    const initial = await inventoryScanner.scan({});
+    const installation = initial.installations.find(
+      (item) => item.location.path === canonical,
+    )!;
+    expect(installation.removal.managed?.effects).toContainEqual(
+      expect.objectContaining({ kind: "remove-path", path: earlierLink }),
+    );
+    const removalPlan = plan(initial, {
+      kind: "targets",
+      targets: [targetFor(installation)],
+      force: false,
+      mode: "managed-first",
+    });
+    const report = await removalExecution(environment, inventoryScanner, () =>
+      managerRemoves([canonical, currentLink]),
+    ).execute(removalPlan, { grants: [{ kind: "confirmation" }] });
+
+    expect(report.status).toBe("succeeded");
+    expect(report.targetResults).toEqual([
+      expect.objectContaining({ status: "removed" }),
+    ]);
+    expect(report.fallbackPlans).toEqual([]);
+    expect(report.actionResults[0]).toMatchObject({
+      status: "succeeded",
+      details: { removedBrokenLinks: 1 },
+    });
+    await expect(lstat(earlierLink)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(join(neighbor, "SKILL.md"), "utf8"),
+    ).resolves.toContain("other-skill");
+  });
+
+  it("keeps a copy at a path of an earlier version and reports the removal as incomplete", async () => {
+    const name = "earlier-copy";
+    const { environment, canonical, inventoryScanner, managerRemoves } =
+      await earlierVersionFixture(name);
+    // A copy has content, so only Quarantine can remove it.
+    const earlierCopy = join(
+      environment.homeDirectory,
+      ".kilocode",
+      "skills",
+      name,
+    );
+    await writeSkill(earlierCopy, name);
+
+    const initial = await inventoryScanner.scan({});
+    const installation = initial.installations.find(
+      (item) => item.location.path === canonical,
+    )!;
+    const removalPlan = plan(initial, {
+      kind: "targets",
+      targets: [targetFor(installation)],
+      force: false,
+      mode: "managed-first",
+    });
+    const report = await removalExecution(environment, inventoryScanner, () =>
+      managerRemoves([canonical]),
+    ).execute(removalPlan, { grants: [{ kind: "confirmation" }] });
+
+    expect(report.status).not.toBe("succeeded");
+    expect(report.actionResults[0]).toMatchObject({
+      details: { removedBrokenLinks: 0 },
+    });
+    expect(report.verificationResults).toContainEqual(
+      expect.objectContaining({ status: "failed" }),
+    );
+    await expect(
+      readFile(join(earlierCopy, "SKILL.md"), "utf8"),
+    ).resolves.toContain(name);
+  });
+
+  it("proves an unchanged project copy with the hash of a version 2 project lock", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const name = "hashed-copy";
+    const copy = join(
+      environment.workspaceDirectory,
+      ".agents",
+      "skills",
+      name,
+    );
+    await mkdir(join(copy, "notes"), { recursive: true });
+    await mkdir(join(copy, "__pycache__"), { recursive: true });
+    await writeFile(join(copy, "SKILL.md"), skillContents(name), "utf8");
+    await writeFile(join(copy, "notes", "windows.txt"), "first\r\nsecond\r\n");
+    await writeFile(
+      join(copy, "notes", "binary.bin"),
+      Buffer.from([0x61, 0x00, 0x62, 0x0d, 0x0a]),
+    );
+    // The Manager does not hash these two.
+    await writeFile(join(copy, "metadata.json"), '{"ignored":true}\n');
+    await writeFile(join(copy, "__pycache__", "c.pyc"), "x");
+    const lock = (computedHash: string) => ({
+      version: 2,
+      skills: {
+        [name]: {
+          source: "acme/hashed-copy",
+          sourceType: "github",
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          skillPath: `skills/${name}/SKILL.md`,
+          computedHash,
+        },
+      },
+    });
+    // skills@1.9.0 recorded this value for the same files.
+    await writeJson(
+      projectLockPath(environment),
+      lock("58262fffc2ce00a51f5b9a25e405b34167a75e1b08d5ef837d7f15aa1003e305"),
+    );
+
+    const unchanged = await scanner(environment, true).scan({});
+    expect(unchanged.installations[0]).toMatchObject({
+      update: {
+        kind: "managed",
+        operation: { localChanges: { kind: "unchanged", path: copy } },
+      },
+      removal: { managed: { availability: { kind: "available" } } },
+    });
+
+    await writeFile(join(copy, "notes", "windows.txt"), "first\r\nthird\r\n");
+    const changed = await scanner(environment, true).scan({});
+    expect(changed.installations[0]).toMatchObject({
+      update: {
+        kind: "managed",
+        operation: { localChanges: { kind: "changed", path: copy } },
+      },
+    });
+  });
+
+  it("withholds Managed Removal from a project lock version that the pinned version rejects", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const name = "later-lock";
+    await writeSkill(
+      join(environment.workspaceDirectory, ".agents", "skills", name),
+      name,
+    );
+    await writeJson(projectLockPath(environment), {
+      version: 3,
+      skills: {
+        [name]: { source: "acme/later-lock", sourceType: "github" },
+      },
+    });
+
+    const inventory = await scanner(environment, true).scan({});
+    expect(inventory.installations[0]).toMatchObject({
+      status: "active",
+      removal: {
+        managed: {
+          availability: {
+            kind: "unavailable",
+            reason: "project lock version 3 is not supported by skills@1.9.0",
+          },
+        },
+      },
     });
   });
 });

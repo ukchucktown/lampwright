@@ -227,7 +227,35 @@ state, cache, quarantine, or temporary files.
 
 When either `<workspace>/skills-lock.json` or the global Vercel lock exists,
 Inventory reads the regular JSON file and reconciles every lock key against
-the bounded path registry pinned to `skills@1.5.22`.
+the bounded path registry pinned to `skills@1.9.0`.
+
+The registry also holds the paths that `skills@1.5.22` used and
+`skills@1.9.0` does not visit. Lampwright pinned `skills@1.5.22` before, so a
+Skill that it installed can still have a link or a copy at such a path. These
+are the paths:
+
+| Agent           | Scope   | Path of `skills@1.5.22`            |
+| --------------- | ------- | ---------------------------------- |
+| Antigravity     | Global  | `~/.gemini/antigravity/skills`     |
+| Antigravity CLI | Global  | `~/.gemini/antigravity-cli/skills` |
+| Codex           | Global  | `$CODEX_HOME/skills`               |
+| Droid           | Project | `.factory/skills`                  |
+| Kilo Code       | Global  | `~/.kilocode/skills`               |
+| Kilo Code       | Project | `.kilocode/skills`                 |
+| Pi              | Global  | `~/.pi/agent/skills`               |
+| Pi              | Project | `.pi/skills`                       |
+
+Inventory reconciles these paths as it reconciles the current ones, so the
+Installation and its removal effects stay complete. The `remove` command of
+`skills@1.9.0` does not delete a link at one of these paths.
+[Removal execution](./execution.md) describes how Lampwright removes a link
+that the command leaves without a target.
+
+In the global scope, `skills@1.9.0` gives an agent no link when the agent
+reads the shared `~/.agents/skills` directory. Codex, Droid, Kilo Code, and Pi
+are now such agents. Antigravity and Antigravity CLI use the shared project
+directory, but in the global scope they have the directory
+`~/.gemini/config/skills`.
 
 The manager resolves exactly one global lock: `$XDG_STATE_HOME/skills/.skill-lock.json`
 when `XDG_STATE_HOME` is set, and `~/.agents/.skill-lock.json` when it is not.
@@ -283,8 +311,8 @@ targets in a normal multi-target intent. These are batch-selection groups, not
 Logical Skill identity evidence, and they never merge their member Skills.
 
 The parser accepts numeric lock versions while ignoring unknown fields. Native
-removal is available only for versions understood by `skills@1.5.22` (global
-version 3 or newer and project version 1 or newer); older records retain exact
+removal is available only for versions understood by `skills@1.9.0` (global
+version 3 or newer and project version 1 or 2); other records retain exact
 declarative fallback. It rejects malformed documents, duplicate keys, non-object
 records, symlinked or hard-linked lock files, and sanitized lock-key collisions
 for mutation. A canonical Skill underneath an invalid lock remains visible as
@@ -302,17 +330,24 @@ developer's real paths.
 Inventory emits Managed Update evidence only for a complete active Vercel
 record with a supported source type. A direct operation uses the installed
 `skills` executable. If that executable is absent, a global operation can use
-the exact `skills@1.5.22` package through `npx`. A project operation has no
+the exact `skills@1.9.0` package through `npx`. A project operation has no
 package fallback because the Manager derives Scope from the workspace.
 
 The evidence records the exact lock key, source, ref, Scope, revision values,
 network use, and process request. The effect set includes the lock file and
-every bounded agent path that `skills@1.5.22` can change or create. Existing
+every bounded agent path that `skills@1.9.0` can change or create. Existing
 copies, symbolic links, and Windows junctions keep their exact locations in
 this set. An absent path has protection evidence from its nearest safe parent.
 
 A project `computedHash` proves whether local content changed. Proven local
-changes withhold Update authority. Global source-tree hashes cannot prove local
+changes withhold Update authority. The version of the project lock selects the
+hash. A version 1 lock, which `skills@1.5.22` wrote, hashes the path and the
+content of each file. A version 2 lock, which `skills@1.9.0` writes, also
+hashes the length of each file, reads a text file with `\n` line ends, and
+ignores `metadata.json`, `__pycache__`, and `__pypackages__`. `skills@1.9.0`
+rewrites a version 1 lock as version 2 when it changes the lock, and an Update
+that finds no new content can do this. The `computedHash` then changes while
+the content stays the same, and the Update result is `updated`. Global source-tree hashes cannot prove local
 content, so Inventory reports that comparison as unavailable. Scanning reads
 these local values but never contacts the recorded source.
 

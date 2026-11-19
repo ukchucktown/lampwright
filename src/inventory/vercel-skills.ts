@@ -56,6 +56,7 @@ import { readSkillMetadata } from "./metadata.js";
 import {
   vercelAgentPaths,
   vercelCanonicalPath,
+  vercelLegacyAgentPaths,
   vercelUpdateCandidatePaths,
 } from "./vercel-skills-paths.js";
 import type {
@@ -306,7 +307,12 @@ async function materializeLockEntry(input: {
           reason:
             "unsafe or inactive artifacts are not read for Update evidence",
         }
-      : await vercelLocalChanges(input.lock.format, input.entry, artifacts);
+      : await vercelLocalChanges(
+          input.lock.format,
+          numberField(input.lock.value.version),
+          input.entry,
+          artifacts,
+        );
   const localChangeReason =
     localChanges.kind === "changed"
       ? `Vercel project copy hash changed: ${localChanges.path}`
@@ -489,6 +495,7 @@ function updateRecordRevision(
 
 async function vercelLocalChanges(
   scope: "global" | "project",
+  lockVersion: number | null,
   entry: Record<string, unknown>,
   artifacts: readonly LocatedArtifact[],
 ): Promise<UpdateLocalChangeEvidence> {
@@ -514,7 +521,9 @@ async function vercelLocalChanges(
   let unchanged: UpdateLocalChangeEvidence | null = null;
   for (const artifact of readable) {
     const actualDigest = sha256(
-      await hashVercelSkillCopy(artifact.location.path),
+      lockVersion === 1
+        ? await hashLegacyVercelSkillCopy(artifact.location.path)
+        : await hashVercelSkillCopy(artifact.location.path),
     );
     const evidence = {
       kind:
@@ -968,11 +977,10 @@ async function locateArtifacts(
     path: canonicalPath,
     agentId: "universal",
   });
-  for (const candidate of await vercelAgentPaths(
-    scope,
-    environment,
-    sanitizedName,
-  )) {
+  for (const candidate of [
+    ...(await vercelAgentPaths(scope, environment, sanitizedName)),
+    ...vercelLegacyAgentPaths(scope, environment, sanitizedName),
+  ]) {
     if (!paths.has(pathKey(candidate.path))) {
       paths.set(pathKey(candidate.path), candidate);
     }
@@ -1215,7 +1223,7 @@ async function readGlobalLockDocument(
 /**
  * The global lock locations, most authoritative first.
  *
- * `skills@1.5.22` resolves exactly one of these: the `XDG_STATE_HOME` location
+ * `skills@1.9.0` resolves exactly one of these: the `XDG_STATE_HOME` location
  * when that variable is set, and the home-relative one when it is not. A lock
  * written under a different environment therefore remains on disk while the
  * manager cannot see it. Discovery reads either, because the Skills are really
@@ -1267,7 +1275,7 @@ function managerSupportsLockVersion(
   scope: "global" | "project",
   version: number,
 ): boolean {
-  return scope === "global" ? version >= 3 : version >= 1;
+  return scope === "global" ? version >= 3 : version === 1 || version === 2;
 }
 
 function nativeSelectorIssue(lockKey: string): string | null {
@@ -1406,7 +1414,89 @@ async function unexpectedArtifactTopology(
   return null;
 }
 
+/**
+ * The `computedHash` of a version 2 project lock, as skills@1.9.0 computes it.
+ *
+ * Each file adds its path, its length, and its content, in the byte order of
+ * the paths. A text file hashes with `\n` line ends, so one Skill has one hash
+ * on each operating system. `metadata.json` and the directories `.git`,
+ * `__pycache__`, and `__pypackages__` are not part of the hash.
+ */
 async function hashVercelSkillCopy(directoryPath: string): Promise<string> {
+  const root = await realpath(directoryPath);
+  const files: { path: Buffer; content: Buffer }[] = [];
+  await collectHashedSkillFiles(directoryPath, "", root, new Set(), files);
+  files.sort((left, right) => Buffer.compare(left.path, right.path));
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(file.path);
+    hash.update("\0");
+    hash.update(String(file.content.length));
+    hash.update("\0");
+    hash.update(file.content);
+  }
+  return hash.digest("hex");
+}
+
+const hashExcludedFiles = new Set(["metadata.json"]);
+const hashExcludedDirectories = new Set([
+  ".git",
+  "__pycache__",
+  "__pypackages__",
+]);
+
+async function collectHashedSkillFiles(
+  directoryPath: string,
+  prefix: string,
+  root: string,
+  ancestors: ReadonlySet<string>,
+  files: { path: Buffer; content: Buffer }[],
+): Promise<void> {
+  const realDirectory = await realpath(directoryPath);
+  if (ancestors.has(realDirectory)) return;
+  const branch = new Set(ancestors).add(realDirectory);
+  const entries = await readdir(directoryPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (hashExcludedFiles.has(entry.name)) continue;
+    const path = join(directoryPath, entry.name);
+    let isDirectory = entry.isDirectory();
+    if (entry.isSymbolicLink()) {
+      // A link counts only when its target is inside the Skill directory.
+      const target = await realpath(path).catch(() => null);
+      if (target === null) continue;
+      if (target !== root && !target.startsWith(root + sep)) continue;
+      isDirectory = (await stat(target)).isDirectory();
+    } else if (!isDirectory && !entry.isFile()) continue;
+    if (isDirectory) {
+      if (hashExcludedDirectories.has(entry.name)) continue;
+      await collectHashedSkillFiles(
+        path,
+        `${prefix}${entry.name}/`,
+        root,
+        branch,
+        files,
+      );
+    } else {
+      files.push({
+        path: Buffer.from(prefix + entry.name, "utf8"),
+        content: withUnixLineEnds(await readFile(path)),
+      });
+    }
+  }
+}
+
+function withUnixLineEnds(content: Buffer): Buffer {
+  if (content.includes(0) || !content.includes("\r\n")) return content;
+  return Buffer.from(
+    content.toString("latin1").replaceAll("\r\n", "\n"),
+    "latin1",
+  );
+}
+
+/** The `computedHash` of a version 1 project lock. */
+async function hashLegacyVercelSkillCopy(
+  directoryPath: string,
+): Promise<string> {
   const files: { relativePath: string; content: Buffer }[] = [];
   await collectVercelSkillFiles(directoryPath, directoryPath, files);
   files.sort((left, right) =>

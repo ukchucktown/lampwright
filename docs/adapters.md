@@ -283,7 +283,7 @@ safety, reference, variant, and compilation pipeline as local content.
 ## Vercel `skills` adapter
 
 The `vercel.skills` built-in pins the native fallback package to
-`skills@1.5.22`. An installed `skills` executable is preferred. When it is
+`skills@1.9.0`. An installed `skills` executable is preferred. When it is
 missing, only global removal may use the pinned `npx` envelope, and only on the
 Node.js versions supported by that package. Project removal requires the
 installed executable because the manager derives project scope from its
@@ -291,9 +291,9 @@ working directory; running the package from Lampwright's isolated ephemeral
 directory would target the wrong scope.
 
 Global commands pass the pinned set of agents that support global installation
-instead of relying on the manager's default all-agent expansion. In
-`skills@1.5.22`, that default also visits project-only Eve and PromptScript
-paths relative to the command's current directory. Excluding those agents
+instead of relying on the manager's default all-agent expansion. That default
+also visits project-only Eve and PromptScript paths relative to the command's
+current directory. Excluding those agents
 keeps a global action from mutating an unrelated workspace while retaining all
 declared global paths. The command and path registries are checked together so
 they cannot drift silently.
