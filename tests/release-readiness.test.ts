@@ -15,9 +15,9 @@ describe("release readiness", () => {
       // @ts-expect-error The exercised release helper is intentionally executable ESM.
       await import("../scripts/npm-pack-result.mjs");
     const pack = {
-      id: "lampwright@0.4.0",
+      id: "lampwright@0.4.1",
       name: "lampwright",
-      version: "0.4.0",
+      version: "0.4.1",
     };
 
     expect(normalizeNpmPackResult([pack], "lampwright")).toBe(pack);
@@ -43,11 +43,11 @@ describe("release readiness", () => {
     const command = join(repositoryRoot, "scripts", "verify-release.mjs");
     const authority = {
       ...process.env,
-      GITHUB_REF_NAME: "v0.4.0",
+      GITHUB_REF_NAME: "v0.4.1",
       GITHUB_REF_TYPE: "tag",
       GITHUB_REPOSITORY: "ukchucktown/lampwright",
-      RELEASE_CONFIRMATION: "lampwright@0.4.0",
-      GITHUB_RELEASE_CONFIRMATION: "v0.4.0",
+      RELEASE_CONFIRMATION: "lampwright@0.4.1",
+      GITHUB_RELEASE_CONFIRMATION: "v0.4.1",
       REPOSITORY_PRIVATE: "false",
     };
 
@@ -57,7 +57,7 @@ describe("release readiness", () => {
     if (supportsTrustedPublishingRuntime())
       await expect(exactAuthority).resolves.toMatchObject({
         stdout: expect.stringContaining(
-          "Release authority verified for lampwright@0.4.0",
+          "Release authority verified for lampwright@0.4.1",
         ),
       });
     else
@@ -267,12 +267,12 @@ describe("release readiness", () => {
           "README.md",
           "SECURITY.md",
           "docs/spec.md",
-          "docs/releases/0.4.0.md",
+          "docs/releases/0.4.1.md",
           "scripts/verify-package.mjs",
         ].map((path) => readFile(join(repositoryRoot, path), "utf8")),
       );
 
-    expect(readme).toContain("npx lampwright@0.4.0");
+    expect(readme).toContain("npx lampwright@0.4.1");
     expect(readme).not.toContain("No npm version has been published yet");
     expect(security).toContain("`0.4.x`");
     expect(security).toContain("`0.3.x`");
@@ -281,16 +281,16 @@ describe("release readiness", () => {
     expect(security).toContain("security/advisories/new");
     expect(specification).toContain("npx lampwright@0.1.0");
     expect(specification).not.toContain("Future published invocation");
-    expect(verifier).toContain('"docs/releases/0.4.0.md"');
+    expect(verifier).toContain('"docs/releases/0.4.1.md"');
     for (const requiredTopic of [
-      "theme",
-      "ctrl+p",
-      "config.toml",
-      "key reference",
+      "skills@1.9.0",
+      "--trust-package",
+      "removedBrokenLinks",
+      "skills-lock.json",
       "Managed Update",
       "Git-protected",
       "System Skills",
-      "GitHub `v0.4.0` release",
+      "GitHub `v0.4.1` release",
     ])
       expect(releaseNotes).toContain(requiredTopic);
   });
