@@ -2,7 +2,7 @@
 
 **Switch agent Skills off. Keep them installed.**
 
-![Lampwright disables four Skills, enables one again, and opens the theme picker, between two title cards with a lamp and a genie](./.github/assets/lampwright-demo.gif)
+![Lampwright lists more than 70 Skills, disables three, shows them in the Disabled view, and opens Trash and the theme picker](./.github/assets/lampwright-demo.gif)
 
 If Lampwright saves context for you, a star on GitHub helps other people find
 it.
