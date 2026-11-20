@@ -23,7 +23,7 @@ it.
 | Tool | Version reviewed | Sources |
 | --- | --- | --- |
 | Lampwright | 0.4.1 | This repository |
-| `asm` | 2.24.0 | [README](https://github.com/luongnv89/asm#readme), [`src/skill-state.ts`](https://github.com/luongnv89/asm/blob/main/src/skill-state.ts), [`src/uninstaller.ts`](https://github.com/luongnv89/asm/blob/main/src/uninstaller.ts), [CI workflows](https://github.com/luongnv89/asm/tree/main/.github/workflows) |
+| `asm` | 2.24.0 | [README](https://github.com/luongnv89/asm#readme), [`src/skill-state.ts`](https://github.com/luongnv89/asm/blob/main/src/skill-state.ts), [`src/uninstaller.ts`](https://github.com/luongnv89/asm/blob/main/src/uninstaller.ts), [`src/auditor.ts`](https://github.com/luongnv89/asm/blob/v2.24.0/src/auditor.ts), [CI workflows](https://github.com/luongnv89/asm/tree/main/.github/workflows) |
 | `skills` | 1.9.0 | [README](https://github.com/vercel-labs/skills#readme), [CLI reference](https://github.com/vercel-labs/skills/blob/main/docs/commands.md), [`src/cli.ts`](https://github.com/vercel-labs/skills/blob/v1.9.0/src/cli.ts), [`src/add.ts`](https://github.com/vercel-labs/skills/blob/v1.9.0/src/add.ts), [CI workflow](https://github.com/vercel-labs/skills/blob/main/.github/workflows/ci.yml) |
 | `skill-cli` | 0.7.2 | [README](https://github.com/VictorTomaili/skill-cli/blob/v0.7.2/README.md) |
 
@@ -63,7 +63,8 @@ and the platform.
 | Protection for files in a Git worktree | Yes, for the paths that Lampwright can check. Lampwright moves a path in a Git worktree only if Git ignores the path. Before it starts an Owner, it checks each path that the Owner declares. It cannot confine the Owner process. | Not described | Not described | Its store is outside your projects |
 | Protection for the Skills that a harness supplies | Yes, System Skills are read-only | Not described | Not described | Not applicable |
 | Report of the context cost of Skills | No | Yes, `asm stats --tokens` and `asm audit residency` | No | No |
-| Find duplicate Skills | Shows identical copies as one row. It does not remove duplicates for you. | Yes, `asm audit` and `asm audit overlap` | Not described | Not applicable, one store |
+| A Skill that is in several agent directories | One Skill with several Harness Exposures. The copies and the links that one Manager records are one Installation. For standalone copies, the terminal UI shows one row only when the normalized name and the content hash both match, and the Inventory keeps one record for each copy. | A duplicate group. `asm audit` groups entries that have the same normalized directory name, the same frontmatter name, or an identical `SKILL.md` body. The two name rules do not require the same content. A symbolic link and its target count as one entry. | Not described | Not applicable, one store |
+| Remove duplicate copies | No. Lampwright removes only the targets that you select. | Yes. `asm audit --yes` keeps one copy and deletes the others. It skips copies with different content unless you add `--force`. `asm audit overlap` also finds Skills with different names that do the same work. | Not described | Not applicable, one store |
 | Tools for authors of Skills | No | Yes: `init`, `link`, `eval`, `publish` | `skills init` | No |
 | Full-screen terminal UI | Yes, the primary interface | Yes, optional | Interactive prompts | Yes |
 | JSON output | Yes, on each command, with a published schema | Yes, `--json` and `--machine` | `--json` on `add` and `list` | Not described |
@@ -130,6 +131,8 @@ Inventory.
 - It does not check for new remote releases before an update.
 - It does not scan a Skill for security problems.
 - It does not report the token cost of a Skill.
+- It does not find or remove duplicate copies of a Skill. A Skill that is in
+  several agent directories is one Skill to Lampwright.
 - It does not create, test, or publish a Skill.
 - It has native availability controls for three harnesses only: Codex, Claude
   Code, and Gemini CLI. For a Skill of another harness, Lampwright uses
