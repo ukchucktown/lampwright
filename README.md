@@ -39,6 +39,7 @@ current work.
 | Safe removal | Uses the Owner's removal operation first. A separately confirmed filesystem fallback moves content to recoverable Quarantine. |
 | Built-in protection | Blocks changes to System Skills, non-ignored Git worktree content, read-only paths, and incomplete ownership boundaries. |
 | Terminal and automation interfaces | Provides an interactive terminal UI, dry runs, stable JSON, and a non-interactive CLI. |
+| Themes | Uses the colors of your terminal by default. A theme picker previews the built-in themes and your custom theme files on the real screen. |
 | Cross-platform support | Runs on macOS, Linux, and Windows with Node.js 20 or newer. |
 | Private by design | Adds no telemetry and does not transmit local paths, Inventory data, metadata, or search queries. |
 
@@ -53,6 +54,11 @@ npx lampwright@0.4.1
 
 This command downloads the package to npm's cache. Lampwright does not install
 itself globally or add a dependency to the current project.
+
+The header shows the three views, which are Inventory, Disabled, and Trash, and
+the selection status. The row below the header shows the keys that apply in the
+current context. Press `?` for the complete key reference and `ctrl+p` for the
+theme picker.
 
 ## Safety model
 
@@ -77,6 +83,7 @@ or search queries.
 
 ```console
 lampwright                  # interactive terminal UI
+lampwright --theme <name>   # interactive terminal UI with one theme
 lampwright scan             # print the live Inventory
 lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # natively disable or safely suspend targets
@@ -94,6 +101,8 @@ verification, and the no-rollback model.
 Use `lampwright --help` for selectors, approvals, JSON output, dry-run, and
 stable exit statuses. See the [terminal UI](./docs/tui.md) and
 [non-interactive CLI](./docs/cli.md) guides for the complete behavior.
+See [Theme and color](./docs/tui.md#theme-and-color) for the built-in themes,
+the format of a theme file, and the order in which Lampwright selects a theme.
 
 ## Documentation
 
