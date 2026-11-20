@@ -11,7 +11,7 @@ the time. A smaller active set can reduce the Skill metadata that a harness
 loads into model context and may lower token use. The actual savings depend on
 the harness and how it loads Skills.
 
-![Lampwright Inventory terminal interface](https://cdn.jsdelivr.net/npm/lampwright@latest/docs/assets/tui-inventory.png)
+![Lampwright Inventory terminal interface](./docs/assets/tui-inventory.png)
 
 ## Reversible Skill control
 
