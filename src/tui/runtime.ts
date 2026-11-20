@@ -18,32 +18,38 @@ export async function runTui(
   },
 ): Promise<TuiOutcome> {
   const controller = new TuiController(dependencies, viewport);
+  // The controller owns which theme applies; the terminal owns how to draw it.
+  const draw = (state: TuiState): void => {
+    const theme = controller.theme;
+    if (theme !== null) terminal.setTheme?.(theme);
+    terminal.render(state);
+  };
   try {
-    terminal.render(controller.state);
+    draw(controller.state);
     await controller.start();
-    terminal.render(controller.state);
+    draw(controller.state);
     while (
       controller.state.screen !== "done" &&
       controller.state.screen !== "error"
     ) {
       await controller.dispatch(await terminal.readAction(controller.state));
       const nextState = controller.state as TuiState;
-      if (nextState.screen !== "done") terminal.render(nextState);
+      if (nextState.screen !== "done") draw(nextState);
       if (nextState.screen === "executing") {
         await controller.waitForExecution();
-        terminal.render(controller.state);
+        draw(controller.state);
       }
       if (nextState.screen === "trash-executing") {
         await controller.waitForTrashExecution();
-        terminal.render(controller.state);
+        draw(controller.state);
       }
       if (nextState.screen === "availability-executing") {
         await controller.waitForAvailabilityExecution();
-        terminal.render(controller.state);
+        draw(controller.state);
       }
       if (nextState.screen === "update-executing") {
         await controller.waitForUpdateExecution();
-        terminal.render(controller.state);
+        draw(controller.state);
       }
     }
     if (controller.state.screen === "error")

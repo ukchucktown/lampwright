@@ -1,16 +1,18 @@
 import { emitKeypressEvents } from "node:readline";
-import type { Key } from "node:readline";
+import type { Interface as ReadlineInterface, Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { searchLayout } from "./search.js";
 import { browseTabHitboxes, renderTui } from "./render.js";
 import {
-  createNightfallTheme,
+  createTuiTheme,
+  terminalThemeDefinition,
   detectTuiColorMode,
   plainTuiTheme,
   type TuiTheme,
 } from "./theme.js";
+import type { TuiThemeDefinition } from "./theme.js";
 import type { TuiAction, TuiState, TuiTerminal, TuiViewport } from "./types.js";
 
 /**
@@ -275,6 +277,9 @@ function pointedRow(state: TuiState, report: MouseReport): PointerRow | null {
   return index < view.entries.total ? { pane, index } : null;
 }
 
+/** How long a lone Escape waits for the rest of a key sequence. */
+const ESCAPE_KEY_WAIT_MS = 50;
+
 type TerminalInput = NodeJS.ReadStream;
 type TerminalOutput = NodeJS.WriteStream;
 
@@ -294,7 +299,8 @@ export function createNodeTuiTerminal(
         input,
         output,
         options.theme ??
-          createNightfallTheme(
+          createTuiTheme(
+            terminalThemeDefinition,
             detectTuiColorMode({
               isTTY: true,
               platform: options.platform ?? process.platform,
@@ -328,6 +334,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "disabled") return { kind: "switch-view", view: "disabled" };
     if (value === "inventory")
       return { kind: "switch-view", view: "inventory" };
+    if (value === "theme") return { kind: "open-theme-picker" };
+    if (value === "help" || value === "?") return { kind: "open-help" };
     if (value === "restore") return { kind: "restore-review" };
     if (value === "purge" || value === "p") return { kind: "purge-review" };
     if (value === "clear") return { kind: "clear-selection" };
@@ -348,6 +356,18 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value.startsWith("/"))
       return { kind: "append-query", value: value.slice(1) };
     return { kind: "append-query", value };
+  }
+  if (state.screen === "help")
+    return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
+  if (state.screen === "theme") {
+    if (value === "" || value === "select" || value === "use")
+      return { kind: "select" };
+    if (value === "up" || value === "k") return { kind: "move", delta: -1 };
+    if (value === "down" || value === "j") return { kind: "move", delta: 1 };
+    if (value === "quit" || value === "q") return { kind: "quit" };
+    return value === "back" || value === "cancel"
+      ? { kind: "cancel" }
+      : { kind: "noop" };
   }
   if (state.screen === "search") {
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -392,12 +412,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "select-fallback", delta: 1 };
     if (state.screen === "report" && (value === "fallback" || value === "f"))
       return { kind: "fallback" };
-    if (
-      (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
-      (value === "back" || value === "cancel")
-    )
-      return { kind: "cancel" };
+    if (value === "back" || value === "cancel") return { kind: "cancel" };
     if (value === "quit" || value === "q" || value === "done")
       return { kind: "quit" };
     return { kind: "noop" };
@@ -458,13 +473,19 @@ class RawTuiTerminal implements TuiTerminal {
   constructor(
     private readonly input: TerminalInput,
     private readonly output: TerminalOutput,
-    private readonly theme: TuiTheme,
+    private theme: TuiTheme,
   ) {
     // Registered before readline attaches its own reader, so a chunk carrying
     // mouse reports is claimed here and the keypresses readline shreds it into
     // are ignored rather than typed into the filter.
     input.on("data", this.onData);
-    emitKeypressEvents(input);
+    // A lone Escape is also the first byte of every arrow and function key, so
+    // readline waits before it reports one. Its default wait is 500 ms, which
+    // makes Escape feel slow beside every other key. A complete key sequence
+    // arrives in one read, so a short wait is enough to tell the two apart.
+    emitKeypressEvents(input, {
+      escapeCodeTimeout: ESCAPE_KEY_WAIT_MS,
+    } as unknown as ReadlineInterface);
     input.on("keypress", this.onKeypress);
     output.on("resize", this.onResize);
     input.setRawMode(true);
@@ -488,6 +509,11 @@ class RawTuiTerminal implements TuiTerminal {
     for (const report of reports) this.mouse.push(report);
     this.wake();
   };
+
+  setTheme(theme: TuiThemeDefinition): void {
+    // The color capability belongs to this terminal, not to the theme.
+    this.theme = createTuiTheme(theme, this.theme.mode);
+  }
 
   render(state: TuiState): void {
     this.output.write(`\u001B[2J\u001B[H${renderTui(state, this.theme)}`);
@@ -613,12 +639,21 @@ export function parseRawTuiAction(
   key: Key,
 ): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
+  if (state.screen === "help")
+    return key.name === "escape" ||
+      key.name === "return" ||
+      key.name === "enter" ||
+      text === "?" ||
+      text === "q"
+      ? { kind: "cancel" }
+      : { kind: "noop" };
   if (state.screen !== "search" && !key.ctrl && !key.meta && text === "q")
     return { kind: "quit" };
   if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
   if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
   if (state.screen === "browse") {
     if (key.name === "escape") return { kind: "cancel" };
+    if (key.ctrl && key.name === "p") return { kind: "open-theme-picker" };
     if (key.ctrl && key.name === "t")
       return {
         kind: "switch-view",
@@ -661,6 +696,7 @@ export function parseRawTuiAction(
     if (key.name === "backspace") return { kind: "delete-query" };
     if (key.ctrl && key.name === "u") return { kind: "clear-selection" };
     if (text === "/") return { kind: "open-search" };
+    if (text === "?") return { kind: "open-help" };
     if (state.view === "trash") return { kind: "noop" };
     if (text === "u") return { kind: "update-review" };
     if (text === "d")
@@ -673,6 +709,14 @@ export function parseRawTuiAction(
         : { kind: "noop" };
     if (!key.ctrl && !key.meta && text.length > 0)
       return { kind: "append-query", value: text };
+    return { kind: "noop" };
+  }
+  if (state.screen === "theme") {
+    if (key.name === "escape") return { kind: "cancel" };
+    if (key.name === "return" || key.name === "enter")
+      return { kind: "select" };
+    if (key.name === "pageup") return { kind: "page", delta: -1 };
+    if (key.name === "pagedown") return { kind: "page", delta: 1 };
     return { kind: "noop" };
   }
   if (state.screen === "search") {
@@ -707,13 +751,9 @@ export function parseRawTuiAction(
     state.screen === "availability-report" ||
     state.screen === "update-report"
   ) {
-    if (
-      (state.screen === "availability-report" ||
-        state.screen === "update-report") &&
-      key.name === "escape"
-    )
-      return { kind: "cancel" };
-    if (key.name === "escape" || text === "q") return { kind: "quit" };
+    // Escape returns to a fresh Inventory from each report; `q` exits.
+    if (key.name === "escape") return { kind: "cancel" };
+    if (text === "q") return { kind: "quit" };
     if (text === "d") return { kind: "toggle-details" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
     if (key.name === "pagedown") return { kind: "page", delta: 1 };

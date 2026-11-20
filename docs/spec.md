@@ -1,7 +1,7 @@
 # Lampwright v1 specification
 
 Status: Accepted product direction; implementation under active refinement
-Last updated: 2026-08-21
+Last updated: 2026-09-19
 
 ## 1. Summary
 
@@ -9,6 +9,11 @@ Last updated: 2026-08-21
 disables, enables, and safely removes AI agent skills regardless of whether
 they were installed as standalone files, by a skill manager, or through an
 agent plugin system.
+
+The accepted Session setup increment also controls native availability for
+Skills, complete Plugins, MCP Registrations, and App Bindings before a new
+session. Its specification is [Session setup](./session-setup.md). The delivery
+issues distinguish this planned support from existing application behavior.
 
 The application is outcome-oriented: a user chooses a logical skill, one
 physical installation, or a containing plugin and asks Lampwright to control
@@ -44,6 +49,8 @@ automation and agent sessions.
     never uses a filesystem or remove-and-install substitute.
 12. **Small command surface.** The interface stays focused on scan, update,
     disable, enable, remove, restore, and purge.
+13. **Explicit setup scope.** Session setup selects one harness through native
+    controls and discloses any effect beyond the selected workspace.
 
 ## 3. Goals
 
@@ -61,6 +68,8 @@ automation and agent sessions.
 - Preserve a reliable audit trail without maintaining an installation database.
 - Allow new tool support through local declarative adapters.
 - Provide deterministic JSON output and non-interactive execution for automation.
+- Prepare native capability availability for a future Codex, Claude Code, or
+  Gemini CLI session through the shared TUI and CLI modules.
 
 ## 4. Non-goals for v1
 
@@ -79,6 +88,9 @@ automation and agent sessions.
 - Constructing Update from Remove followed by Install.
 - Updating every target through one `--all` intent.
 - Providing automatic rollback for an Owner Update.
+- Permanent MCP registration deletion, account disconnection, credential
+  revocation, active-session control, per-tool filters, and saved setup presets
+  in the Session setup increment.
 
 ## 5. Runtime and distribution
 
@@ -121,6 +133,8 @@ Every finding is classified as one of:
 
 Source, cache, vendor, and unknown findings are hidden from ordinary cleanup results unless the user enables the relevant inspection filter. System Skills remain visible in their own non-selectable section so their protected status is clear. Their discovery never authorizes deletion.
 
+A System Skill is a Skill that an agent runtime supplies as an inseparable part of itself, or a Skill that the account service of an agent supplies and keeps current. The Skills in a Claude synced bucket that the bucket manifest names are System Skills.
+
 ### 6.3 Inventory fields
 
 The normalized inventory schema includes:
@@ -156,9 +170,16 @@ Installations may be grouped into a Logical Skill only with strong evidence:
 
 Matching names or hashes are displayed as possible relationships but never merge records automatically.
 
+The terminal UI shows one row for the Installations with no shared source that have both the same normalized name and the same content hash. This row is presentation only. The Inventory and the JSON output keep one record for each copy, and a plan from the row names each copy as a separate target. A matching name with different content, or a matching hash with a different name, does not combine rows.
+
 Installation Groups are a separate navigational batch-selection mechanism. In v1 they form only from declared manager-and-source evidence in one Scope; structural grouping is deferred until a concrete discovery path and safety boundary justify it.
 
 ## 7. Search and terminal UI
+
+The area selector is `Skills & plugins | Session setup`. The default remains
+Skills & plugins. The requirements below describe that existing lifecycle
+area. [Session setup](./session-setup.md#tui-integration) defines the additional
+area, its harness selection, native-only actions, and independent view state.
 
 Running `lampwright` without a subcommand opens the terminal UI. The
 version-pinned first-release invocation is `npx lampwright@0.1.0`; before that
@@ -177,10 +198,10 @@ The UI must:
   description, category, ownership, exposure, and paths in a right-hand
   preview. System Skills remain visible but cannot be staged.
 - Stage individual matches with Space, stage every visible removable match with
-  Ctrl-A, and add staged matches to the existing inventory selection with
+  Ctrl+A, and add staged matches to the existing inventory selection with
   Enter. Enter returns to the prior inventory position, `/` can start another
   additive search, Escape cancels search without changing the inventory
-  selection, Ctrl-U clears the search expression, and Ctrl-U in the inventory
+  selection, Ctrl+U clears the search expression, and Ctrl+U in the inventory
   clears its selection.
 - Show one row per Logical Skill by default.
 - Show the focused Logical Skill's physical paths in the detail pane. Selecting
@@ -287,12 +308,20 @@ Removing a Plugin must show all owned skills, agents, commands, hooks, configura
 
 A non-default Plugin may be disabled or enabled only as one complete Plugin
 boundary through a supported harness-native control. The Plugin and every owned
-Skill or resource remain installed and change availability together. Plugin
-availability never displaces content into Disabled Storage, and Plugin-owned
+Skill or resource remain installed. The action changes the complete owner gate
+and preserves any independent child policy, so a child can remain disabled
+after Plugin Enable. Plugin availability never displaces content into Disabled
+Storage, and Plugin-owned
 Skills remain nonselectable as individual Availability Targets. Runtime-default,
 managed-policy, unsupported, unresolved, malformed, ambiguous, protected,
 read-only, stale, or raced Plugin controls fail closed and cannot be forced.
 Removal and availability protections are evaluated independently.
+
+Session setup may independently control a package-provided MCP Registration or
+App Binding only through a verified native policy. This does not authorize
+manifest edits, individual Plugin-owned Skill control, or an implicit owner
+operation. [ADR 0015](./adr/0015-scope-session-setup-to-native-availability.md)
+records this narrow refinement of the complete-Plugin boundary.
 
 ### 9.2 Project protection
 
@@ -307,11 +336,18 @@ effect paths retain conservative protection.
 
 ### 9.3 Availability planning
 
-Every disable or enable mutation starts with an Availability Plan built from a
-fresh Inventory and the current Disabled Storage entries. A disable target
+Every legacy disable or enable mutation starts with an Availability Plan built
+from a fresh Inventory and the current Disabled Storage entries. A disable target
 expands to every represented Harness Exposure. The plan succeeds only when the
 selected capability will be unavailable across all of those exposures; a
 partial result must not be presented as fully disabled.
+
+Session setup uses its own explicit intent and plan. It selects one Harness
+Exposure or another exact supported target, admits only native controls, and
+does not use Disabled Storage. Its review names the actual Control Scope,
+including user-wide effects. Legacy selectors retain their all-exposure
+behavior. [Session setup scope](./session-setup.md#scope-and-control-rules)
+defines owner gates, shared policies, dependencies, and no-op verification.
 
 Codex path-based skill configuration, Claude Code skill overrides, and Gemini
 CLI disabled-skill settings are the initial Skill Native Disable controls.
@@ -360,6 +396,12 @@ untrusted commands, proven local changes, and incomplete Owner evidence. Force
 does not override these blocks. [Owner-managed Update](./update.md) defines the
 complete target and plan rules.
 
+An Update does not add the target to an agent harness that did not have it.
+When an Owner operation creates a link to the target at a declared path that
+was absent before the operation, Lampwright removes that link after the
+operation. Lampwright does not delete content that the Owner creates at such a
+path. The final verification reports a changed Harness Exposure set.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal
@@ -397,6 +439,11 @@ Enabling never overwrites an occupied or changed destination. A final rescan
 and Disabled Storage listing verify every affected exposure and report blocked,
 partial, failed, unchanged, disabled, or enabled outcomes honestly.
 
+Session setup reuses the native writer, freshness checks, protection, dependency
+execution, audit, and final rescan. It verifies saved policy and effective
+workspace availability separately from account connectivity and active-session
+state. It admits no delete, credential, or suspension mutation.
+
 ### 10.6 Managed Update execution
 
 Execution accepts only the structured Owner invocation and the declared effects
@@ -422,7 +469,7 @@ existing status values and do not change the stable JSON schema version.
 
 ## 11. Quarantine and local state
 
-Read-only scans, TUI browsing, and dry runs create no files.
+Read-only scans, TUI browsing, and dry runs create no files. A theme that the user confirms in the theme picker writes the `theme` value of the Lampwright configuration file. No other action in the terminal UI writes that file, and a preview in the picker writes nothing. [ADR 0017](./adr/0017-keep-theme-preferences-in-a-configuration-file.md) records this decision.
 
 Persistent state is created lazily only for:
 
@@ -430,6 +477,7 @@ Persistent state is created lazily only for:
 - Ephemeral package trust decisions
 - Removal audit records
 - Update audit records
+- Confirmed native availability and Session setup audit records
 - Quarantine manifests and content
 - Disabled Storage manifests and suspended content
 - Optional rebuildable search cache
@@ -480,6 +528,11 @@ The first Update version requires an explicit target and does not accept
 non-interactive paths must call the same planners, executors, and Disabled
 Storage module.
 
+The Session setup extension adds `scan --session-setup`, exact `setup:<id>`
+selectors for Enable and Disable, `--harness`, and `--workspace`. Its distinct
+versioned JSON leaves legacy output unchanged. The full syntax and rejection
+rules are in [Session setup CLI parity](./session-setup.md#cli-parity).
+
 ## 13. Cross-platform requirements
 
 - Use platform path APIs; never construct paths with hard-coded separators.
@@ -498,6 +551,12 @@ uses no network access. An explicitly approved ephemeral package runner may
 access the network as described in its plan. A reviewed Managed Update may also
 let the Owner process access the network. Lampwright discloses that access
 before execution and does not perform a hidden remote Update check.
+
+For Codex Plugins, a scan reads the Codex configuration file and the Codex
+plugin cache. A scan does not run `codex plugin list`, because that command
+contacts a remote catalog.
+[ADR 0016](./adr/0016-read-codex-plugins-from-local-evidence.md) records this
+decision.
 
 ## 15. MVP acceptance criteria
 
@@ -530,6 +589,9 @@ The v1 MVP is complete when:
 
 The post-MVP Update acceptance criteria are defined in
 [Owner-managed Update](./update.md#acceptance-criteria).
+
+The Session setup acceptance criteria and ordered implementation issues are in
+[Session setup](./session-setup.md#safety-and-acceptance).
 
 ## 16. Delivery sequence
 

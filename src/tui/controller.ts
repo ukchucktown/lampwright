@@ -36,9 +36,14 @@ import {
   createDisabledSections,
   disabledSelectionTargets,
 } from "./disabled.js";
-import { createTuiSections, selectionTargets } from "./sections.js";
+import {
+  createTuiSections,
+  entryTargets,
+  selectionTargets,
+} from "./sections.js";
 import { createTrashSections, type TrashRestoreReadiness } from "./trash.js";
 import { createSearchModel, reduceSearch } from "./search.js";
+import type { TuiThemeDefinition } from "./theme.js";
 import type {
   TuiAction,
   TuiAvailabilityPlanState,
@@ -52,7 +57,9 @@ import type {
   TuiUpdatePlanState,
   TuiUpdateReportState,
   TuiTrashReviewState,
+  TuiHelpState,
   TuiSearchState,
+  TuiThemeState,
   TuiState,
   TuiViewSnapshot,
 } from "./types.js";
@@ -63,14 +70,28 @@ export class TuiController {
   private trashExecution: Promise<void> | null = null;
   private availabilityExecution: Promise<void> | null = null;
   private updateExecution: Promise<void> | null = null;
+  private appliedTheme: TuiThemeDefinition | null = null;
 
   constructor(
     private readonly dependencies: TuiDependencies,
     private readonly viewport = { rows: 30, columns: 100 },
-  ) {}
+  ) {
+    this.appliedTheme = dependencies.themes?.current ?? null;
+  }
 
   get state(): TuiState {
     return this.stateValue;
+  }
+
+  /**
+   * The theme to draw with: the highlighted valid choice while the picker is
+   * open, otherwise the applied theme. Null when the host offers no themes.
+   */
+  get theme(): TuiThemeDefinition | null {
+    const state = this.stateValue;
+    const preview =
+      state.screen === "theme" ? state.choices[state.index]?.theme : null;
+    return preview ?? this.appliedTheme;
   }
 
   async start(): Promise<void> {
@@ -79,7 +100,7 @@ export class TuiController {
       let operations: readonly QuarantineOperation[] | undefined;
       let disabledEntries =
         [] as readonly import("../disabled-storage/types.js").DisabledEntry[];
-      let notice: string | null = null;
+      let notice: string | null = this.dependencies.themes?.notice ?? null;
       if (this.dependencies.quarantine !== undefined) {
         try {
           operations = await this.dependencies.quarantine.listOperations();
@@ -171,7 +192,18 @@ export class TuiController {
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "search") this.searchAction(state, action);
-      else if (state.screen === "plan") await this.planAction(state, action);
+      else if (state.screen === "theme") await this.themeAction(state, action);
+      else if (state.screen === "help") {
+        // Any closing key returns to the exact browse position.
+        if (
+          action.kind === "cancel" ||
+          action.kind === "open-help" ||
+          action.kind === "select"
+        )
+          this.stateValue = { screen: "browse", ...state.browse };
+        else if (action.kind === "quit")
+          this.stateValue = { screen: "done", report: null };
+      } else if (state.screen === "plan") await this.planAction(state, action);
       else if (state.screen === "availability-plan")
         await this.availabilityPlanAction(state, action);
       else if (state.screen === "availability-report")
@@ -409,6 +441,37 @@ export class TuiController {
         return;
       }
       this.stateValue = { screen: "done", report: null };
+      return;
+    }
+
+    if (action.kind === "open-help") {
+      this.stateValue = { screen: "help", browse: browseSnapshot(state) };
+      return;
+    }
+    if (action.kind === "open-theme-picker") {
+      const themes = this.dependencies.themes;
+      if (themes === undefined) {
+        this.stateValue = {
+          ...state,
+          model: {
+            ...state.model,
+            notice: "Themes are unavailable in this host.",
+          },
+        };
+        return;
+      }
+      const choices = await themes.list();
+      const applied = this.theme?.name;
+      this.stateValue = {
+        screen: "theme",
+        browse: browseSnapshot(state),
+        choices,
+        index: Math.max(
+          0,
+          choices.findIndex((choice) => choice.name === applied),
+        ),
+        notice: null,
+      };
       return;
     }
 
@@ -695,7 +758,7 @@ export class TuiController {
     );
     if (selected.length > 0) return selected;
     const entry = currentEntry(state.model);
-    return entry?.target === null || entry === null ? [] : [entry.target];
+    return entry === null ? [] : entryTargets(entry);
   }
 
   private async planAction(
@@ -947,6 +1010,54 @@ export class TuiController {
     }
   }
 
+  /**
+   * Returns to the Inventory after a Removal with everything read again: the
+   * Inventory, the Disabled entries, and the Trash, which the Removal changed.
+   */
+  private async refreshAfterRemoval(state: TuiReportState): Promise<void> {
+    try {
+      const inventory = await this.dependencies.scan();
+      const disabledEntries =
+        this.dependencies.listDisabled === undefined
+          ? []
+          : await this.dependencies.listDisabled();
+      const operations =
+        this.dependencies.quarantine === undefined
+          ? undefined
+          : await this.dependencies.quarantine.listOperations();
+      const sections = createTuiSections(inventory);
+      const previous =
+        (state.browse.view ?? "inventory") === "inventory"
+          ? state.browse.model
+          : state.browse.viewSnapshots?.inventory?.model;
+      this.stateValue = {
+        screen: "browse",
+        inventory,
+        model: {
+          ...(previous === undefined
+            ? createBrowseModel(sections, state.browse.model.viewport)
+            : preserveBrowseModel(previous, sections)),
+          notice: null,
+        },
+        view: "inventory",
+        disabledEntries,
+        ...(operations === undefined
+          ? {}
+          : {
+              operations: new Map(
+                operations.map((operation) => [
+                  `trash-operation:${operation.id}`,
+                  operation,
+                ]),
+              ),
+            }),
+      };
+    } catch {
+      // A successful mutation must never lead back to a stale live projection.
+      this.stateValue = { screen: "done", report: state.report };
+    }
+  }
+
   private async refreshAfterUpdate(state: TuiUpdateReportState): Promise<void> {
     try {
       const inventory = await this.dependencies.scan();
@@ -1022,8 +1133,12 @@ export class TuiController {
     state: TuiReportState,
     action: TuiAction,
   ): Promise<void> {
-    if (action.kind === "quit" || action.kind === "cancel") {
+    if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: state.report };
+      return;
+    }
+    if (action.kind === "cancel") {
+      await this.refreshAfterRemoval(state);
       return;
     }
     if (action.kind === "toggle-details") {
@@ -1230,6 +1345,62 @@ export class TuiController {
     }
   }
 
+  /** The picker previews by moving; only a confirmed theme is saved. */
+  private async themeAction(
+    state: TuiThemeState,
+    action: TuiAction,
+  ): Promise<void> {
+    const back = (notice: string | null): void => {
+      this.stateValue = {
+        screen: "browse",
+        ...state.browse,
+        model: { ...state.browse.model, notice },
+      };
+    };
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: null };
+      return;
+    }
+    if (action.kind === "cancel") {
+      back(null);
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const step =
+        action.kind === "move"
+          ? action.delta
+          : action.delta * Math.max(1, state.browse.model.viewport.rows - 8);
+      this.stateValue = {
+        ...state,
+        index: Math.min(
+          Math.max(0, state.index + step),
+          Math.max(0, state.choices.length - 1),
+        ),
+        notice: null,
+      };
+      return;
+    }
+    if (action.kind !== "select" && action.kind !== "confirm") return;
+    const choice = state.choices[state.index];
+    if (choice === undefined) return;
+    if (choice.theme === null) {
+      this.stateValue = {
+        ...state,
+        notice: `"${choice.name}" cannot be used: ${choice.problem ?? "the theme is not valid"}.`,
+      };
+      return;
+    }
+    this.appliedTheme = choice.theme;
+    try {
+      await this.dependencies.themes?.select(choice.name);
+      back(`Theme "${choice.name}" saved.`);
+    } catch (error: unknown) {
+      back(
+        `Theme "${choice.name}" applies to this session only. Lampwright could not save it: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   private fail(error: unknown): void {
     this.stateValue = {
       screen: "error",
@@ -1297,6 +1468,8 @@ function resizeState(
   state:
     | TuiBrowseState
     | TuiSearchState
+    | TuiThemeState
+    | TuiHelpState
     | TuiPlanState
     | TuiExecutingState
     | TuiReportState
@@ -1310,6 +1483,8 @@ function resizeState(
 ):
   | TuiBrowseState
   | TuiSearchState
+  | TuiThemeState
+  | TuiHelpState
   | TuiPlanState
   | TuiExecutingState
   | TuiReportState
@@ -1321,6 +1496,8 @@ function resizeState(
   | import("./types.js").TuiUpdateExecutingState {
   if (state.screen === "browse")
     return { screen: "browse", ...resizeBrowse(state, viewport) };
+  if (state.screen === "theme" || state.screen === "help")
+    return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "search")
     return {
       ...state,
@@ -1618,6 +1795,12 @@ function updateSelection(state: TuiBrowseState): {
     };
   if (entry.key.startsWith("finding:"))
     return { target: null, notice: "System Skills are read-only." };
+  if (entry.targets !== undefined)
+    return {
+      target: null,
+      notice:
+        "This row combines identical copies. Update accepts one target only.",
+    };
   const target =
     state.view === "disabled"
       ? availabilityUpdateTarget(

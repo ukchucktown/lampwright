@@ -6,6 +6,11 @@ change. Both commands use a fresh Inventory, current Disabled Storage entries,
 an Availability Plan, explicit confirmation, Availability Execution, and final
 verification.
 
+This document defines legacy Availability, including its all-exposure Skill
+targets and Suspended Disable. [Session setup](./session-setup.md) uses an
+explicit single-harness native intent through the same owning modules. Its
+separate contracts do not alter the lifecycle operations below.
+
 ## Recognizing every state
 
 | State | Where it is recorded | What Enable does | Operator recovery |

@@ -86,8 +86,8 @@ covers both while removing one Installation removes only that entry.
 Claude may expose capabilities compiled into its runtime that do not correspond
 to a filesystem `SKILL.md`, installed Plugin, or manager record. Inventory does
 not invent findings for those capabilities: there is no bounded artifact to
-inspect or safe removal boundary to plan. This differs from Codex System Skills,
-whose marked runtime subtree contains filesystem Skills that can be shown as
+inspect or safe removal boundary to plan. This differs from Codex System Skills
+and Claude synced Skills, which are filesystem Skills that can be shown as
 visible, immutable evidence.
 
 Codex marks the Skills shipped with its own runtime. When
@@ -97,6 +97,26 @@ findings, while the rest of `<CODEX_HOME>/skills` stays an ordinary agent root.
 The marker must be a regular file, never a link, so a planted link cannot make
 the scanner treat a user's own Skills as inseparable runtime content. Without
 the marker the subtree stays ordinary: a missing marker never hides Skills.
+
+Claude synchronizes a set of Skills into
+`<CLAUDE_CONFIG_DIR>/skills/synced/<bucket>/`. The owner of this repository
+decided that these Skills are System Skills, because the user does not install
+them in that directory. Lampwright did not confirm which Claude component
+writes the directory. The boundary comes from the evidence in the directory:
+
+- The file `synced/.bucket-<bucket>` is a regular file.
+- The file `synced/<bucket>/manifest.json` is a stable regular file, is valid
+  JSON, and contains a `skills` array.
+- An entry of that array has a `name` and a `source`, and the `name` is one
+  path segment that names a real directory in the bucket.
+
+Each directory that satisfies these conditions is a `system` root. Its finding
+carries the declared source in the metadata key `claude-code-synced-skill`.
+The rule applies to each `source` value. All other content of `synced` stays an
+ordinary part of the agent root. Thus a bucket with no marker, with no valid
+manifest, or with a linked manifest gives ordinary Installations, and a
+directory that the manifest does not name stays an ordinary Installation. A
+missing manifest never hides Skills.
 
 `Inventory.id` is a deterministic fingerprint of the complete normalized
 snapshot, excluding `scannedAt`. Repeating an unchanged scan at another time
@@ -207,7 +227,35 @@ state, cache, quarantine, or temporary files.
 
 When either `<workspace>/skills-lock.json` or the global Vercel lock exists,
 Inventory reads the regular JSON file and reconciles every lock key against
-the bounded path registry pinned to `skills@1.5.22`.
+the bounded path registry pinned to `skills@1.9.0`.
+
+The registry also holds the paths that `skills@1.5.22` used and
+`skills@1.9.0` does not visit. Lampwright pinned `skills@1.5.22` before, so a
+Skill that it installed can still have a link or a copy at such a path. These
+are the paths:
+
+| Agent           | Scope   | Path of `skills@1.5.22`            |
+| --------------- | ------- | ---------------------------------- |
+| Antigravity     | Global  | `~/.gemini/antigravity/skills`     |
+| Antigravity CLI | Global  | `~/.gemini/antigravity-cli/skills` |
+| Codex           | Global  | `$CODEX_HOME/skills`               |
+| Droid           | Project | `.factory/skills`                  |
+| Kilo Code       | Global  | `~/.kilocode/skills`               |
+| Kilo Code       | Project | `.kilocode/skills`                 |
+| Pi              | Global  | `~/.pi/agent/skills`               |
+| Pi              | Project | `.pi/skills`                       |
+
+Inventory reconciles these paths as it reconciles the current ones, so the
+Installation and its removal effects stay complete. The `remove` command of
+`skills@1.9.0` does not delete a link at one of these paths.
+[Removal execution](./execution.md) describes how Lampwright removes a link
+that the command leaves without a target.
+
+In the global scope, `skills@1.9.0` gives an agent no link when the agent
+reads the shared `~/.agents/skills` directory. Codex, Droid, Kilo Code, and Pi
+are now such agents. Antigravity and Antigravity CLI use the shared project
+directory, but in the global scope they have the directory
+`~/.gemini/config/skills`.
 
 The manager resolves exactly one global lock: `$XDG_STATE_HOME/skills/.skill-lock.json`
 when `XDG_STATE_HOME` is set, and `~/.agents/.skill-lock.json` when it is not.
@@ -263,8 +311,8 @@ targets in a normal multi-target intent. These are batch-selection groups, not
 Logical Skill identity evidence, and they never merge their member Skills.
 
 The parser accepts numeric lock versions while ignoring unknown fields. Native
-removal is available only for versions understood by `skills@1.5.22` (global
-version 3 or newer and project version 1 or newer); older records retain exact
+removal is available only for versions understood by `skills@1.9.0` (global
+version 3 or newer and project version 1 or 2); other records retain exact
 declarative fallback. It rejects malformed documents, duplicate keys, non-object
 records, symlinked or hard-linked lock files, and sanitized lock-key collisions
 for mutation. A canonical Skill underneath an invalid lock remains visible as
@@ -282,17 +330,24 @@ developer's real paths.
 Inventory emits Managed Update evidence only for a complete active Vercel
 record with a supported source type. A direct operation uses the installed
 `skills` executable. If that executable is absent, a global operation can use
-the exact `skills@1.5.22` package through `npx`. A project operation has no
+the exact `skills@1.9.0` package through `npx`. A project operation has no
 package fallback because the Manager derives Scope from the workspace.
 
 The evidence records the exact lock key, source, ref, Scope, revision values,
 network use, and process request. The effect set includes the lock file and
-every bounded agent path that `skills@1.5.22` can change or create. Existing
+every bounded agent path that `skills@1.9.0` can change or create. Existing
 copies, symbolic links, and Windows junctions keep their exact locations in
 this set. An absent path has protection evidence from its nearest safe parent.
 
 A project `computedHash` proves whether local content changed. Proven local
-changes withhold Update authority. Global source-tree hashes cannot prove local
+changes withhold Update authority. The version of the project lock selects the
+hash. A version 1 lock, which `skills@1.5.22` wrote, hashes the path and the
+content of each file. A version 2 lock, which `skills@1.9.0` writes, also
+hashes the length of each file, reads a text file with `\n` line ends, and
+ignores `metadata.json`, `__pycache__`, and `__pypackages__`. `skills@1.9.0`
+rewrites a version 1 lock as version 2 when it changes the lock, and an Update
+that finds no new content can do this. The `computedHash` then changes while
+the content stays the same, and the Update result is `updated`. Global source-tree hashes cannot prove local
 content, so Inventory reports that comparison as unavailable. Scanning reads
 these local values but never contacts the recorded source.
 
@@ -423,13 +478,40 @@ entry. Inventory does not contact that source during a scan.
 
 ## Codex plugin reconciliation
 
-Inventory obtains installed Codex Plugin state only from the supported
-`codex plugin list --json` command. The command receives the injected or
-environment-derived `CODEX_HOME`; its temporary-directory variables point to
-that same root so Codex cannot create its helper alias during a read-only scan.
-`DO_NOT_TRACK=1` and `DISABLE_TELEMETRY=1` are also fixed by the scanner. Tests
-can observe the complete structured command and environment through
-`InventoryCommandRunner` without invoking the developer's Codex installation.
+Inventory reads installed Codex Plugin state from local evidence in the Codex
+home, which is the injected or environment-derived `CODEX_HOME`. A scan does
+not run the Codex executable, because `codex plugin list` contacts a remote
+catalog on each call. [ADR 0016](./adr/0016-read-codex-plugins-from-local-evidence.md)
+records this decision.
+
+A Codex Plugin is installed when both of these conditions are true:
+
+- The `config.toml` file contains a `[plugins."<name>@<marketplace>"]` table.
+- The directory `plugins/cache/<marketplace>/<name>` contains one or more
+  version directories.
+
+The `enabled` value of the table gives the enabled state. A table with no
+`enabled` value is enabled. The active version is the version directory that
+Codex selects: `local` when that directory exists, otherwise the greatest
+name. Two names that are both semantic versions use semantic version order.
+All other pairs use string order. A file or a link is not a version directory.
+
+A `[marketplaces.<marketplace>]` table gives the marketplace source. For a
+`local` marketplace, the source tree of a Plugin comes from the marketplace
+manifest in the declared directory. For a `git` marketplace, the manifest comes
+from the Codex clone at `.tmp/marketplaces/<marketplace>`. The scan reads
+`.agents/plugins/marketplace.json` first and `.claude-plugin/marketplace.json`
+second.
+
+The scan follows a symbolic link at the configuration path and reads the
+target. The Plugins from a linked configuration stay visible, but Managed
+Removal is unavailable for them. A configuration file that is hard-linked,
+unstable, a broken link, or not valid TOML gives no Codex Plugins. The scan
+then reports each cache version as a non-removable finding with the state
+`invalid-configuration`. A Plugin table
+that the scan cannot interpret, or a cache directory with no Plugin table, also
+gives no Plugin. The remote plugins that the Codex desktop app enables have no
+Plugin table, so they stay outside each plan.
 
 A Plugin whose declared `marketplaceSource` resolves inside a runtime-managed
 marketplace root is marked `runtimeDefault` on its boundary. Two are in use:

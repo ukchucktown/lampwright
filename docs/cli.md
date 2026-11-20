@@ -5,7 +5,26 @@
 Quarantine. They do not inspect configuration, edit settings, or move Skill
 paths themselves.
 
+## Terminal UI options
+
+`lampwright` with no arguments opens the terminal UI. `lampwright --theme <name>`
+and `lampwright --theme=<name>` open the terminal UI with the named theme for
+that session and do not save the selection. If the name is unknown, Lampwright
+exits with status `2` and lists the available themes. If the named theme file
+is not valid, Lampwright exits with status `2` and gives the reason.
+The option applies only to the terminal UI, so a command such as `scan` does
+not accept it. See [Theme and color](./tui.md#theme-and-color) for the themes
+and the selection order.
+
 ## Selectors and confirmation
+
+The selectors below retain their legacy lifecycle behavior. The accepted
+[Session setup extension](./session-setup.md#cli-parity) adds `setup:<id>`
+selectors for native Enable and Disable, an explicit `--harness`, and a
+workspace context. `scan --session-setup` exposes the corresponding targets.
+Setup uses a separate versioned JSON schema, and mixed setup/lifecycle
+selectors are invalid. Its delivery issues add this surface without changing
+the defaults below.
 
 `remove` accepts `installation:<id>`, `logical-skill:<id>`, `source:<source-id>`,
 `group:<group-id>`, and `plugin:<boundary-id>`.

@@ -8,7 +8,7 @@ export interface BuiltInAdapterSource {
 export const VERCEL_SKILLS_ADAPTER_ID = "vercel.skills";
 export const VERCEL_SKILLS_EXECUTABLE = "skills";
 export const VERCEL_SKILLS_PACKAGE_NAME = "skills";
-export const VERCEL_SKILLS_PACKAGE_VERSION = "1.5.22";
+export const VERCEL_SKILLS_PACKAGE_VERSION = "1.9.0";
 export const VERCEL_SKILLS_GLOBAL_AGENT_IDS = [
   "aider-desk",
   "amp",
@@ -37,6 +37,7 @@ export const VERCEL_SKILLS_GLOBAL_AGENT_IDS = [
   "droid",
   "firebender",
   "forgecode",
+  "fx",
   "gemini-cli",
   "github-copilot",
   "goose",
@@ -62,6 +63,7 @@ export const VERCEL_SKILLS_GLOBAL_AGENT_IDS = [
   "openhands",
   "ona",
   "pi",
+  "posit-assistant",
   "qoder",
   "qoder-cn",
   "qwen-code",
@@ -69,6 +71,7 @@ export const VERCEL_SKILLS_GLOBAL_AGENT_IDS = [
   "reasonix",
   "rovodev",
   "roo",
+  "sarvam-code",
   "tabnine-cli",
   "terramind",
   "tinycloud",

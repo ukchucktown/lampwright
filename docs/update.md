@@ -46,6 +46,7 @@ an independent Installation or Plugin outside that boundary.
 8. Lampwright MUST NOT contact a remote source during scan, browse, plan, or dry-run.
 9. Lampwright MUST disclose network access before the Owner operation starts.
 10. Lampwright MUST keep `--all` and remote update discovery outside the first version.
+11. Lampwright MUST NOT let an Update add the target to an agent harness that did not have it.
 
 The newest revision means the newest revision that the recorded Owner policy
 permits. It does not mean the newest branch, tag, release, or marketplace entry
@@ -294,6 +295,20 @@ artifacts that existed before Update. The plan warns when Inventory cannot
 prove that the installed content matches the Owner record. Proven local changes
 block Update.
 
+An Update does not add the Skill to an agent harness. The `update` command of
+the Manager has no option that selects agents. When it installs a new version,
+it can create a link to the Skill in each agent directory that it uses as a
+default target. Lampwright records each declared mutation root that is absent
+before the Owner command. After the command, Lampwright removes each symbolic
+link or junction that the Owner created at one of those paths. It then removes
+each directory that the Owner created only to hold that link. The action result
+gives the number of removed links in `removedAgentLinks`.
+
+Lampwright removes links only. A file or a directory that the Owner creates at
+one of those paths stays, because that content belongs to Quarantine and not to
+Update. The final verification then reports that the Harness Exposure set
+changed, and the target result is `unresolved`.
+
 The version 1 declarative Vercel Adapter grants Managed Removal authority only.
 Trusted package reconciliation code materializes Vercel Update authority
 because conditional lock locations and a dynamic set of agent artifacts cannot
@@ -408,7 +423,7 @@ Target results map to CLI exit statuses as follows:
 ## Acceptance criteria
 
 1. A targeted Vercel Installation produces a complete offline Update Plan.
-2. A managed Vercel Update preserves the source, ref, Scope, and strong identity.
+2. A managed Vercel Update preserves the source, ref, Scope, strong identity, and Harness Exposures.
 3. A successful Owner command with changed content reports `updated`.
 4. A successful Owner command with unchanged content reports `unchanged`.
 5. Lampwright never describes `unchanged` as `up-to-date` without remote proof.

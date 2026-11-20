@@ -764,7 +764,10 @@ describe("the built lampwright executable", () => {
   it("prints help and exits successfully", async () => {
     const output = await runBuiltExecutable("--help");
 
-    expect(output).toContain("Usage:\n  lampwright\n  lampwright scan");
+    expect(output).toContain(
+      "Usage:\n  lampwright [--theme <name>]\n  lampwright scan",
+    );
+    expect(output).toContain("--theme <name>");
     expect(output).toContain("--trust-adapter");
     expect(output).toContain("--version");
   });

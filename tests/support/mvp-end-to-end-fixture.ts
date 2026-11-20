@@ -164,7 +164,7 @@ function fixtureCommandRunner(
       if (command.executable === "skills")
         return {
           exitCode: managerAvailable ? 0 : null,
-          stdout: managerAvailable ? "1.5.22\n" : "",
+          stdout: managerAvailable ? "1.9.0\n" : "",
         };
       if (command.executable === "fsutil")
         return {

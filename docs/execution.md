@@ -58,6 +58,18 @@ comparison; neither is inferred from Execution's own process directory.
 Ephemeral packages likewise run only from a fresh Lampwright-owned temporary
 directory.
 
+An Owner can stop the use of an agent path in a later version. Its removal
+command then deletes the Skill and leaves the link at the old path, and that
+link has no target. After a Managed Removal command exits with success,
+Execution examines each `remove-path` effect of the action. It removes each
+symbolic link or junction whose target is absent. The action result gives the
+number of removed links in `removedBrokenLinks`.
+
+Execution removes such links only. A directory, a file, or a link to a target
+that exists stays, because content belongs to Quarantine and not to Managed
+Removal. The `path-absent` check of that path then fails, and the report can
+offer the Brute-force fallback with its own confirmation.
+
 ## Scheduling and fallback
 
 The bounded scheduler starts only actions whose `dependsOn` results are

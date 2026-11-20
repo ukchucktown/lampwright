@@ -32,6 +32,7 @@ import { scanVercelSkills } from "../src/inventory/vercel-skills.js";
 import { createIsolatedTestEnvironmentFixture } from "./support/isolated-test-environment-fixture.js";
 
 const createTestEnvironment = createIsolatedTestEnvironmentFixture();
+const linkType = process.platform === "win32" ? "junction" : "dir";
 const fixedTime = new Date("2026-08-21T00:00:00.000Z");
 
 interface FixtureEnvironment extends InventoryScanEnvironment {
@@ -63,7 +64,7 @@ function commandRunner(
       if (command.executable === "skills")
         return {
           exitCode: managerAvailable ? 0 : null,
-          stdout: managerAvailable ? "1.5.22\n" : "",
+          stdout: managerAvailable ? "1.9.0\n" : "",
         };
       if (
         command.executable === "git" &&
@@ -561,7 +562,7 @@ describe("Vercel Managed Update evidence", () => {
           packageExecution: {
             runner: "npx",
             packageName: "skills",
-            packageVersion: "1.5.22",
+            packageVersion: "1.9.0",
             mayDownload: true,
             adapterHash: expect.stringMatching(/^[a-f\d]{64}$/),
           },
@@ -571,7 +572,7 @@ describe("Vercel Managed Update evidence", () => {
         packageDownload: {
           kind: "possible",
           packageName: "skills",
-          packageVersion: "1.5.22",
+          packageVersion: "1.9.0",
         },
       },
     });
@@ -585,7 +586,7 @@ describe("Vercel Managed Update evidence", () => {
         kind: "package-trust",
         runner: "npx",
         packageName: "skills",
-        packageVersion: "1.5.22",
+        packageVersion: "1.9.0",
       }),
     ]);
 
@@ -636,7 +637,7 @@ describe("Vercel Managed Update evidence", () => {
           executable: "npx",
           arguments: [
             "--yes",
-            "skills@1.5.22",
+            "skills@1.9.0",
             "update",
             "review-tools",
             "--global",
@@ -760,6 +761,116 @@ describe("Vercel Managed Update execution", () => {
       code: "ENOENT",
     });
   });
+
+  it.each([
+    { name: "links it into more agents", copy: false },
+    { name: "also copies it into an agent", copy: true },
+  ])(
+    "keeps the agent harnesses of a Skill when the Manager $name",
+    async ({ copy }) => {
+      const value = await globalFixture(true);
+      const home = value.environment.homeDirectory;
+      // The Skill is exposed to one agent before the Update.
+      const existingLink = join(home, ".claude", "skills", "review-tools");
+      await mkdir(join(home, ".claude", "skills"), { recursive: true });
+      await symlink(value.skillPath, existingLink, linkType);
+      // Three more agents have a home directory, so the Manager can link there.
+      for (const agentHome of [".grok", ".junie", ".vibe"])
+        await mkdir(join(home, agentHome), { recursive: true });
+      const scanSelected = async () => {
+        const inventory = await value.inventoryScanner.scan({});
+        return {
+          inventory,
+          installation: inventory.installations.find(
+            (candidate) => candidate.location.path === value.skillPath,
+          )!,
+        };
+      };
+      const first = await scanSelected();
+      const absent = planUpdate(
+        first.inventory,
+        updateIntent(first.installation),
+      )
+        .actions[0]!.operation.effects.filter(
+          (effect) => effect.kind === "mutation-root" && !effect.exists,
+        )
+        .map((effect) => effect.path);
+      expect(absent.length).toBeGreaterThan(2);
+      const [newLink, secondLink, copied] = absent as [string, string, string];
+      // One agent directory already holds another Skill of the user.
+      const neighbor = join(dirname(secondLink), "other-skill");
+      await writeSkill(neighbor, "other-skill");
+      const { inventory, installation } = await scanSelected();
+      const before = [...installation.exposedTo];
+      const planned = planUpdate(inventory, updateIntent(installation));
+
+      const run = vi.fn(async () => {
+        // The Manager installs the new version and links it into more agents.
+        await writeSkill(value.skillPath, "review-tools", "v2");
+        const lock = JSON.parse(await readFile(value.lockPath, "utf8")) as {
+          skills: Record<string, Record<string, unknown>>;
+        };
+        lock.skills["review-tools"]!.skillFolderHash = "new-source-tree";
+        await writeJson(value.lockPath, lock);
+        for (const link of [newLink, secondLink]) {
+          await mkdir(dirname(link), { recursive: true });
+          await symlink(value.skillPath, link, linkType);
+        }
+        if (copy) await writeSkill(copied, "review-tools", "v2");
+        return { exitCode: 0, stdout: "updated", stderr: "" };
+      });
+
+      const report = await execution(
+        value.inventoryScanner,
+        value.environment,
+        {
+          run,
+        },
+      ).executeUpdate(planned, { grants: [{ kind: "confirmation" }] });
+
+      await expect(lstat(newLink)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(secondLink)).rejects.toMatchObject({ code: "ENOENT" });
+      // A directory that the Manager created only for the link is gone too.
+      await expect(lstat(dirname(newLink))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      // Everything that existed before the Update stays.
+      expect((await lstat(existingLink)).isSymbolicLink()).toBe(true);
+      await expect(
+        readFile(join(neighbor, "SKILL.md"), "utf8"),
+      ).resolves.toContain("other-skill");
+      await expect(
+        readFile(join(value.skillPath, "SKILL.md"), "utf8"),
+      ).resolves.toContain("v2");
+      expect(report.actionResults[0]).toMatchObject({
+        status: "succeeded",
+        details: { removedAgentLinks: 2 },
+      });
+
+      if (copy) {
+        // A copy is content, not a link. Lampwright does not delete it, and the
+        // report states that the Harness Exposures changed.
+        await expect(
+          readFile(join(copied, "SKILL.md"), "utf8"),
+        ).resolves.toContain("v2");
+        expect(report.status).toBe("partial");
+        expect(report.targetResults[0].status).toBe("unresolved");
+        expect(report.verificationResults).toContainEqual(
+          expect.objectContaining({
+            status: "failed",
+            error: expect.objectContaining({
+              message: "the Harness Exposure set changed",
+            }),
+          }),
+        );
+        return;
+      }
+      expect(report.status).toBe("succeeded");
+      expect(report.targetResults[0].status).toBe("updated");
+      const after = await scanSelected();
+      expect(after.installation.exposedTo).toEqual(before);
+    },
+  );
 
   it("reports unchanged without claiming the remote source is current", async () => {
     const value = await globalFixture(true);
@@ -1033,6 +1144,40 @@ describe("Vercel Update safety blocks", () => {
         path: join(environment.homeDirectory, ".adal", "skills", name),
         exists: false,
       }),
+    );
+  });
+
+  it("declares a global link only for a detected agent that does not read the shared directory", async () => {
+    const value = await globalFixture(true);
+    const home = value.environment.homeDirectory;
+    // Each of these agents is present on the machine.
+    for (const agentHome of [
+      [".grok"],
+      [".gemini", "antigravity"],
+      [".pi", "agent"],
+      [".factory"],
+      [".kilo"],
+      [".fx"],
+    ])
+      await mkdir(join(home, ...agentHome), { recursive: true });
+
+    const inventory = await value.inventoryScanner.scan({});
+    const installation = inventory.installations.find(
+      (candidate) => candidate.location.path === value.skillPath,
+    )!;
+    if (installation.update.kind !== "managed")
+      throw new Error("expected managed Vercel Update");
+    const absent = installation.update.operation.effects
+      .filter((effect) => effect.kind === "mutation-root" && !effect.exists)
+      .map((effect) => effect.path);
+
+    // Grok has a directory of its own. Antigravity uses the shared project
+    // directory, but in the global scope it reads a directory of its own.
+    expect(absent.sort()).toEqual(
+      [
+        join(home, ".gemini", "config", "skills", "review-tools"),
+        join(home, ".grok", "skills", "review-tools"),
+      ].sort(),
     );
   });
 

@@ -283,7 +283,7 @@ safety, reference, variant, and compilation pipeline as local content.
 ## Vercel `skills` adapter
 
 The `vercel.skills` built-in pins the native fallback package to
-`skills@1.5.22`. An installed `skills` executable is preferred. When it is
+`skills@1.9.0`. An installed `skills` executable is preferred. When it is
 missing, only global removal may use the pinned `npx` envelope, and only on the
 Node.js versions supported by that package. Project removal requires the
 installed executable because the manager derives project scope from its
@@ -291,9 +291,9 @@ working directory; running the package from Lampwright's isolated ephemeral
 directory would target the wrong scope.
 
 Global commands pass the pinned set of agents that support global installation
-instead of relying on the manager's default all-agent expansion. In
-`skills@1.5.22`, that default also visits project-only Eve and PromptScript
-paths relative to the command's current directory. Excluding those agents
+instead of relying on the manager's default all-agent expansion. That default
+also visits project-only Eve and PromptScript paths relative to the command's
+current directory. Excluding those agents
 keeps a global action from mutating an unrelated workspace while retaining all
 declared global paths. The command and path registries are checked together so
 they cannot drift silently.
@@ -368,14 +368,14 @@ installed scopes.
 
 ## Codex plugin adapter
 
-The `codex.plugins` built-in treats the supported local
-`codex plugin list --json` result as the authority for installed state. It does
-not infer an installed Plugin from `config.toml` or from cache content. The
-query runs without a shell and receives the resolved `CODEX_HOME`, privacy
-flags, and `TMPDIR`, `TMP`, and `TEMP` overrides that keep the read-only scan
-from creating helper-alias temporary state. Cache-only trees remain
-non-installation evidence if Codex is absent, the output is invalid, or the
-configuration and cache no longer agree.
+The `codex.plugins` built-in reads installed state from local evidence: the
+Plugin tables in `<CODEX_HOME>/config.toml` and the version directories in the
+Codex plugin cache. A scan does not run the Codex executable. A Plugin table
+with no cache directory is not an installed Plugin. A cache directory with no
+Plugin table stays non-installation evidence, and so does each cache directory
+when the configuration is not safe to read.
+[Codex plugin reconciliation](./inventory.md#codex-plugin-reconciliation)
+gives the complete rules.
 
 Each installed Plugin is one user-scope ownership boundary. Its Skills are
 searchable `managed-plugin-resource` Installations with strong Plugin identity,

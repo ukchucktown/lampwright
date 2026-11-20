@@ -1,0 +1,13 @@
+# Keep theme preferences in a configuration file
+
+Lampwright keeps the selected theme in `config.toml` and reads custom themes from a `themes` directory. Both are in a Lampwright configuration directory that is separate from the state root of [ADR 0012](./0012-use-one-canonical-lampwright-state-root.md). The configuration directory is `$XDG_CONFIG_HOME/lampwright` when `XDG_CONFIG_HOME` is set, `%APPDATA%\lampwright` on Windows, and `~/.config/lampwright` in all other conditions. The state root holds records of what Lampwright did. The configuration directory holds what the user prefers, and a user can keep it in a repository of configuration files.
+
+A confirmed theme in the theme picker is the first write that a browse of the terminal UI can cause. Earlier, a read-only scan, a browse, and a dry run created no files without exception. The exception is narrow: only Enter on a usable theme in the picker writes, and it changes only the top-level `theme` line of `config.toml`. A preview, a cancel, a scan, and a start with a stale preference write nothing. The `--theme` option and the `LAMPWRIGHT_THEME` environment variable select a theme with no write.
+
+The default theme is `terminal`, which sends only the 16 ANSI palette colors, the default colors, and text attributes. The earlier default, `Nightfall`, sent fixed 24-bit colors that the theme of the terminal could not change, and it was hard to read on a light background. `Nightfall` stays a built-in theme. An existing user sees different colors after this change until the user selects `nightfall`.
+
+A theme is a TOML file with one style string for each role, in the form `<foreground> [on <background>] [attributes]`. The owner of this repository selected this format because a JSONC file with nested objects is more complex than a theme needs. Lampwright already depends on a TOML parser. A theme is data only, as an Adapter is, and Lampwright validates it with its own parser. A theme has no published JSON Schema, and an Adapter stays a JSONC file with a JSON Schema.
+
+A custom theme can extend a built-in theme only. A chain of custom themes adds resolution order and cycle checks for small value. A theme file that is not valid never stops the terminal UI: the picker lists it with the reason. A saved selection or an environment value that names no usable theme gives the `terminal` theme and a notice, but an unknown `--theme` value stops Lampwright, because the user typed that value for this run.
+
+The theme picker opens with `ctrl+p`. A letter key in a browse view starts a search, so the picker needs a control key, and `ctrl+t` already changes the view.

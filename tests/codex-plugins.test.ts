@@ -36,19 +36,6 @@ interface FixtureEnvironment extends InventoryScanEnvironment {
   readonly agentHomeDirectories: Readonly<Record<string, string>>;
 }
 
-interface PluginListEntry {
-  readonly pluginId: string;
-  readonly name: string;
-  readonly marketplaceName: string;
-  readonly version: string;
-  readonly installed: true;
-  readonly enabled: boolean;
-  readonly source: Record<string, unknown>;
-  readonly marketplaceSource?: Record<string, unknown>;
-  readonly installPolicy: string;
-  readonly authPolicy: string;
-}
-
 function scanEnvironment(environment: {
   readonly home: string;
   readonly workspace: string;
@@ -100,25 +87,24 @@ function configPath(environment: FixtureEnvironment): string {
   return join(codexHome(environment), "config.toml");
 }
 
-function listEntry(
-  source: Record<string, unknown> = {
-    source: "git",
-    url: "https://example.invalid/plugins.git",
-  },
-  overrides: Partial<PluginListEntry> = {},
-): PluginListEntry {
-  return {
-    pluginId: "quality-suite@acme-marketplace",
-    name: "quality-suite",
-    marketplaceName: "acme-marketplace",
-    version: "1.2.3",
-    installed: true,
-    enabled: true,
-    source,
-    installPolicy: "AVAILABLE",
-    authPolicy: "ON_USE",
-    ...overrides,
-  };
+const pluginTable =
+  '[plugins."quality-suite@acme-marketplace"]\nenabled = true\n';
+
+/** A `[marketplaces.<name>]` table as Codex records it in `config.toml`. */
+function marketplaceTable(
+  sourceType: "local" | "git",
+  source: string,
+  name = "acme-marketplace",
+): string {
+  return `[marketplaces.${name}]\nsource_type = ${JSON.stringify(sourceType)}\nsource = ${JSON.stringify(source)}\n`;
+}
+
+async function writeConfig(
+  environment: FixtureEnvironment,
+  text = pluginTable,
+): Promise<void> {
+  await mkdir(codexHome(environment), { recursive: true });
+  await writeFile(configPath(environment), text, "utf8");
 }
 
 function agentDataPath(
@@ -141,28 +127,14 @@ function agentDataPath(
   );
 }
 
-function commandRunner(input: {
-  readonly environment: FixtureEnvironment;
-  readonly installed?: () => readonly PluginListEntry[];
-  readonly stdout?: string;
-  readonly available?: readonly unknown[];
-  readonly exitCode?: number | null;
-  readonly commandSpy?: (command: InventoryCommand) => void;
-}): InventoryCommandRunner {
+function commandRunner(
+  input: {
+    readonly commandSpy?: (command: InventoryCommand) => void;
+  } = {},
+): InventoryCommandRunner {
   return {
     async run(command) {
-      if (command.executable === "codex") {
-        input.commandSpy?.(command);
-        return {
-          exitCode: input.exitCode === undefined ? 0 : input.exitCode,
-          stdout:
-            input.stdout ??
-            JSON.stringify({
-              installed: input.installed?.() ?? [],
-              available: input.available ?? [],
-            }),
-        };
-      }
+      input.commandSpy?.(command);
       if (command.executable === "fsutil") {
         return {
           exitCode: 0,
@@ -258,9 +230,6 @@ describe("Codex plugin adapter", () => {
     );
     const seenCommands: InventoryCommand[] = [];
     const runner = commandRunner({
-      environment,
-      installed: () => [listEntry()],
-      available: [{ ignored: "uninstalled catalog entry" }],
       commandSpy: (command) => seenCommands.push(command),
     });
 
@@ -273,18 +242,9 @@ describe("Codex plugin adapter", () => {
         selector: { value: "quality-suite@acme-marketplace" },
       },
     });
-    expect(seenCommands).toContainEqual({
-      executable: "codex",
-      arguments: ["plugin", "list", "--json"],
-      environment: {
-        CODEX_HOME: codexHome(environment),
-        TMPDIR: codexHome(environment),
-        TMP: codexHome(environment),
-        TEMP: codexHome(environment),
-        DO_NOT_TRACK: "1",
-        DISABLE_TELEMETRY: "1",
-      },
-    });
+    expect(
+      seenCommands.filter((command) => command.executable === "codex"),
+    ).toEqual([]);
     expect(
       inventory.installations.map((installation) => [
         installation.skill.name,
@@ -461,15 +421,8 @@ describe("Codex plugin adapter", () => {
     await createPluginRoot(installed);
     await writeSkill(standalone, "review");
     await mkdir(dataPath(environment), { recursive: true });
-    await writeFile(configPath(environment), "[plugins]\n");
-    let installedState = true;
-    const inventoryScanner = scanner(
-      environment,
-      commandRunner({
-        environment,
-        installed: () => (installedState ? [listEntry()] : []),
-      }),
-    );
+    await writeConfig(environment);
+    const inventoryScanner = scanner(environment, commandRunner());
     const initial = await inventoryScanner.scan({});
     const plugin = initial.plugins.find(
       (boundary) => boundary.adapterId === "codex.plugins",
@@ -496,7 +449,6 @@ describe("Codex plugin adapter", () => {
       expect(request.cwd).toBeTypeOf("string");
       await rm(cacheBase(environment), { recursive: true });
       await writeFile(configPath(environment), "[plugins]\n# removed\n");
-      installedState = false;
       return { exitCode: 0, stdout: "{}", stderr: "" };
     });
     const execution = createExecutionModule({
@@ -554,11 +506,8 @@ describe("Codex plugin adapter", () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
-    await writeFile(configPath(environment), "[plugins]\n");
-    const inventoryScanner = scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    );
+    await writeConfig(environment);
+    const inventoryScanner = scanner(environment, commandRunner());
     const initial = await inventoryScanner.scan({});
     const plugin = initial.plugins.find(
       (boundary) => boundary.adapterId === "codex.plugins",
@@ -606,45 +555,33 @@ describe("Codex plugin adapter", () => {
     });
     await expect(lstat(cacheBase(environment))).resolves.toBeDefined();
     await expect(readFile(configPath(environment), "utf8")).resolves.toBe(
-      "[plugins]\n",
+      pluginTable,
     );
   });
 
   it.each([
-    ["manager absence", { exitCode: null as number | null }],
-    ["invalid JSON", { stdout: "not-json" }],
+    ["an absent configuration", null],
+    ["no Plugin table", "[plugins]\n"],
+    ["invalid TOML", "[plugins\n"],
+    ["a Plugin value that is not a table", "plugins = true\n"],
     [
-      "invalid identity",
-      {
-        stdout: JSON.stringify({
-          installed: [
-            {
-              ...listEntry(),
-              pluginId: "quality-suite@wrong-marketplace",
-            },
-          ],
-          available: [],
-        }),
-      },
+      "a Plugin table for another marketplace",
+      '[plugins."quality-suite@other-marketplace"]\nenabled = true\n',
     ],
     [
-      "duplicate identity",
-      {
-        stdout: JSON.stringify({
-          installed: [listEntry(), listEntry()],
-          available: [],
-        }),
-      },
+      "an unsafe Plugin table name",
+      '[plugins."../quality-suite@acme-marketplace"]\nenabled = true\n',
     ],
-  ])("keeps cache evidence non-removable for %s", async (_label, override) => {
+    [
+      "an enabled value that is not a boolean",
+      '[plugins."quality-suite@acme-marketplace"]\nenabled = "yes"\n',
+    ],
+  ])("keeps cache evidence non-removable for %s", async (_label, config) => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
-    await writeFile(configPath(environment), "[plugins]\n");
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, ...override }),
-    ).scan({});
+    if (config !== null) await writeConfig(environment, config);
+    const inventory = await scanner(environment, commandRunner()).scan({});
 
     expect(
       inventory.plugins.filter(
@@ -668,18 +605,119 @@ describe("Codex plugin adapter", () => {
     );
   });
 
-  it("blocks unsafe config and cache paths instead of offering fallback", async () => {
+  it("does not report a Plugin table that has no cache directory", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await writeConfig(environment);
+    await mkdir(cacheBase(environment), { recursive: true });
+    await writeFile(join(cacheBase(environment), "1.2.3"), "not a directory");
+
+    const inventory = await scanner(environment, commandRunner()).scan({});
+
+    expect(inventory.plugins).toEqual([]);
+    expect(inventory.installations).toEqual([]);
+  });
+
+  it("leaves a remote plugin cache with no Plugin table outside every plan", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await createPluginRoot(activeRoot(environment));
+    const remoteRoot = join(
+      cacheBase(environment, "openai-curated-remote", "gmail"),
+      "0.1.10",
+    );
+    await createPluginRoot(remoteRoot, { name: "gmail", version: "0.1.10" });
+    await writeConfig(environment);
+
+    const inventory = await scanner(environment, commandRunner()).scan({});
+
+    expect(inventory.plugins.map((plugin) => plugin.pluginId)).toEqual([
+      "quality-suite@acme-marketplace",
+    ]);
+    expect(
+      inventory.installations.filter((installation) =>
+        installation.location.path.startsWith(remoteRoot),
+      ),
+    ).toEqual([]);
+    expect(inventory.otherFindings).toContainEqual(
+      expect.objectContaining({
+        classification: "cache-or-vendor-artifact",
+        location: expect.objectContaining({ path: remoteRoot }),
+        metadata: {
+          "codex-plugin": expect.objectContaining({ removalAuthority: false }),
+        },
+      }),
+    );
+    expect(
+      plan(inventory, {
+        kind: "all",
+        includePlugins: true,
+        force: false,
+        mode: "managed-first",
+      }).targets,
+    ).toEqual([pluginTarget(inventory.plugins[0]!)]);
+  });
+
+  it.each([
+    [["1.2.3"], "1.2.3"],
+    [["1.2.3", "1.2.10", "1.10.0"], "1.10.0"],
+    [["1.0.0", "1.0.0-beta"], "1.0.0"],
+    [["1.0.0-beta", "1.0.0-alpha"], "1.0.0-beta"],
+    [["0.1.13-77c10e110b37", "0.1.13"], "0.1.13"],
+    [["26.1111.21308", "26.1112.11011"], "26.1112.11011"],
+    [["1.0.0", "local", "2.0.0"], "local"],
+    [["2.0", "10.0.0"], "2.0"],
+    [["abc", "1.0.0"], "abc"],
+  ])(
+    "selects the active version of %j as Codex does",
+    async (versions, active) => {
+      const fixture = await createTestEnvironment();
+      const environment = scanEnvironment(fixture);
+      for (const version of versions) {
+        await createPluginRoot(activeRoot(environment, version));
+      }
+      await writeFile(join(cacheBase(environment), "9.9.9"), "not a directory");
+      await symlink(
+        activeRoot(environment, versions[0]),
+        join(cacheBase(environment), "latest"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      await writeConfig(environment);
+
+      const inventory = await scanner(environment, commandRunner()).scan({});
+
+      expect(inventory.plugins[0]?.version).toBe(active);
+    },
+  );
+
+  it("reads the enabled state from the Plugin table", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await createPluginRoot(activeRoot(environment));
+    await writeConfig(
+      environment,
+      '[plugins."quality-suite@acme-marketplace"]\nenabled = false\n',
+    );
+    const disabled = await scanner(environment, commandRunner()).scan({});
+    expect(disabled.plugins[0]?.availability.status).toBe("disabled");
+
+    await writeConfig(
+      environment,
+      '[plugins."quality-suite@acme-marketplace"]\n',
+    );
+    const defaulted = await scanner(environment, commandRunner()).scan({});
+    expect(defaulted.plugins[0]?.availability.status).toBe("enabled");
+  });
+
+  it("reads a linked configuration but blocks removal, and reports no Plugin for a hard-linked or broken one", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
     const configTarget = join(fixture.temporary, "config-target.toml");
-    await writeFile(configTarget, "[plugins]\n");
+    await writeFile(configTarget, pluginTable);
     await symlink(configTarget, configPath(environment), "file");
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
-    const plugin = inventory.plugins.find(
+    const linked = await scanner(environment, commandRunner()).scan({});
+    const plugin = linked.plugins.find(
       (boundary) => boundary.adapterId === "codex.plugins",
     )!;
     expect(plugin.removal).toMatchObject({
@@ -691,7 +729,7 @@ describe("Codex plugin adapter", () => {
       },
       fallback: { kind: "unavailable" },
     });
-    expect(inventory.installations).toContainEqual(
+    expect(linked.installations).toContainEqual(
       expect.objectContaining({
         classification: "managed-plugin-resource",
         ownership: expect.objectContaining({
@@ -700,7 +738,7 @@ describe("Codex plugin adapter", () => {
         }),
       }),
     );
-    const blockedPlan = plan(inventory, {
+    const blockedPlan = plan(linked, {
       kind: "targets",
       targets: [pluginTarget(plugin)],
       force: false,
@@ -718,18 +756,36 @@ describe("Codex plugin adapter", () => {
 
     await rm(configPath(environment));
     await link(configTarget, configPath(environment));
-    const hardLinked = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
-    expect(
-      hardLinked.plugins.find(
-        (boundary) => boundary.adapterId === "codex.plugins",
-      )?.removal.managed?.availability,
-    ).toMatchObject({
-      kind: "unavailable",
-      reason: expect.stringContaining("hard-linked"),
-    });
+    const hardLinked = await scanner(environment, commandRunner()).scan({});
+
+    await rm(configPath(environment));
+    await symlink(
+      join(fixture.temporary, "missing-config.toml"),
+      configPath(environment),
+      "file",
+    );
+    const broken = await scanner(environment, commandRunner()).scan({});
+
+    for (const inventory of [hardLinked, broken]) {
+      expect(inventory.plugins).toEqual([]);
+      expect(
+        inventory.installations.filter(
+          (installation) => installation.adapterId === "codex.plugins",
+        ),
+      ).toEqual([]);
+      expect(inventory.otherFindings).toContainEqual(
+        expect.objectContaining({
+          classification: "cache-or-vendor-artifact",
+          location: expect.objectContaining({ path: activeRoot(environment) }),
+          metadata: {
+            "codex-plugin": expect.objectContaining({
+              removalAuthority: false,
+              state: "invalid-configuration",
+            }),
+          },
+        }),
+      );
+    }
   });
 
   it("accepts dotted Codex plugin names without widening cache traversal", async () => {
@@ -740,15 +796,12 @@ describe("Codex plugin adapter", () => {
       "quality.suite",
     );
     await createPluginRoot(root, { name: "quality.suite", version: "1.2.3" });
-    await writeFile(configPath(environment), "[plugins]\n");
-    const entry = listEntry(undefined, {
-      pluginId: "quality.suite@acme-marketplace",
-      name: "quality.suite",
-    });
-    const inventory = await scanner(
+    const entry = { pluginId: "quality.suite@acme-marketplace" };
+    await writeConfig(
       environment,
-      commandRunner({ environment, installed: () => [entry] }),
-    ).scan({});
+      '[plugins."quality.suite@acme-marketplace"]\nenabled = true\n',
+    );
+    const inventory = await scanner(environment, commandRunner()).scan({});
     const plugin = inventory.plugins.find(
       (boundary) => boundary.pluginId === entry.pluginId,
     )!;
@@ -777,12 +830,9 @@ describe("Codex plugin adapter", () => {
       join(installed, "skills", "nested", "review"),
       "nested-review",
     );
-    await writeFile(configPath(environment), "[plugins]\n");
+    await writeConfig(environment);
 
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    const inventory = await scanner(environment, commandRunner()).scan({});
     expect(inventory.installations).toContainEqual(
       expect.objectContaining({
         classification: "managed-plugin-resource",
@@ -823,12 +873,9 @@ describe("Codex plugin adapter", () => {
       "legacy",
     );
     await mkdir(agentDataPath(environment), { recursive: true });
-    await writeFile(configPath(environment), "[plugins]\n");
+    await writeConfig(environment);
 
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    const inventory = await scanner(environment, commandRunner()).scan({});
     const plugin = inventory.plugins.find(
       (boundary) => boundary.adapterId === "codex.plugins",
     )!;
@@ -877,12 +924,9 @@ describe("Codex plugin adapter", () => {
     const rootManifestSource = join(fixture.temporary, "unrelated-plugin.json");
     await writeJson(rootManifestSource, { package: "unrelated" });
     await link(rootManifestSource, join(installed, "plugin.json"));
-    await writeFile(configPath(environment), "[plugins]\n");
+    await writeConfig(environment);
 
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    const inventory = await scanner(environment, commandRunner()).scan({});
     const plugin = inventory.plugins.find(
       (boundary) => boundary.adapterId === "codex.plugins",
     )!;
@@ -898,12 +942,11 @@ describe("Codex plugin adapter", () => {
     const environment = scanEnvironment(fixture);
     const installed = activeRoot(environment);
     await writeSkill(join(installed, "skills", "review"), "review");
-    await writeFile(configPath(environment), "[plugins]\n");
+    await writeConfig(environment);
 
-    const missingManifest = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    const missingManifest = await scanner(environment, commandRunner()).scan(
+      {},
+    );
     expect(
       missingManifest.plugins.find(
         (boundary) => boundary.adapterId === "codex.plugins",
@@ -922,10 +965,9 @@ describe("Codex plugin adapter", () => {
       $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
       name: "Invalid_Name",
     });
-    const invalidAgentName = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    const invalidAgentName = await scanner(environment, commandRunner()).scan(
+      {},
+    );
     expect(
       invalidAgentName.plugins.find(
         (boundary) => boundary.adapterId === "codex.plugins",
@@ -954,17 +996,27 @@ describe("Codex plugin adapter", () => {
       linkedSkill,
       process.platform === "win32" ? "junction" : "dir",
     );
-    const sourceRoot = join(fixture.temporary, "marketplace-source");
+    const marketplaceRoot = join(fixture.temporary, "marketplace-source");
+    const sourceRoot = join(marketplaceRoot, "plugins", "quality-suite");
     await createPluginRoot(sourceRoot);
-    await writeFile(configPath(environment), "[plugins]\n");
-
-    const inventory = await scanner(
+    await writeJson(
+      join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
+      {
+        name: "acme-marketplace",
+        plugins: [
+          {
+            name: "quality-suite",
+            source: { source: "local", path: "./plugins/quality-suite" },
+          },
+        ],
+      },
+    );
+    await writeConfig(
       environment,
-      commandRunner({
-        environment,
-        installed: () => [listEntry({ source: "local", path: sourceRoot })],
-      }),
-    ).scan({});
+      pluginTable + marketplaceTable("local", marketplaceRoot),
+    );
+
+    const inventory = await scanner(environment, commandRunner()).scan({});
     expect(
       inventory.installations.some(
         (installation) => installation.location.path === linkedSkill,
@@ -991,6 +1043,46 @@ describe("Codex plugin adapter", () => {
     ).toEqual({ kind: "available" });
   });
 
+  it("finds the source tree of a Git marketplace in the Codex clone, and ignores a source that escapes it", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    await createPluginRoot(activeRoot(environment));
+    const clone = join(
+      codexHome(environment),
+      ".tmp",
+      "marketplaces",
+      "acme-marketplace",
+    );
+    await createPluginRoot(clone);
+    const manifest = join(clone, ".claude-plugin", "marketplace.json");
+    await writeJson(manifest, {
+      name: "acme-marketplace",
+      plugins: [{ name: "quality-suite", source: "./" }],
+    });
+    await writeConfig(
+      environment,
+      pluginTable +
+        marketplaceTable("git", "https://example.invalid/plugins.git"),
+    );
+    const sourceSkill = expect.objectContaining({
+      classification: "source-artifact",
+      location: expect.objectContaining({
+        path: join(clone, "skills", "review"),
+      }),
+    });
+
+    const inside = await scanner(environment, commandRunner()).scan({});
+    expect(inside.otherFindings).toContainEqual(sourceSkill);
+
+    await writeJson(manifest, {
+      name: "acme-marketplace",
+      plugins: [{ name: "quality-suite", source: "../acme-marketplace/.." }],
+    });
+    const escaping = await scanner(environment, commandRunner()).scan({});
+    expect(escaping.plugins).toHaveLength(1);
+    expect(escaping.otherFindings).not.toContainEqual(sourceSkill);
+  });
+
   it("keeps broken Codex standalone links independent and blocks linked cache escapes", async () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
@@ -1010,12 +1102,9 @@ describe("Codex plugin adapter", () => {
       brokenStandalone,
       process.platform === "win32" ? "junction" : "dir",
     );
-    await writeFile(configPath(environment), "[plugins]\n");
+    await writeConfig(environment);
 
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    const inventory = await scanner(environment, commandRunner()).scan({});
     expect(inventory.installations).toContainEqual(
       expect.objectContaining({
         status: "broken",
@@ -1048,11 +1137,8 @@ describe("Codex plugin adapter", () => {
       name: "ignored-lower-precedence",
       version: "1.2.3",
     });
-    await writeFile(configPath(environment), "[plugins]\n");
-    const inventory = await scanner(
-      environment,
-      commandRunner({ environment, installed: () => [listEntry()] }),
-    ).scan({});
+    await writeConfig(environment);
+    const inventory = await scanner(environment, commandRunner()).scan({});
     const plugin = inventory.plugins.find(
       (boundary) => boundary.adapterId === "codex.plugins",
     )!;
@@ -1067,28 +1153,22 @@ describe("Codex plugin adapter", () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
-    await mkdir(codexHome(environment), { recursive: true });
-    const runner = commandRunner({
+    await writeConfig(
       environment,
-      installed: () => [
-        listEntry(
-          { source: "local", path: join(fixture.home, "runtime", "plugin") },
-          {
-            marketplaceSource: {
-              sourceType: "local",
-              source: join(
-                fixture.home,
-                ".cache",
-                "codex-runtimes",
-                "codex-primary-runtime",
-                "plugins",
-                "acme-marketplace",
-              ),
-            },
-          },
+      pluginTable +
+        marketplaceTable(
+          "local",
+          join(
+            fixture.home,
+            ".cache",
+            "codex-runtimes",
+            "codex-primary-runtime",
+            "plugins",
+            "acme-marketplace",
+          ),
         ),
-      ],
-    });
+    );
+    const runner = commandRunner();
 
     const inventory = await scanner(environment, runner).scan({});
 
@@ -1106,26 +1186,20 @@ describe("Codex plugin adapter", () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
-    await mkdir(codexHome(environment), { recursive: true });
-    const runner = commandRunner({
+    await writeConfig(
       environment,
-      installed: () => [
-        listEntry(
-          { source: "local", path: join(fixture.home, "bundled", "plugin") },
-          {
-            marketplaceSource: {
-              sourceType: "local",
-              source: join(
-                codexHome(environment),
-                ".tmp",
-                "bundled-marketplaces",
-                "acme-marketplace",
-              ),
-            },
-          },
+      pluginTable +
+        marketplaceTable(
+          "local",
+          join(
+            codexHome(environment),
+            ".tmp",
+            "bundled-marketplaces",
+            "acme-marketplace",
+          ),
         ),
-      ],
-    });
+    );
+    const runner = commandRunner();
 
     const inventory = await scanner(environment, runner).scan({});
 
@@ -1136,28 +1210,20 @@ describe("Codex plugin adapter", () => {
     const fixture = await createTestEnvironment();
     const environment = scanEnvironment(fixture);
     await createPluginRoot(activeRoot(environment));
-    await mkdir(codexHome(environment), { recursive: true });
-    const marketplaceSources = [
-      { sourceType: "local", source: join(fixture.home, "my-marketplaces") },
-      {
-        sourceType: "local",
-        source: join(fixture.home, ".cache", "codex-runtimes-sibling"),
-      },
-      undefined,
+    const marketplaceTables = [
+      marketplaceTable("local", join(fixture.home, "my-marketplaces")),
+      marketplaceTable(
+        "local",
+        join(fixture.home, ".cache", "codex-runtimes-sibling"),
+      ),
+      marketplaceTable("git", "https://example.invalid/plugins.git"),
+      "",
     ];
 
-    for (const marketplaceSource of marketplaceSources) {
-      const runner = commandRunner({
-        environment,
-        installed: () => [
-          listEntry(
-            { source: "local", path: join(fixture.home, "mine") },
-            marketplaceSource === undefined ? {} : { marketplaceSource },
-          ),
-        ],
-      });
+    for (const table of marketplaceTables) {
+      await writeConfig(environment, pluginTable + table);
 
-      const inventory = await scanner(environment, runner).scan({});
+      const inventory = await scanner(environment, commandRunner()).scan({});
 
       expect(inventory.plugins).toHaveLength(1);
       expect(inventory.plugins[0]?.runtimeDefault).toBe(false);

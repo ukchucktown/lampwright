@@ -140,7 +140,7 @@ describe("cross-platform MVP end to end", () => {
           packageExecution: {
             runner: "npx",
             packageName: "skills",
-            packageVersion: "1.5.22",
+            packageVersion: "1.9.0",
             mayDownload: true,
           },
         },
