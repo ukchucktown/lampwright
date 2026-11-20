@@ -28,8 +28,9 @@ This model works well for installations with hundreds of Skills. You can keep
 specialized Skills available on disk and activate only the set that fits your
 current work.
 
-Lampwright does not install Skills or search a registry. It manages what an
-installer such as the Vercel `skills` CLI or `asm` put on your computer. See
+Lampwright does not install Skills or search a registry. It manages the Skills
+that an installer such as the Vercel `skills` CLI put in a directory that
+Lampwright scans. See
 [Lampwright and similar tools](./docs/comparison.md) for a feature matrix.
 
 ## Features
@@ -53,15 +54,16 @@ installer such as the Vercel `skills` CLI or `asm` put on your computer. See
 | Install a Skill or search a catalog | No | Yes | Yes | Yes |
 | Disable a Skill and keep it installed | Yes, native control or Disabled Storage | Yes, renames `SKILL.md` | No command | Yes, in its own store |
 | Disable or enable a complete Plugin | Yes | No | Not described | Not applicable |
-| Removal that you can undo | Yes, Quarantine | Not described | Not described | Not described |
+| Removal that you can undo | Filesystem removals sent to Quarantine can be restored for 30 days by default. A Managed Removal has no undo. | Not described | Not described | Not described |
 | Complete plan before each change | Yes, `--dry-run` | Some commands | Experimental commands | Not described |
-| Protection for tracked Git files and System Skills | Yes | Not described | Not described | Not applicable |
-| Token cost reports and security scans | No | Yes | Security-audit requests only | Not described |
+| Protection for tracked Git files and System Skills | Yes, for each path that Lampwright or a trusted Owner declares | Not described | Not described | Not applicable |
+| Token cost reports and security scans | No | Yes | Partner risk ratings before an installation from a public GitHub source | Not described |
 
 Lampwright fits best when Skills from different tools are already installed
 and you want to control them safely and reversibly. An installer fits best
-when you need to find and add Skills. You can use both: install with `skills`,
-then manage with Lampwright. The
+when you need to find and add Skills. You can use both when the installer
+puts Skills in a directory that Lampwright scans: install with `skills`, then
+manage with Lampwright. The
 [complete comparison](./docs/comparison.md) has the full matrix, the sources,
 the date of the review, and the features that Lampwright does not have.
 
