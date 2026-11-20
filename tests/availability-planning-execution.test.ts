@@ -1,9 +1,18 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  availabilityEnableEntries,
   createDisabledStorageModule,
   createExecutionModule,
   createInventoryScanner,
@@ -398,7 +407,7 @@ describe("Availability Planning and Execution", () => {
     ).toEqual(paths);
   });
 
-  it("disables and enables a complete Vercel-managed set while preserving Manager state", async () => {
+  it("round-trips a Vercel-managed set while its retained Manager record stays visible", async () => {
     const environment = await environmentFixture();
     const paths = ["a-primary", "b-claude-copy", "c-gemini-copy"].map((name) =>
       join(environment.temporary, "vercel-round-trip", name),
@@ -466,6 +475,59 @@ describe("Availability Planning and Execution", () => {
         recordCleanups: [],
       },
     });
+    const managerRecordOnlyInstallation = buildInstallation({
+      ...installation,
+      status: "broken",
+      identity: {
+        strongEvidence: installation.identity.strongEvidence.filter(
+          (evidence) => evidence.kind !== "canonical-target",
+        ),
+        weakEvidence: installation.identity.weakEvidence,
+      },
+      exposedTo: [],
+      harnessExposures: [],
+      location: {
+        ...installation.location,
+        canonicalPath: null,
+      },
+      contentHash: null,
+      modifiedAt: null,
+      suspension: {
+        kind: "unavailable",
+        reason: "only a complete active Vercel Installation can be suspended",
+      },
+      update: {
+        kind: "unresolved",
+        reason: "the Vercel lock record has no complete active artifact set",
+      },
+      removal: {
+        ...installation.removal,
+        primaryArtifactPresent: false,
+        supplementalArtifacts: [],
+        recordCleanups: [
+          {
+            id: "manager-record-cleanup",
+            adapterId: "vercel.skills",
+            location: {
+              path: managerRecord,
+              canonicalPath: managerRecord,
+              artifactType: { kind: "file" },
+            },
+            format: "json",
+            recordPointer: "/skills/managed-review",
+            expectedFileHash: {
+              algorithm: "sha256",
+              digest: "a".repeat(64),
+            },
+            expectedRecordHash: {
+              algorithm: "sha256",
+              digest: "b".repeat(64),
+            },
+            protection,
+          },
+        ],
+      },
+    });
     const scanLive = async () => {
       const present = await Promise.all(
         paths.map((path) =>
@@ -476,7 +538,9 @@ describe("Availability Planning and Execution", () => {
         ),
       );
       return buildInventory({
-        installations: present.every(Boolean) ? [installation] : [],
+        installations: present.every(Boolean)
+          ? [installation]
+          : [managerRecordOnlyInstallation],
       });
     };
     const target = {
@@ -494,14 +558,27 @@ describe("Availability Planning and Execution", () => {
       targets: [target],
       force: false,
     });
-    await expect(
-      runner.module.executeAvailability(disablePlan, {
-        grants: [{ kind: "confirmation" }],
-      }),
-    ).resolves.toMatchObject({ status: "succeeded" });
+    const disabled = await runner.module.executeAvailability(disablePlan, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(disabled.status).toBe("succeeded");
+    expect(disabled.verificationResults).toHaveLength(2);
+    expect(
+      disabled.verificationResults.every(
+        (result) => result.status === "passed",
+      ),
+    ).toBe(true);
     const entries = await runner.disabledStorage.list();
     expect(entries).toHaveLength(1);
     expect(entries[0]?.schemaVersion).toBe(2);
+    expect((await scanLive()).installations).toMatchObject([
+      {
+        status: "broken",
+        exposedTo: [],
+        harnessExposures: [],
+        removal: { primaryArtifactPresent: false },
+      },
+    ]);
     await expect(readFile(managerRecord, "utf8")).resolves.toBe(
       '{"installed":true}\n',
     );
@@ -510,6 +587,8 @@ describe("Availability Planning and Execution", () => {
       targets: [target],
       force: false,
     });
+    expect(enablePlan.blocks).toEqual([]);
+    expect(enablePlan.actions).toMatchObject([{ kind: "suspended-enable" }]);
     await expect(
       runner.module.executeAvailability(enablePlan, {
         grants: [{ kind: "confirmation" }],
@@ -524,6 +603,565 @@ describe("Availability Planning and Execution", () => {
     );
     await expect(runner.disabledStorage.list()).resolves.toEqual([]);
     expect(audit).toHaveLength(2);
+  });
+
+  it("verifies a suspended Vercel Skill of a lock-declared Eve subagent with the real scanner", async () => {
+    async function eveFixture(name: string) {
+      const environment = await environmentFixture();
+      const artifact = join(
+        environment.workspace,
+        "agent",
+        "subagents",
+        "reviewer",
+        "skills",
+        "review",
+      );
+      await createSkill(artifact, "review");
+      await writeFile(
+        join(environment.workspace, "skills-lock.json"),
+        `${JSON.stringify({
+          version: 1,
+          skills: {
+            review: {
+              source: "acme/project-skills",
+              sourceType: "github",
+              sourceUrl: "https://github.com/acme/project-skills.git",
+              skillPath: "skills/review/SKILL.md",
+              subagents: ["reviewer"],
+            },
+          },
+        })}\n`,
+      );
+      const scanLive = () =>
+        scan(
+          {
+            homeDirectory: environment.home,
+            workspaceDirectory: environment.workspace,
+          },
+          [],
+        );
+      return { artifact, scanLive, stateRoot: join(environment.state, name) };
+    }
+
+    const fixture = await eveFixture("eve-suspended");
+    const initial = await fixture.scanLive();
+    expect(initial.installations).toHaveLength(1);
+    expect(initial.installations[0]!.exposedTo).toEqual(["eve:reviewer"]);
+    const target = {
+      kind: "installation" as const,
+      installationId: initial.installations[0]!.id,
+    };
+    const intent = {
+      operation: "disable" as const,
+      targets: [target],
+      force: false,
+    };
+    const runner = execution(fixture.stateRoot, fixture.scanLive, []);
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], intent),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    expect(
+      disabled.verificationResults.every(
+        (result) => result.status === "passed",
+      ),
+    ).toBe(true);
+    await expect(access(fixture.artifact)).rejects.toThrow();
+    expect((await fixture.scanLive()).installations).toMatchObject([
+      { status: "broken", exposedTo: [], harnessExposures: [] },
+    ]);
+
+    // A subagent that can still load the Skill after the move is a real failure.
+    const live = await eveFixture("eve-still-live");
+    const liveInitial = await live.scanLive();
+    const scanWithReturnedArtifact = async () => {
+      await access(live.artifact).catch(() =>
+        createSkill(live.artifact, "review"),
+      );
+      return live.scanLive();
+    };
+    const liveRunner = execution(live.stateRoot, scanWithReturnedArtifact, []);
+    const stillLive = await liveRunner.module.executeAvailability(
+      planAvailability(liveInitial, [], {
+        ...intent,
+        targets: [
+          {
+            kind: "installation",
+            installationId: liveInitial.installations[0]!.id,
+          },
+        ],
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(stillLive.status).not.toBe("succeeded");
+    expect(
+      stillLive.verificationResults.some(
+        (result) => result.status === "failed",
+      ),
+    ).toBe(true);
+
+    // The same holds when the Skill returns under another subagent.
+    const moved = await eveFixture("eve-moved");
+    const movedInitial = await moved.scanLive();
+    const writerArtifact = moved.artifact.replace("reviewer", "writer");
+    const scanWithOtherSubagent = async () => {
+      await access(moved.artifact).catch(() =>
+        createSkill(writerArtifact, "review"),
+      );
+      return moved.scanLive();
+    };
+    const movedRunner = execution(moved.stateRoot, scanWithOtherSubagent, []);
+    const liveElsewhere = await movedRunner.module.executeAvailability(
+      planAvailability(movedInitial, [], {
+        ...intent,
+        targets: [
+          {
+            kind: "installation",
+            installationId: movedInitial.installations[0]!.id,
+          },
+        ],
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect((await moved.scanLive()).installations[0]!.exposedTo).toEqual([
+      "eve:writer",
+    ]);
+    expect(liveElsewhere.status).not.toBe("succeeded");
+    expect(
+      liveElsewhere.verificationResults.some(
+        (result) => result.status === "failed",
+      ),
+    ).toBe(true);
+  });
+
+  it("enables a Disabled entry that an earlier release wrote with an undeclared Eve exposure", async () => {
+    const environment = await environmentFixture();
+    const artifact = join(
+      environment.workspace,
+      "agent",
+      "subagents",
+      "reviewer",
+      "skills",
+      "review",
+    );
+    await createSkill(artifact, "review");
+    await writeFile(
+      join(environment.workspace, "skills-lock.json"),
+      `${JSON.stringify({
+        version: 1,
+        skills: {
+          review: {
+            source: "acme/project-skills",
+            sourceType: "github",
+            sourceUrl: "https://github.com/acme/project-skills.git",
+            skillPath: "skills/review/SKILL.md",
+            subagents: ["reviewer", "writer"],
+          },
+        },
+      })}\n`,
+    );
+    const scanLive = () =>
+      scan(
+        {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        [],
+      );
+    const runner = execution(
+      join(environment.state, "legacy-eve-entry"),
+      scanLive,
+      [],
+    );
+    const initial = await scanLive();
+    expect(initial.installations[0]!.exposedTo).toEqual(["eve:reviewer"]);
+    const target = {
+      kind: "installation" as const,
+      installationId: initial.installations[0]!.id,
+    };
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets: [target],
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const [current] = await runner.disabledStorage.list();
+    expect(current!.harnessExposures.map((item) => item.harnessId)).toEqual([
+      "eve:reviewer",
+    ]);
+
+    // Release 0.4.1 also stored each subagent that the lock declared. Write
+    // that record into the stored manifest, as that release left it on disk.
+    const stateRoot = join(environment.state, "legacy-eve-entry");
+    const manifest = (await readdir(stateRoot, { recursive: true }))
+      .map((path) => join(stateRoot, path))
+      .find((path) => basename(path) === "manifest.json")!;
+    const stored = JSON.parse(await readFile(manifest, "utf8")) as {
+      harnessExposures: { harnessId: string }[];
+    };
+    stored.harnessExposures.push({
+      ...stored.harnessExposures[0]!,
+      harnessId: "eve:writer",
+    });
+    await writeFile(manifest, `${JSON.stringify(stored, null, 2)}\n`);
+    const [legacy] = await runner.disabledStorage.list();
+    expect(legacy!.harnessExposures.map((item) => item.harnessId)).toEqual([
+      "eve:reviewer",
+      "eve:writer",
+    ]);
+
+    const enablePlan = planAvailability(await scanLive(), [legacy!], {
+      operation: "enable",
+      targets: [target],
+      force: false,
+    });
+    expect(enablePlan.blocks).toEqual([]);
+    expect(
+      enablePlan.verificationChecks.flatMap((check) =>
+        check.kind === "harness-exposure-state" ? [check.harnessId] : [],
+      ),
+    ).toEqual(["eve:reviewer"]);
+    const enabled = await runner.module.executeAvailability(enablePlan, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(enabled.status).toBe("succeeded");
+    expect(
+      enabled.verificationResults.every((result) => result.status === "passed"),
+    ).toBe(true);
+    expect((await scanLive()).installations[0]!.exposedTo).toEqual([
+      "eve:reviewer",
+    ]);
+    expect(await runner.disabledStorage.list()).toEqual([]);
+  });
+
+  it("blocks Enable when a foreign file or a live Plugin child occupies the original path", async () => {
+    const environment = await environmentFixture();
+    const canonical = join(environment.home, ".agents", "skills", "review");
+    await createSkill(canonical, "review");
+    await writeFile(
+      join(environment.home, ".agents", ".skill-lock.json"),
+      `${JSON.stringify({
+        version: 3,
+        skills: {
+          review: {
+            source: "acme/review-tools",
+            sourceType: "github",
+            skillPath: "skills/review",
+          },
+        },
+      })}\n`,
+    );
+    const scanLive = () =>
+      scan(
+        {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        [],
+      );
+    const initial = await scanLive();
+    expect(initial.installations).toHaveLength(1);
+    const target = {
+      kind: "installation" as const,
+      installationId: initial.installations[0]!.id,
+    };
+    const runner = execution(
+      join(environment.state, "occupied-restore"),
+      scanLive,
+      [],
+    );
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets: [target],
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const entries = await runner.disabledStorage.list();
+    const enable = (inventory: Inventory) =>
+      planAvailability(inventory, entries, {
+        operation: "enable",
+        targets: [target],
+        force: true,
+      });
+
+    // A vacant lock-only path is a free restore destination.
+    const vacant = await scanLive();
+    expect(enable(vacant).blocks).toEqual([]);
+    expect(enable(vacant).actions).toMatchObject([
+      { kind: "suspended-enable" },
+    ]);
+
+    // A live Plugin child reports no removable primary artifact, but its directory is there.
+    const pluginChild = buildInstallation({
+      id: "plugin-child-at-restore-path",
+      skill: { name: "review", description: null },
+      status: "active",
+      location: {
+        path: canonical,
+        canonicalPath: canonical,
+        artifactType: { kind: "directory" },
+      },
+      removal: {
+        managed: null,
+        fallback: { kind: "unavailable", reason: "a Plugin owns this Skill" },
+        primaryArtifactPresent: false,
+        supplementalArtifacts: [],
+        recordCleanups: [],
+      },
+      suspension: {
+        kind: "unavailable",
+        reason: "a Plugin child cannot be suspended alone",
+      },
+    });
+    const withPluginChild = enable(
+      buildInventory({
+        installations: [...vacant.installations, pluginChild],
+      }),
+    );
+    expect(withPluginChild.actions).toEqual([]);
+    expect(withPluginChild.blocks).toMatchObject([
+      { reason: expect.stringContaining("live Installation occupies") },
+    ]);
+
+    // A regular file at the original directory path is not a Skill, but it occupies the path.
+    await writeFile(canonical, "not a Skill directory");
+    const occupied = enable(await scanLive());
+    expect(occupied.actions).toEqual([]);
+    expect(occupied.blocks).toMatchObject([
+      { reason: expect.stringContaining("live Installation occupies") },
+    ]);
+    await expect(readFile(canonical, "utf8")).resolves.toBe(
+      "not a Skill directory",
+    );
+    expect(await runner.disabledStorage.list()).toHaveLength(1);
+  });
+
+  it("previews only the Disabled entries that an Enable restores", async () => {
+    const environment = await environmentFixture();
+    const names = ["alpha", "beta", "gamma"];
+    for (const name of names)
+      await createSkill(
+        join(environment.home, ".agents", "skills", name),
+        name,
+      );
+    await writeFile(
+      join(environment.home, ".agents", ".skill-lock.json"),
+      `${JSON.stringify({
+        version: 3,
+        skills: Object.fromEntries(
+          names.map((name) => [
+            name,
+            {
+              source: "acme/review-tools",
+              sourceType: "github",
+              skillPath: `skills/${name}`,
+            },
+          ]),
+        ),
+      })}\n`,
+    );
+    const scanLive = () =>
+      scan(
+        {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        [],
+      );
+    const initial = await scanLive();
+    const targets = initial.installations.map((installation) => ({
+      kind: "installation" as const,
+      installationId: installation.id,
+    }));
+    expect(targets).toHaveLength(3);
+    const runner = execution(
+      join(environment.state, "selected-previews"),
+      scanLive,
+      [],
+      { availabilityEnableEntries },
+    );
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets,
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const entries = await runner.disabledStorage.list();
+    expect(entries).toHaveLength(3);
+    const inventory = await scanLive();
+    const one = {
+      operation: "enable" as const,
+      targets: [targets[1]!],
+      force: false,
+    };
+
+    const selected = availabilityEnableEntries(inventory, entries, one);
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.installationIds).toEqual([targets[1]!.installationId]);
+    expect(entries).toContain(selected[0]);
+    expect(
+      availabilityEnableEntries(inventory, entries, {
+        ...one,
+        targets,
+      }),
+    ).toHaveLength(3);
+    expect(
+      availabilityEnableEntries(initial, [], {
+        ...one,
+        operation: "disable",
+      }),
+    ).toEqual([]);
+
+    // Execution looks at the selected entry only before it restores it.
+    const previews = vi.spyOn(runner.disabledStorage, "previewEnable");
+    const enablePlan = planAvailability(inventory, entries, one, [
+      await runner.disabledStorage.previewEnable(selected[0]!),
+    ]);
+    previews.mockClear();
+    await expect(
+      runner.module.executeAvailability(enablePlan, {
+        grants: [{ kind: "confirmation" }],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    expect(previews.mock.calls.map(([entry]) => entry.id)).toEqual([
+      selected[0]!.id,
+    ]);
+    expect(await runner.disabledStorage.list()).toHaveLength(2);
+  });
+
+  it("blocks Enable in the plan when a foreign file occupies the path of an agent link", async () => {
+    const environment = await environmentFixture();
+    const canonical = join(environment.home, ".agents", "skills", "review");
+    const link = join(environment.home, ".claude", "skills", "review");
+    await createSkill(canonical, "review");
+    await mkdir(dirname(link), { recursive: true });
+    await symlink(
+      canonical,
+      link,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await writeFile(
+      join(environment.home, ".agents", ".skill-lock.json"),
+      `${JSON.stringify({
+        version: 3,
+        skills: {
+          review: {
+            source: "acme/review-tools",
+            sourceType: "github",
+            skillPath: "skills/review",
+          },
+        },
+      })}\n`,
+    );
+    // On Windows the link is a junction, and the scanner asks fsutil for its
+    // kind. The other tests of this file have no link and answer no command.
+    const scanLive = () =>
+      createInventoryScanner({
+        now: () => new Date("2026-08-08T12:00:00.000Z"),
+        environment: {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        commandRunner: {
+          async run(command) {
+            return command.executable === "fsutil"
+              ? { exitCode: 0, stdout: "Reparse Tag Value : 0xa0000003\r\n" }
+              : { exitCode: 1, stdout: "" };
+          },
+        },
+      }).scan({ roots: [] });
+    const initial = await scanLive();
+    expect(initial.installations).toHaveLength(1);
+    const target = {
+      kind: "installation" as const,
+      installationId: initial.installations[0]!.id,
+    };
+    const runner = execution(
+      join(environment.state, "occupied-link"),
+      scanLive,
+      [],
+    );
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets: [target],
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const entries = await runner.disabledStorage.list();
+    expect(entries).toHaveLength(1);
+    const intent = {
+      operation: "enable" as const,
+      targets: [target],
+      force: false,
+    };
+
+    // The scanner does not report a regular file at the path of a link.
+    await writeFile(link, "a foreign file");
+    const inventory = await scanLive();
+    const unaware = planAvailability(inventory, entries, intent);
+    expect(unaware.blocks).toEqual([]);
+
+    // Disabled Storage looks at each destination, and the plan uses its answer.
+    const blockedPreview = await runner.disabledStorage.previewEnable(
+      entries[0]!,
+    );
+    expect(blockedPreview).toMatchObject({
+      status: "blocked",
+      reason: "destination-occupied",
+      path: link,
+    });
+    const aware = planAvailability(inventory, entries, intent, [
+      blockedPreview,
+    ]);
+    expect(aware.actions).toEqual([]);
+    expect(aware.blocks).toMatchObject([
+      {
+        kind: "configuration-unsafe",
+        overridable: false,
+        path: link,
+        reason: expect.stringContaining("an original path is occupied"),
+      },
+    ]);
+
+    // Execution looks again, so a plan made with no preview cannot restore.
+    const refused = await runner.module.executeAvailability(unaware, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(refused.status).not.toBe("succeeded");
+    await expect(readFile(link, "utf8")).resolves.toBe("a foreign file");
+    await expect(access(canonical)).rejects.toThrow();
+    expect(await runner.disabledStorage.list()).toHaveLength(1);
+
+    // With the file gone, the same entry restores both paths.
+    await rm(link);
+    const freePreview = await runner.disabledStorage.previewEnable(entries[0]!);
+    expect(freePreview.status).toBe("would-enable");
+    const ready = planAvailability(await scanLive(), entries, intent, [
+      freePreview,
+    ]);
+    expect(ready.blocks).toEqual([]);
+    await expect(
+      runner.module.executeAvailability(ready, {
+        grants: [{ kind: "confirmation" }],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    await expect(readFile(join(link, "SKILL.md"), "utf8")).resolves.toContain(
+      "review",
+    );
+    expect(await runner.disabledStorage.list()).toEqual([]);
   });
 
   it("reports and audits a final Availability rescan failure without claiming verification", async () => {

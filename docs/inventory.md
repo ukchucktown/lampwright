@@ -177,6 +177,11 @@ agent. Exposure is never derived from the shape of a path. It is empty only
 when nothing can load the Skill, as for a lock-only record whose artifacts are
 absent; an active Installation always names at least one agent.
 
+A Vercel lock can declare Eve subagents for a project Skill. A declared
+subagent is an exposure only while the artifact for that subagent is present.
+Thus, a suspended Skill does not keep an exposure that comes from the lock
+alone.
+
 ## Installation Groups
 
 `Inventory.groups` records Installations that one act of installation put in

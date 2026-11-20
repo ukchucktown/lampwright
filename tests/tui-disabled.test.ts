@@ -1304,6 +1304,56 @@ describe("Disabled TUI projection", () => {
     expect(executeRemoval).not.toHaveBeenCalled();
   });
 
+  it("passes the restore preview of the selected Disabled entry to an Enable review only", async () => {
+    const { inventory, enabled } = fixture();
+    const entry = disabledEntry(enabled, "stored-safe");
+    const enableEntries = vi.fn(() => [entry]);
+    const preview = {
+      schemaVersion: 1 as const,
+      status: "blocked" as const,
+      entryId: entry.id,
+      path: "/occupied/agent-link",
+      reason: "destination-occupied" as const,
+    };
+    const previewEnable = vi.fn(async () => preview);
+    const planner = vi.fn(() =>
+      availabilityPlan(inventory.id, "enable", entry),
+    );
+    const controller = new TuiController({
+      scan: vi.fn(async () => inventory),
+      plan,
+      execute: vi.fn(),
+      listDisabled: vi.fn(async () => [entry]),
+      enableEntries,
+      previewEnable,
+      planAvailability: planner,
+      executeAvailability: vi.fn(),
+    });
+    await controller.start();
+    expect(previewEnable).not.toHaveBeenCalled();
+    await controller.dispatch({ kind: "switch-view", view: "disabled" });
+    await controller.dispatch({ kind: "point-section", index: 1 });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "toggle-select" });
+    expect(previewEnable).not.toHaveBeenCalled();
+    await controller.dispatch({ kind: "enable-review" });
+
+    expect(controller.state.screen).toBe("availability-plan");
+    expect(enableEntries).toHaveBeenCalledWith(
+      inventory,
+      [entry],
+      expect.objectContaining({ operation: "enable" }),
+    );
+    expect(previewEnable).toHaveBeenCalledTimes(1);
+    expect(previewEnable).toHaveBeenCalledWith(entry);
+    expect(planner).toHaveBeenCalledWith(
+      inventory,
+      [entry],
+      expect.objectContaining({ operation: "enable" }),
+      [preview],
+    );
+  });
+
   it("completes Availability with line, raw-keyboard, and mouse interactions", async () => {
     const { inventory, enabled } = fixture();
     const entry = disabledEntry(enabled, "stored-input");

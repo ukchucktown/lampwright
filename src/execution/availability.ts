@@ -33,11 +33,28 @@ export async function executeAvailabilityPlan(
   const startedAt = timestamp(options.now());
   const freshInventory = await options.scan();
   const freshEntries = await options.disabledStorage!.list();
-  const freshPlan = options.replanAvailability!(
-    freshInventory,
-    freshEntries,
-    plan.intent,
-  );
+  // An Enable plan is fresh only with a fresh look at the restore destinations.
+  const freshPreviews =
+    plan.intent.operation === "enable"
+      ? await Promise.all(
+          (
+            options.availabilityEnableEntries?.(
+              freshInventory,
+              freshEntries,
+              plan.intent,
+            ) ?? freshEntries
+          ).map((entry) => options.disabledStorage!.previewEnable(entry)),
+        )
+      : [];
+  const freshPlan =
+    freshPreviews.length > 0
+      ? options.replanAvailability!(
+          freshInventory,
+          freshEntries,
+          plan.intent,
+          freshPreviews,
+        )
+      : options.replanAvailability!(freshInventory, freshEntries, plan.intent);
   if (!plansMatch(plan, freshPlan))
     return staleReport(plan, freshInventory, startedAt, options.now);
 
@@ -288,11 +305,17 @@ function verify(
       if (
         !passed &&
         check.expectedStatus === "disabled" &&
-        installation === undefined
+        exposure === undefined
       )
-        passed = entries.some((entry) =>
-          entry.installationIds.includes(check.installationId),
-        );
+        // A stored entry proves the suspension only while no harness can load
+        // the Installation. The Skill can return under another harness ID.
+        passed =
+          entries.some((entry) =>
+            entry.installationIds.includes(check.installationId),
+          ) &&
+          !(installation?.harnessExposures ?? []).some(
+            (item) => item.status !== "disabled",
+          );
     }
     return passed
       ? { checkId: check.id, status: "passed", details: {} }

@@ -24,7 +24,10 @@ import type {
   AvailabilityReport,
   AvailabilityTarget,
 } from "../availability/types.js";
-import type { DisabledEntry } from "../disabled-storage/types.js";
+import type {
+  DisabledEntry,
+  EnablePreview,
+} from "../disabled-storage/types.js";
 import type {
   UpdateIntent,
   UpdatePlan,
@@ -66,10 +69,19 @@ export interface TuiDependencies {
   readonly quarantine?: QuarantineModule;
   /** Availability values are optional for source compatibility with embedders. */
   readonly listDisabled?: () => Promise<readonly DisabledEntry[]>;
+  /** Selects the entries that an Enable intent restores, to preview only those. */
+  readonly enableEntries?: (
+    inventory: Inventory,
+    disabledEntries: readonly DisabledEntry[],
+    intent: AvailabilityIntent,
+  ) => readonly DisabledEntry[];
+  /** Looks at the restore destinations of one entry and changes no state. */
+  readonly previewEnable?: (entry: DisabledEntry) => Promise<EnablePreview>;
   readonly planAvailability?: (
     inventory: Inventory,
     disabledEntries: readonly DisabledEntry[],
     intent: AvailabilityIntent,
+    enablePreviews?: readonly EnablePreview[],
   ) => AvailabilityPlan;
   readonly executeAvailability?: (
     plan: AvailabilityPlan,

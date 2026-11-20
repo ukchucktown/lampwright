@@ -559,7 +559,10 @@ ownership, invoke a manager, or mutate the filesystem itself.
 `runTui(dependencies, terminal?)` is exported for alternate presentation hosts
 and interaction tests. `TuiDependencies` requires Removal `scan`, `plan`, and
 `execute` functions and optionally accepts Availability `listDisabled`,
-`planAvailability`, and `executeAvailability` functions. These use the public
+`enableEntries`, `previewEnable`, `planAvailability`, and `executeAvailability`
+functions. When a host supplies `previewEnable`, an Enable review passes the
+previews to `planAvailability` as a fourth argument. When the host also
+supplies `enableEntries`, the review previews the selected entries only. These use the public
 Inventory, DisabledEntry, Removal/Availability Plan, ApprovalRequirement,
 ExecutionReport, and AvailabilityReport values. Optional `planUpdate` and
 `executeUpdate` functions use the public Update Plan and Update Report values.

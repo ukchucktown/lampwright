@@ -79,6 +79,16 @@ partial, retains the Disabled payloads for recovery, and never overwrites an
 unclaimed path. Running a Manager while its Skill is suspended may recreate a
 declared path; Inventory and Enable surface that replacement as a conflict.
 
+Final verification of a Suspended Disable reads the Installation again. A
+Manager record can stay in Inventory after the suspension, so a missing
+Harness Exposure passes only when a Disabled entry holds the Installation and
+no harness can load it. If the Skill is live under one harness, including a
+harness that the plan did not name, the check fails. After Enable, verification
+requires the enabled state of each Harness Exposure that the entry can restore. An entry from
+release 0.4.1 can record an Eve subagent that the Vercel lock declared with no
+artifact. The stored set cannot restore that exposure, so Enable does not
+require it.
+
 Disabled Storage copies and verifies every artifact before moving each source to
 a same-directory pending name and committing the set as one entry. This avoids
 cross-device rename assumptions: state-volume transfers are verified copies,

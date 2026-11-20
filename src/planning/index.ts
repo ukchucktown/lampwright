@@ -1,5 +1,5 @@
 export { plan } from "./planner.js";
-export { planAvailability } from "./availability.js";
+export { availabilityEnableEntries, planAvailability } from "./availability.js";
 export { planUpdate } from "./update.js";
 export {
   resolveAvailabilitySelectors,

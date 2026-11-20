@@ -81,6 +81,14 @@ primary location only in an explicitly confirmed brute-force plan.
 primary path is already absent. It is valid only with exact record-cleanup
 evidence, allowing a stale lock record to be cleaned without inventing a
 Quarantine source.
+An absent primary artifact does not state that the expected path is free. A
+Plugin child also reports `primaryArtifactPresent: false`, because Lampwright
+cannot remove the child alone, and its directory is live. For a Manager record,
+`location.canonicalPath` is `null` only when nothing is at the expected path. A
+foreign entry at that path, for example a regular file, keeps a canonical path
+and the artifact type `file`, and it adds no identity evidence. Enable planning
+treats the expected path as a free restore destination only for a `broken`
+record that has an absent primary artifact and no canonical path.
 
 Each Installation also has top-level `suspension` evidence for Availability.
 This closed union is either `{ kind: "unavailable", reason }` or an `available`

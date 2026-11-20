@@ -13,8 +13,31 @@ planAvailability(
   inventory: Inventory,
   disabledEntries: readonly DisabledEntry[],
   intent: AvailabilityIntent,
+  enablePreviews?: readonly EnablePreview[],
 ): AvailabilityPlan
 ```
+
+`enablePreviews` holds the answers of `previewEnable` from Disabled Storage for
+an Enable intent. Inventory cannot show each occupant of an original path, for
+example a regular file at the path of an agent link. Disabled Storage examines
+each destination, and a `blocked` preview of a selected entry becomes a
+`configuration-unsafe` block that `force` cannot override. The caller collects
+the previews, because Planning has no side effects. The CLI, the terminal UI,
+and Execution each collect them. Execution collects them again before it
+changes a file, so a plan with no preview cannot restore to an occupied path.
+
+```ts
+availabilityEnableEntries(
+  inventory: Inventory,
+  disabledEntries: readonly DisabledEntry[],
+  intent: AvailabilityIntent,
+): readonly DisabledEntry[]
+```
+
+`availabilityEnableEntries` returns the Disabled entries that an Enable intent
+restores, and no entries for a Disable intent. A preview reads the stored
+content of its entry, so each caller previews these entries only. The cost of
+an Enable plan then follows the selection and not the size of Disabled Storage.
 
 `RemovalIntent` either selects explicit Installation, Logical Skill, or Plugin
 boundary targets, or requests remove-all. Ordinary remove-all includes Plugin

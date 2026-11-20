@@ -21,7 +21,11 @@ import type {
 } from "../model/types.js";
 import { parseInventory } from "../model/validation.js";
 import { parseDisabledEntry } from "../disabled-storage/schema.js";
-import type { DisabledEntry } from "../disabled-storage/types.js";
+import type {
+  DisabledBlockReason,
+  DisabledEntry,
+  EnablePreview,
+} from "../disabled-storage/types.js";
 import type {
   AvailabilityAction,
   AvailabilityBlock,
@@ -47,10 +51,36 @@ type NativeExposure = HarnessExposure & {
   readonly control: Extract<HarnessExposure["control"], { kind: "native" }>;
 };
 
+/**
+ * The Disabled entries that an Enable intent restores, in the order given.
+ * A caller previews these entries only, so the cost of a preview follows the
+ * selection and not the size of Disabled Storage. Returns no entries for a
+ * Disable intent.
+ */
+export function availabilityEnableEntries(
+  inventoryInput: Inventory,
+  disabledEntryInputs: readonly DisabledEntry[],
+  intentInput: AvailabilityIntent,
+): readonly DisabledEntry[] {
+  const intent = parseAvailabilityIntent(intentInput);
+  if (intent.operation !== "enable") return [];
+  const inventory = parseInventory(inventoryInput);
+  const entries = disabledEntryInputs.map(parseDisabledEntry);
+  const selected = new Set(
+    normalizeTargets(
+      intent.targets.map((target) => resolveTarget(inventory, entries, target)),
+    ).flatMap((item) => item.installationIds),
+  );
+  return disabledEntryInputs.filter((_, index) =>
+    entries[index]!.installationIds.some((id) => selected.has(id)),
+  );
+}
+
 export function planAvailability(
   inventoryInput: Inventory,
   disabledEntryInputs: readonly DisabledEntry[],
   intentInput: AvailabilityIntent,
+  enablePreviews: readonly EnablePreview[] = [],
 ): AvailabilityPlan {
   const inventory = parseInventory(inventoryInput);
   const entries = disabledEntryInputs.map(parseDisabledEntry);
@@ -73,7 +103,14 @@ export function planAvailability(
   for (const item of resolved) {
     const itemBlocks =
       item.plugin === null
-        ? targetBlocks(inventory, entries, item, normalizedIntent, selectedIds)
+        ? targetBlocks(
+            inventory,
+            entries,
+            item,
+            normalizedIntent,
+            selectedIds,
+            enablePreviews,
+          )
         : pluginTargetBlocks(inventory, item, normalizedIntent, selectedIds);
     blocks.push(...itemBlocks);
     if (itemBlocks.some((block) => !block.overridable || !intent.force))
@@ -451,6 +488,7 @@ function targetBlocks(
   resolved: ResolvedAvailabilityTarget,
   intent: AvailabilityIntent,
   selectedIds: ReadonlySet<InstallationId>,
+  enablePreviews: readonly EnablePreview[],
 ): AvailabilityBlock[] {
   const blocks: AvailabilityBlock[] = [];
   const selectedEntries = entries.filter((entry) =>
@@ -574,6 +612,18 @@ function targetBlocks(
         );
     }
     for (const entry of selectedEntries) {
+      // Disabled Storage examined the real destinations. Inventory cannot see
+      // each occupant, for example a foreign file at the path of an agent link.
+      const preview = enablePreviews.find((item) => item.entryId === entry.id);
+      if (preview?.status === "blocked")
+        blocks.push(
+          absoluteBlock(
+            "configuration-unsafe",
+            resolved.target,
+            `Disabled Storage cannot restore this entry: ${restoreBlockReasons[preview.reason]}`,
+            preview.path,
+          ),
+        );
       for (const location of entryLocations(entry)) {
         const key = physicalPathKey(location);
         if (
@@ -864,11 +914,28 @@ function installationArtifactLocations(
   return installation.suspension.kind === "available"
     ? installation.suspension.artifacts.map((artifact) => artifact.location)
     : [
-        installation.location,
+        ...(primaryLocationIsVacant(installation)
+          ? []
+          : [installation.location]),
         ...(installation.removal.supplementalArtifacts ?? []).map(
           (artifact) => artifact.location,
         ),
       ];
+}
+
+/**
+ * True only for a stale Manager record whose expected path holds nothing: the
+ * record is broken, its primary artifact is absent, and nothing resolved at
+ * the path. An absent primary artifact alone does not prove this, because a
+ * Plugin child also reports it while its directory is live, and a foreign
+ * file at the path keeps a canonical path.
+ */
+function primaryLocationIsVacant(installation: Installation): boolean {
+  return (
+    installation.status === "broken" &&
+    installation.removal.primaryArtifactPresent === false &&
+    installation.location.canonicalPath === null
+  );
 }
 
 function locationsOverlap(
@@ -1360,7 +1427,9 @@ function createChecks(
           expectedPresent: false,
         });
         for (const installationId of action.affectedInstallationIds)
-          for (const exposure of action.entry.harnessExposures)
+          for (const exposure of action.entry.harnessExposures.filter((item) =>
+            storedExposureIsBacked(action.entry, item.harnessId),
+          ))
             checks.push({
               id: stableId(
                 "availability-check",
@@ -1380,6 +1449,37 @@ function createChecks(
     }
   }
   return checks.sort((left, right) => compare(left.id, right.id));
+}
+
+/**
+ * False for an Eve exposure that the entry cannot restore. An entry written
+ * before release 0.4.2 also records each Eve subagent that the Vercel lock
+ * declared, with or without an artifact. Only an artifact in the stored set
+ * returns an exposure, so only those exposures need a check after Enable.
+ */
+function storedExposureIsBacked(
+  entry: DisabledEntry,
+  harnessId: string,
+): boolean {
+  if (harnessId !== "eve" && !harnessId.startsWith("eve:")) return true;
+  const subagent = harnessId === "eve" ? null : harnessId.slice(4);
+  return entryLocations(entry).some((location) => {
+    const segments = location.path.split(/[\\/]+/).slice(0, -1);
+    if (segments.at(-1) !== "skills") return false;
+    return subagent === null
+      ? segments.at(-2) === "agent"
+      : segments.at(-3) === "subagents" &&
+          segments.at(-4) === "agent" &&
+          installNameKey(segments.at(-2) ?? "") === installNameKey(subagent);
+  });
+}
+
+/** The directory name that the Vercel Manager derives from a declared name. */
+function installNameKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9._]+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "");
 }
 
 function approvalsFor(
@@ -1458,6 +1558,15 @@ function precedence(
       ? 2
       : 1;
 }
+const restoreBlockReasons: Readonly<Record<DisabledBlockReason, string>> = {
+  "destination-occupied": "an original path is occupied",
+  "git-protected": "an original path is protected by Git",
+  "integrity-failed": "the stored content does not match its record",
+  "entry-not-found": "the stored entry is missing",
+  "state-unsafe": "the storage or a parent directory is not safe to change",
+  "source-not-eligible": "the stored content is not eligible",
+};
+
 function absoluteBlock(
   kind: Exclude<AvailabilityBlock["kind"], "hard-dependency">,
   target: AvailabilityTarget,
