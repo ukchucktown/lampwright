@@ -1304,9 +1304,10 @@ describe("Disabled TUI projection", () => {
     expect(executeRemoval).not.toHaveBeenCalled();
   });
 
-  it("passes the restore preview of each Disabled entry to an Enable review only", async () => {
+  it("passes the restore preview of the selected Disabled entry to an Enable review only", async () => {
     const { inventory, enabled } = fixture();
     const entry = disabledEntry(enabled, "stored-safe");
+    const enableEntries = vi.fn(() => [entry]);
     const preview = {
       schemaVersion: 1 as const,
       status: "blocked" as const,
@@ -1323,6 +1324,7 @@ describe("Disabled TUI projection", () => {
       plan,
       execute: vi.fn(),
       listDisabled: vi.fn(async () => [entry]),
+      enableEntries,
       previewEnable,
       planAvailability: planner,
       executeAvailability: vi.fn(),
@@ -1337,6 +1339,11 @@ describe("Disabled TUI projection", () => {
     await controller.dispatch({ kind: "enable-review" });
 
     expect(controller.state.screen).toBe("availability-plan");
+    expect(enableEntries).toHaveBeenCalledWith(
+      inventory,
+      [entry],
+      expect.objectContaining({ operation: "enable" }),
+    );
     expect(previewEnable).toHaveBeenCalledTimes(1);
     expect(previewEnable).toHaveBeenCalledWith(entry);
     expect(planner).toHaveBeenCalledWith(

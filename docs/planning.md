@@ -26,6 +26,19 @@ the previews, because Planning has no side effects. The CLI, the terminal UI,
 and Execution each collect them. Execution collects them again before it
 changes a file, so a plan with no preview cannot restore to an occupied path.
 
+```ts
+availabilityEnableEntries(
+  inventory: Inventory,
+  disabledEntries: readonly DisabledEntry[],
+  intent: AvailabilityIntent,
+): readonly DisabledEntry[]
+```
+
+`availabilityEnableEntries` returns the Disabled entries that an Enable intent
+restores, and no entries for a Disable intent. A preview reads the stored
+content of its entry, so each caller previews these entries only. The cost of
+an Enable plan then follows the selection and not the size of Disabled Storage.
+
 `RemovalIntent` either selects explicit Installation, Logical Skill, or Plugin
 boundary targets, or requests remove-all. Ordinary remove-all includes Plugin
 children only when their boundary declares them independently selectable. It

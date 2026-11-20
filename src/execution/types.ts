@@ -120,6 +120,15 @@ export interface ExecutionModuleOptions {
       ReturnType<DisabledStorageModule["previewEnable"]>
     >[],
   ) => AvailabilityPlan;
+  /**
+   * Selects the entries that an Enable intent restores. With no selector,
+   * Execution previews each Disabled entry.
+   */
+  readonly availabilityEnableEntries?: (
+    inventory: Inventory,
+    disabledEntries: Awaited<ReturnType<DisabledStorageModule["list"]>>,
+    intent: AvailabilityIntent,
+  ) => Awaited<ReturnType<DisabledStorageModule["list"]>>;
   readonly availabilityAuditWriter?: AvailabilityExecutionAuditWriter;
   readonly replanUpdate?: (
     inventory: Inventory,

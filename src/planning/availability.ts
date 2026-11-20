@@ -51,6 +51,31 @@ type NativeExposure = HarnessExposure & {
   readonly control: Extract<HarnessExposure["control"], { kind: "native" }>;
 };
 
+/**
+ * The Disabled entries that an Enable intent restores, in the order given.
+ * A caller previews these entries only, so the cost of a preview follows the
+ * selection and not the size of Disabled Storage. Returns no entries for a
+ * Disable intent.
+ */
+export function availabilityEnableEntries(
+  inventoryInput: Inventory,
+  disabledEntryInputs: readonly DisabledEntry[],
+  intentInput: AvailabilityIntent,
+): readonly DisabledEntry[] {
+  const intent = parseAvailabilityIntent(intentInput);
+  if (intent.operation !== "enable") return [];
+  const inventory = parseInventory(inventoryInput);
+  const entries = disabledEntryInputs.map(parseDisabledEntry);
+  const selected = new Set(
+    normalizeTargets(
+      intent.targets.map((target) => resolveTarget(inventory, entries, target)),
+    ).flatMap((item) => item.installationIds),
+  );
+  return disabledEntryInputs.filter((_, index) =>
+    entries[index]!.installationIds.some((id) => selected.has(id)),
+  );
+}
+
 export function planAvailability(
   inventoryInput: Inventory,
   disabledEntryInputs: readonly DisabledEntry[],

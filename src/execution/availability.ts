@@ -37,9 +37,13 @@ export async function executeAvailabilityPlan(
   const freshPreviews =
     plan.intent.operation === "enable"
       ? await Promise.all(
-          freshEntries.map((entry) =>
-            options.disabledStorage!.previewEnable(entry),
-          ),
+          (
+            options.availabilityEnableEntries?.(
+              freshInventory,
+              freshEntries,
+              plan.intent,
+            ) ?? freshEntries
+          ).map((entry) => options.disabledStorage!.previewEnable(entry)),
         )
       : [];
   const freshPlan =

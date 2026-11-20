@@ -44,6 +44,7 @@ import type {
 import { parseExecutionApprovals } from "./model/validation.js";
 import type { UpdateIntent, UpdatePlan, UpdateReport } from "./update/index.js";
 import {
+  availabilityEnableEntries,
   plan,
   planAvailability,
   planUpdate,
@@ -593,13 +594,18 @@ async function availability(
   );
   const planner = dependencies.planAvailability ?? planAvailability;
   const storage = disabledStorage.module;
+  const intent = { operation, targets, force: args.force };
+  // Only the entries that this Enable restores need a look at their destinations.
   const enablePreviews =
     operation === "enable" && storage !== undefined
       ? await Promise.all(
-          disabledEntries.map((entry) => storage.previewEnable(entry)),
+          availabilityEnableEntries(
+            scanned.inventory,
+            disabledEntries,
+            intent,
+          ).map((entry) => storage.previewEnable(entry)),
         )
       : [];
-  const intent = { operation, targets, force: args.force };
   const availabilityPlan =
     enablePreviews.length > 0
       ? planner(scanned.inventory, disabledEntries, intent, enablePreviews)
@@ -957,6 +963,7 @@ async function productionExecuteAvailability(
     stateRoot,
     disabledStorage: providedStorage,
     replanAvailability: planAvailability,
+    availabilityEnableEntries,
     availabilityAuditWriter:
       createFileAvailabilityExecutionAuditWriter(stateRoot),
   }).executeAvailability(availabilityPlan, { grants: approvals });
@@ -1211,6 +1218,7 @@ async function main(): Promise<void> {
           productionExecute(removalPlan, [], [], [], approvals),
         quarantine,
         listDisabled: () => disabledStorage.list(),
+        enableEntries: availabilityEnableEntries,
         previewEnable: (entry) => disabledStorage.previewEnable(entry),
         planAvailability,
         executeAvailability: (availabilityPlan, approvals) =>

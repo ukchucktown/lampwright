@@ -8,9 +8,10 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  availabilityEnableEntries,
   createDisabledStorageModule,
   createExecutionModule,
   createInventoryScanner,
@@ -803,6 +804,102 @@ describe("Availability Planning and Execution", () => {
       "not a Skill directory",
     );
     expect(await runner.disabledStorage.list()).toHaveLength(1);
+  });
+
+  it("previews only the Disabled entries that an Enable restores", async () => {
+    const environment = await environmentFixture();
+    const names = ["alpha", "beta", "gamma"];
+    for (const name of names)
+      await createSkill(
+        join(environment.home, ".agents", "skills", name),
+        name,
+      );
+    await writeFile(
+      join(environment.home, ".agents", ".skill-lock.json"),
+      `${JSON.stringify({
+        version: 3,
+        skills: Object.fromEntries(
+          names.map((name) => [
+            name,
+            {
+              source: "acme/review-tools",
+              sourceType: "github",
+              skillPath: `skills/${name}`,
+            },
+          ]),
+        ),
+      })}\n`,
+    );
+    const scanLive = () =>
+      scan(
+        {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        [],
+      );
+    const initial = await scanLive();
+    const targets = initial.installations.map((installation) => ({
+      kind: "installation" as const,
+      installationId: installation.id,
+    }));
+    expect(targets).toHaveLength(3);
+    const runner = execution(
+      join(environment.state, "selected-previews"),
+      scanLive,
+      [],
+      { availabilityEnableEntries },
+    );
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets,
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const entries = await runner.disabledStorage.list();
+    expect(entries).toHaveLength(3);
+    const inventory = await scanLive();
+    const one = {
+      operation: "enable" as const,
+      targets: [targets[1]!],
+      force: false,
+    };
+
+    const selected = availabilityEnableEntries(inventory, entries, one);
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.installationIds).toEqual([targets[1]!.installationId]);
+    expect(entries).toContain(selected[0]);
+    expect(
+      availabilityEnableEntries(inventory, entries, {
+        ...one,
+        targets,
+      }),
+    ).toHaveLength(3);
+    expect(
+      availabilityEnableEntries(initial, [], {
+        ...one,
+        operation: "disable",
+      }),
+    ).toEqual([]);
+
+    // Execution looks at the selected entry only before it restores it.
+    const previews = vi.spyOn(runner.disabledStorage, "previewEnable");
+    const enablePlan = planAvailability(inventory, entries, one, [
+      await runner.disabledStorage.previewEnable(selected[0]!),
+    ]);
+    previews.mockClear();
+    await expect(
+      runner.module.executeAvailability(enablePlan, {
+        grants: [{ kind: "confirmation" }],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    expect(previews.mock.calls.map(([entry]) => entry.id)).toEqual([
+      selected[0]!.id,
+    ]);
+    expect(await runner.disabledStorage.list()).toHaveLength(2);
   });
 
   it("blocks Enable in the plan when a foreign file occupies the path of an agent link", async () => {

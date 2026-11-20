@@ -69,6 +69,12 @@ export interface TuiDependencies {
   readonly quarantine?: QuarantineModule;
   /** Availability values are optional for source compatibility with embedders. */
   readonly listDisabled?: () => Promise<readonly DisabledEntry[]>;
+  /** Selects the entries that an Enable intent restores, to preview only those. */
+  readonly enableEntries?: (
+    inventory: Inventory,
+    disabledEntries: readonly DisabledEntry[],
+    intent: AvailabilityIntent,
+  ) => readonly DisabledEntry[];
   /** Looks at the restore destinations of one entry and changes no state. */
   readonly previewEnable?: (entry: DisabledEntry) => Promise<EnablePreview>;
   readonly planAvailability?: (
