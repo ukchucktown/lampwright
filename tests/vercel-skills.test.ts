@@ -1214,6 +1214,89 @@ describe("Vercel skills adapter", () => {
       exposedTo: [],
     });
   });
+
+  it("exposes a lock-declared Eve subagent only while its artifact is present", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const subagentSkill = join(
+      environment.workspaceDirectory,
+      "agent",
+      "subagents",
+      "reviewer",
+      "skills",
+      "review",
+    );
+    await writeJson(projectLockPath(environment), {
+      version: 1,
+      skills: {
+        review: {
+          source: "acme/project-skills",
+          sourceType: "github",
+          sourceUrl: "https://github.com/acme/project-skills.git",
+          skillPath: "skills/review/SKILL.md",
+          subagents: ["reviewer"],
+        },
+      },
+    });
+
+    const declaredOnly = await scanner(environment, true).scan({});
+
+    expect(declaredOnly.installations).toHaveLength(1);
+    expect(declaredOnly.installations[0]).toMatchObject({
+      status: "broken",
+      exposedTo: [],
+      harnessExposures: [],
+    });
+
+    await writeSkill(subagentSkill, "review");
+    const live = await scanner(environment, true).scan({});
+
+    expect(live.installations).toHaveLength(1);
+    expect(live.installations[0]!.exposedTo).toEqual(["eve:reviewer"]);
+  });
+
+  it("keeps a canonical path for a foreign file at the expected path of a lock-only record", async () => {
+    const fixture = await createTestEnvironment();
+    const environment = scanEnvironment(fixture);
+    const canonical = globalCanonicalPath(environment, "absent-tools");
+    await writeJson(globalLockPath(environment), {
+      version: 3,
+      skills: {
+        "absent-tools": {
+          source: "acme/absent-tools",
+          sourceType: "github",
+          skillPath: "skills/absent-tools",
+        },
+      },
+    });
+
+    const vacant = await scanner(environment, true).scan({});
+
+    expect(vacant.installations[0]).toMatchObject({
+      status: "broken",
+      location: { path: canonical, canonicalPath: null },
+      removal: { primaryArtifactPresent: false },
+    });
+
+    await mkdir(dirname(canonical), { recursive: true });
+    await writeFile(canonical, "not a Skill directory", "utf8");
+    const occupied = await scanner(environment, true).scan({});
+
+    expect(occupied.installations).toHaveLength(1);
+    const record = occupied.installations[0]!;
+    expect(record).toMatchObject({
+      status: "broken",
+      exposedTo: [],
+      location: { path: canonical, artifactType: { kind: "file" } },
+      removal: { primaryArtifactPresent: false },
+    });
+    expect(record.location.canonicalPath).not.toBeNull();
+    expect(
+      record.identity.strongEvidence.some(
+        (evidence) => evidence.kind === "canonical-target",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("Vercel skills adapter at the pinned skills version", () => {

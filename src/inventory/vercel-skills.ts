@@ -196,8 +196,12 @@ async function materializeLockEntry(input: {
     artifacts.find((artifact) => !isBroken(artifact.location)) ??
     canonicalArtifact ??
     artifacts[0];
+  // With no artifact, the expected path is vacant only when nothing is there.
+  // A foreign entry, such as a regular file, keeps a canonical path so that
+  // Planning does not treat the path as a free restore destination.
   const primaryLocation =
     primary?.location ??
+    (await foreignOccupant(canonicalPath)) ??
     ({
       path: canonicalPath,
       canonicalPath: null,
@@ -240,7 +244,7 @@ async function materializeLockEntry(input: {
       skillPath,
     });
   }
-  if (primaryLocation.canonicalPath !== null) {
+  if (primary !== undefined && primaryLocation.canonicalPath !== null) {
     strongEvidence.push({
       strength: "strong",
       kind: "canonical-target",
@@ -367,10 +371,25 @@ async function materializeLockEntry(input: {
     ownerRecordDigest,
     localChanges,
   });
+  // The lock declares Eve subagents, but a declaration is not an exposure:
+  // an agent can load the Skill only while its artifact is present.
+  const presentPaths = new Set(
+    artifacts.map((artifact) => pathKey(artifact.location.path)),
+  );
   const agents = [
     ...new Set([
       ...artifacts.map((artifact) => artifact.agentId),
-      ...declaredEveAgents(input.entry),
+      ...(input.lock.format === "project"
+        ? declaredEveSubagents(input.entry)
+            .filter((subagent) =>
+              presentPaths.has(
+                pathKey(
+                  eveSkillPath(input.environment, subagent, sanitizedName),
+                ),
+              ),
+            )
+            .map(eveAgentId)
+        : []),
     ]),
   ];
 
@@ -1543,10 +1562,45 @@ function numberField(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function declaredEveAgents(entry: Record<string, unknown>): readonly string[] {
-  return declaredEveSubagents(entry).map((value) =>
-    isEveRootSubagent(value) ? "eve" : `eve:${value}`,
-  );
+function eveAgentId(subagent: string): string {
+  return isEveRootSubagent(subagent) ? "eve" : `eve:${subagent}`;
+}
+
+/** Where the Manager installs a project Skill for the Eve root or one subagent. */
+function eveSkillPath(
+  environment: InventoryScanEnvironment,
+  subagent: string,
+  sanitizedName: string,
+): string {
+  return isEveRootSubagent(subagent)
+    ? join(environment.workspaceDirectory, "agent", "skills", sanitizedName)
+    : join(
+        environment.workspaceDirectory,
+        "agent",
+        "subagents",
+        sanitizeInstallName(subagent),
+        "skills",
+        sanitizedName,
+      );
+}
+
+/**
+ * The location of an entry at `path` that is not a Skill artifact, or null
+ * when the path is vacant. Directories and links are artifacts and never
+ * reach this check.
+ */
+async function foreignOccupant(path: string): Promise<ArtifactLocation | null> {
+  try {
+    await lstat(path);
+  } catch (error: unknown) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  return {
+    path,
+    canonicalPath: await realpath(path).catch(() => path),
+    artifactType: { kind: "file" },
+  };
 }
 
 function declaredEveSubagents(

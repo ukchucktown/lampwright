@@ -864,13 +864,28 @@ function installationArtifactLocations(
   return installation.suspension.kind === "available"
     ? installation.suspension.artifacts.map((artifact) => artifact.location)
     : [
-        ...(installation.removal.primaryArtifactPresent !== false
-          ? [installation.location]
-          : []),
+        ...(primaryLocationIsVacant(installation)
+          ? []
+          : [installation.location]),
         ...(installation.removal.supplementalArtifacts ?? []).map(
           (artifact) => artifact.location,
         ),
       ];
+}
+
+/**
+ * True only for a stale Manager record whose expected path holds nothing: the
+ * record is broken, its primary artifact is absent, and nothing resolved at
+ * the path. An absent primary artifact alone does not prove this, because a
+ * Plugin child also reports it while its directory is live, and a foreign
+ * file at the path keeps a canonical path.
+ */
+function primaryLocationIsVacant(installation: Installation): boolean {
+  return (
+    installation.status === "broken" &&
+    installation.removal.primaryArtifactPresent === false &&
+    installation.location.canonicalPath === null
+  );
 }
 
 function locationsOverlap(
