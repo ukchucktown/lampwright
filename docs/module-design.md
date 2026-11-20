@@ -263,6 +263,28 @@ user intent or approvals. They must not:
 
 This keeps interactive and automated behavior equivalent and allows both presentation modules to be built in parallel after the core value types stabilize.
 
+## Preferences module
+
+Interface:
+
+```ts
+createThemePreferences(options: ThemePreferencesOptions): ThemePreferences
+
+interface ThemePreferences {
+  list(): Promise<readonly ThemeChoice[]>
+  selected(): Promise<string | null>
+  select(name: string): Promise<void>
+}
+```
+
+The module owns the Lampwright configuration directory, the parser for theme
+files, and the saved theme selection. `list` and `selected` only read.
+`select` is the one operation that writes, and it changes only the `theme`
+value of `config.toml`. The CLI creates the module and passes it to the
+terminal UI, so the terminal UI does not read or write the configuration
+directory directly. [ADR 0017](./adr/0017-keep-theme-preferences-in-a-configuration-file.md)
+records the decision to keep this state.
+
 ## Session setup extension
 
 The [Session setup contract](./session-setup.md#shared-contracts-and-compatibility)
