@@ -1,5 +1,12 @@
 # Lampwright
 
+**Switch agent Skills off. Keep them installed.**
+
+![Lampwright disables four Skills, enables one again, and opens the theme picker](./.github/assets/lampwright-demo.gif)
+
+If Lampwright saves context for you, a star on GitHub helps other people find
+it.
+
 `lampwright` is a cross-platform terminal application that manages AI agent
 Skills and Plugins. It discovers installed content, lets you disable and enable
 unused Skills, updates Owner-managed content, and safely removes what you no
@@ -10,8 +17,6 @@ large Skill collection installed and expose only the Skills that you need at
 the time. A smaller active set can reduce the Skill metadata that a harness
 loads into model context and may lower token use. The actual savings depend on
 the harness and how it loads Skills.
-
-![Lampwright Inventory terminal interface](./docs/assets/tui-inventory.png)
 
 ## Reversible Skill control
 
@@ -96,6 +101,8 @@ npx lampwright@0.4.1
 
 This command downloads the package to npm's cache. Lampwright does not install
 itself globally or add a dependency to the current project.
+
+![Lampwright Inventory terminal interface](./docs/assets/tui-inventory.png)
 
 The header shows the three views, which are Inventory, Disabled, and Trash, and
 the selection status. The row below the header shows the keys that apply in the
