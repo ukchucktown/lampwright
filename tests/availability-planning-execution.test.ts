@@ -926,14 +926,23 @@ describe("Availability Planning and Execution", () => {
         },
       })}\n`,
     );
+    // On Windows the link is a junction, and the scanner asks fsutil for its
+    // kind. The other tests of this file have no link and answer no command.
     const scanLive = () =>
-      scan(
-        {
+      createInventoryScanner({
+        now: () => new Date("2026-08-08T12:00:00.000Z"),
+        environment: {
           homeDirectory: environment.home,
           workspaceDirectory: environment.workspace,
         },
-        [],
-      );
+        commandRunner: {
+          async run(command) {
+            return command.executable === "fsutil"
+              ? { exitCode: 0, stdout: "Reparse Tag Value : 0xa0000003\r\n" }
+              : { exitCode: 1, stdout: "" };
+          },
+        },
+      }).scan({ roots: [] });
     const initial = await scanLive();
     expect(initial.installations).toHaveLength(1);
     const target = {
