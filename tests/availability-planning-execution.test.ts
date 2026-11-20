@@ -1,5 +1,12 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  access,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -796,6 +803,122 @@ describe("Availability Planning and Execution", () => {
       "not a Skill directory",
     );
     expect(await runner.disabledStorage.list()).toHaveLength(1);
+  });
+
+  it("blocks Enable in the plan when a foreign file occupies the path of an agent link", async () => {
+    const environment = await environmentFixture();
+    const canonical = join(environment.home, ".agents", "skills", "review");
+    const link = join(environment.home, ".claude", "skills", "review");
+    await createSkill(canonical, "review");
+    await mkdir(dirname(link), { recursive: true });
+    await symlink(
+      canonical,
+      link,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await writeFile(
+      join(environment.home, ".agents", ".skill-lock.json"),
+      `${JSON.stringify({
+        version: 3,
+        skills: {
+          review: {
+            source: "acme/review-tools",
+            sourceType: "github",
+            skillPath: "skills/review",
+          },
+        },
+      })}\n`,
+    );
+    const scanLive = () =>
+      scan(
+        {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        [],
+      );
+    const initial = await scanLive();
+    expect(initial.installations).toHaveLength(1);
+    const target = {
+      kind: "installation" as const,
+      installationId: initial.installations[0]!.id,
+    };
+    const runner = execution(
+      join(environment.state, "occupied-link"),
+      scanLive,
+      [],
+    );
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets: [target],
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const entries = await runner.disabledStorage.list();
+    expect(entries).toHaveLength(1);
+    const intent = {
+      operation: "enable" as const,
+      targets: [target],
+      force: false,
+    };
+
+    // The scanner does not report a regular file at the path of a link.
+    await writeFile(link, "a foreign file");
+    const inventory = await scanLive();
+    const unaware = planAvailability(inventory, entries, intent);
+    expect(unaware.blocks).toEqual([]);
+
+    // Disabled Storage looks at each destination, and the plan uses its answer.
+    const blockedPreview = await runner.disabledStorage.previewEnable(
+      entries[0]!,
+    );
+    expect(blockedPreview).toMatchObject({
+      status: "blocked",
+      reason: "destination-occupied",
+      path: link,
+    });
+    const aware = planAvailability(inventory, entries, intent, [
+      blockedPreview,
+    ]);
+    expect(aware.actions).toEqual([]);
+    expect(aware.blocks).toMatchObject([
+      {
+        kind: "configuration-unsafe",
+        overridable: false,
+        path: link,
+        reason: expect.stringContaining("an original path is occupied"),
+      },
+    ]);
+
+    // Execution looks again, so a plan made with no preview cannot restore.
+    const refused = await runner.module.executeAvailability(unaware, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(refused.status).not.toBe("succeeded");
+    await expect(readFile(link, "utf8")).resolves.toBe("a foreign file");
+    await expect(access(canonical)).rejects.toThrow();
+    expect(await runner.disabledStorage.list()).toHaveLength(1);
+
+    // With the file gone, the same entry restores both paths.
+    await rm(link);
+    const freePreview = await runner.disabledStorage.previewEnable(entries[0]!);
+    expect(freePreview.status).toBe("would-enable");
+    const ready = planAvailability(await scanLive(), entries, intent, [
+      freePreview,
+    ]);
+    expect(ready.blocks).toEqual([]);
+    await expect(
+      runner.module.executeAvailability(ready, {
+        grants: [{ kind: "confirmation" }],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    await expect(readFile(join(link, "SKILL.md"), "utf8")).resolves.toContain(
+      "review",
+    );
+    expect(await runner.disabledStorage.list()).toEqual([]);
   });
 
   it("reports and audits a final Availability rescan failure without claiming verification", async () => {

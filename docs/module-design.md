@@ -61,6 +61,7 @@ planAvailability(
   inventory: Inventory,
   disabledEntries: readonly DisabledEntry[],
   intent: AvailabilityIntent,
+  enablePreviews?: readonly EnablePreview[],
 ): AvailabilityPlan
 planUpdate(inventory: Inventory, intent: UpdateIntent): UpdatePlan
 ```

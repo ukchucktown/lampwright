@@ -24,6 +24,7 @@ import type {
 import {
   createDisabledStorageModule,
   type DisabledEntry,
+  type EnablePreview,
   type DisabledStorageModule,
 } from "./disabled-storage/index.js";
 import { nodeArtifactFileSystem } from "./filesystem/artifact-filesystem.js";
@@ -90,6 +91,7 @@ export interface CliDependencies {
     inventory: Inventory,
     disabledEntries: readonly DisabledEntry[],
     intent: AvailabilityIntent,
+    enablePreviews?: readonly EnablePreview[],
   ) => AvailabilityPlan;
   readonly executeAvailability?: (
     plan: AvailabilityPlan,
@@ -590,11 +592,18 @@ async function availability(
     args.values,
   );
   const planner = dependencies.planAvailability ?? planAvailability;
-  const availabilityPlan = planner(scanned.inventory, disabledEntries, {
-    operation,
-    targets,
-    force: args.force,
-  });
+  const storage = disabledStorage.module;
+  const enablePreviews =
+    operation === "enable" && storage !== undefined
+      ? await Promise.all(
+          disabledEntries.map((entry) => storage.previewEnable(entry)),
+        )
+      : [];
+  const intent = { operation, targets, force: args.force };
+  const availabilityPlan =
+    enablePreviews.length > 0
+      ? planner(scanned.inventory, disabledEntries, intent, enablePreviews)
+      : planner(scanned.inventory, disabledEntries, intent);
   const planEnvelope = {
     schemaVersion: 1 as const,
     kind: "availability-plan" as const,
@@ -1202,6 +1211,7 @@ async function main(): Promise<void> {
           productionExecute(removalPlan, [], [], [], approvals),
         quarantine,
         listDisabled: () => disabledStorage.list(),
+        previewEnable: (entry) => disabledStorage.previewEnable(entry),
         planAvailability,
         executeAvailability: (availabilityPlan, approvals) =>
           productionExecuteAvailability(

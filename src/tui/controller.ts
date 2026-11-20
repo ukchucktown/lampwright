@@ -612,11 +612,24 @@ export class TuiController {
       };
       return;
     }
-    const plan = planner(state.inventory, state.disabledEntries ?? [], {
-      operation,
-      targets,
-      force: false,
-    });
+    const previewEnable = this.dependencies.previewEnable;
+    const enablePreviews =
+      operation === "enable" && previewEnable !== undefined
+        ? await Promise.all(
+            (state.disabledEntries ?? []).map((entry) => previewEnable(entry)),
+          )
+        : [];
+    const intent = { operation, targets, force: false };
+    // The call keeps three arguments with no previews, as hosts expect.
+    const plan =
+      enablePreviews.length > 0
+        ? planner(
+            state.inventory,
+            state.disabledEntries ?? [],
+            intent,
+            enablePreviews,
+          )
+        : planner(state.inventory, state.disabledEntries ?? [], intent);
     this.stateValue = {
       screen: "availability-plan",
       browse: browseSnapshot(state),

@@ -21,7 +21,11 @@ import type {
 } from "../model/types.js";
 import { parseInventory } from "../model/validation.js";
 import { parseDisabledEntry } from "../disabled-storage/schema.js";
-import type { DisabledEntry } from "../disabled-storage/types.js";
+import type {
+  DisabledBlockReason,
+  DisabledEntry,
+  EnablePreview,
+} from "../disabled-storage/types.js";
 import type {
   AvailabilityAction,
   AvailabilityBlock,
@@ -51,6 +55,7 @@ export function planAvailability(
   inventoryInput: Inventory,
   disabledEntryInputs: readonly DisabledEntry[],
   intentInput: AvailabilityIntent,
+  enablePreviews: readonly EnablePreview[] = [],
 ): AvailabilityPlan {
   const inventory = parseInventory(inventoryInput);
   const entries = disabledEntryInputs.map(parseDisabledEntry);
@@ -73,7 +78,14 @@ export function planAvailability(
   for (const item of resolved) {
     const itemBlocks =
       item.plugin === null
-        ? targetBlocks(inventory, entries, item, normalizedIntent, selectedIds)
+        ? targetBlocks(
+            inventory,
+            entries,
+            item,
+            normalizedIntent,
+            selectedIds,
+            enablePreviews,
+          )
         : pluginTargetBlocks(inventory, item, normalizedIntent, selectedIds);
     blocks.push(...itemBlocks);
     if (itemBlocks.some((block) => !block.overridable || !intent.force))
@@ -451,6 +463,7 @@ function targetBlocks(
   resolved: ResolvedAvailabilityTarget,
   intent: AvailabilityIntent,
   selectedIds: ReadonlySet<InstallationId>,
+  enablePreviews: readonly EnablePreview[],
 ): AvailabilityBlock[] {
   const blocks: AvailabilityBlock[] = [];
   const selectedEntries = entries.filter((entry) =>
@@ -574,6 +587,18 @@ function targetBlocks(
         );
     }
     for (const entry of selectedEntries) {
+      // Disabled Storage examined the real destinations. Inventory cannot see
+      // each occupant, for example a foreign file at the path of an agent link.
+      const preview = enablePreviews.find((item) => item.entryId === entry.id);
+      if (preview?.status === "blocked")
+        blocks.push(
+          absoluteBlock(
+            "configuration-unsafe",
+            resolved.target,
+            `Disabled Storage cannot restore this entry: ${restoreBlockReasons[preview.reason]}`,
+            preview.path,
+          ),
+        );
       for (const location of entryLocations(entry)) {
         const key = physicalPathKey(location);
         if (
@@ -1475,6 +1500,15 @@ function precedence(
       ? 2
       : 1;
 }
+const restoreBlockReasons: Readonly<Record<DisabledBlockReason, string>> = {
+  "destination-occupied": "an original path is occupied",
+  "git-protected": "an original path is protected by Git",
+  "integrity-failed": "the stored content does not match its record",
+  "entry-not-found": "the stored entry is missing",
+  "state-unsafe": "the storage or a parent directory is not safe to change",
+  "source-not-eligible": "the stored content is not eligible",
+};
+
 function absoluteBlock(
   kind: Exclude<AvailabilityBlock["kind"], "hard-dependency">,
   target: AvailabilityTarget,

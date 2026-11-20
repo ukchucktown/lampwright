@@ -33,11 +33,24 @@ export async function executeAvailabilityPlan(
   const startedAt = timestamp(options.now());
   const freshInventory = await options.scan();
   const freshEntries = await options.disabledStorage!.list();
-  const freshPlan = options.replanAvailability!(
-    freshInventory,
-    freshEntries,
-    plan.intent,
-  );
+  // An Enable plan is fresh only with a fresh look at the restore destinations.
+  const freshPreviews =
+    plan.intent.operation === "enable"
+      ? await Promise.all(
+          freshEntries.map((entry) =>
+            options.disabledStorage!.previewEnable(entry),
+          ),
+        )
+      : [];
+  const freshPlan =
+    freshPreviews.length > 0
+      ? options.replanAvailability!(
+          freshInventory,
+          freshEntries,
+          plan.intent,
+          freshPreviews,
+        )
+      : options.replanAvailability!(freshInventory, freshEntries, plan.intent);
   if (!plansMatch(plan, freshPlan))
     return staleReport(plan, freshInventory, startedAt, options.now);
 

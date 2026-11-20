@@ -116,6 +116,9 @@ export interface ExecutionModuleOptions {
     inventory: Inventory,
     disabledEntries: Awaited<ReturnType<DisabledStorageModule["list"]>>,
     intent: AvailabilityIntent,
+    enablePreviews?: readonly Awaited<
+      ReturnType<DisabledStorageModule["previewEnable"]>
+    >[],
   ) => AvailabilityPlan;
   readonly availabilityAuditWriter?: AvailabilityExecutionAuditWriter;
   readonly replanUpdate?: (
