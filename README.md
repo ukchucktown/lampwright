@@ -28,6 +28,11 @@ This model works well for installations with hundreds of Skills. You can keep
 specialized Skills available on disk and activate only the set that fits your
 current work.
 
+Lampwright does not install Skills or search a registry. It manages the Skills
+that an installer such as the Vercel `skills` CLI put in a directory that
+Lampwright scans. See
+[Lampwright and similar tools](./docs/comparison.md) for a feature matrix.
+
 ## Features
 
 | Feature | What Lampwright does |
@@ -42,6 +47,26 @@ current work.
 | Themes | Uses the colors of your terminal by default. A theme picker previews the built-in themes and your custom theme files on the real screen. |
 | Cross-platform support | Runs on macOS, Linux, and Windows with Node.js 20 or newer. |
 | Private by design | Adds no telemetry and does not transmit local paths, Inventory data, metadata, or search queries. |
+
+## How Lampwright compares
+
+| Need | Lampwright | `asm` | `skills` | `skill-cli` |
+| --- | --- | --- | --- | --- |
+| Install a Skill or search a catalog | No | Yes | Yes | Yes |
+| Disable a Skill and keep it installed | Yes, native control or Disabled Storage | Yes, renames `SKILL.md` | No command | Yes, in its own store |
+| Disable or enable a complete Plugin | Yes | No | Not described | Not applicable |
+| Removal that you can undo | Filesystem removals sent to Quarantine can be restored for 30 days by default. A Managed Removal has no undo. | Not described | Not described | Not described |
+| Complete plan before each change | Yes, `--dry-run` | Some commands | Experimental commands | Not described |
+| Protection for tracked Git files and System Skills | Yes, for each path that Lampwright or a trusted Owner declares | Not described | Not described | Not applicable |
+| Token cost reports and security scans | No | Yes | Partner risk ratings before an installation from a public GitHub source | Not described |
+
+Lampwright fits best when Skills from different tools are already installed
+and you want to control them safely and reversibly. An installer fits best
+when you need to find and add Skills. You can use both when the installer
+puts Skills in a directory that Lampwright scans: install with `skills`, then
+manage with Lampwright. The
+[complete comparison](./docs/comparison.md) has the full matrix, the sources,
+the date of the review, and the features that Lampwright does not have.
 
 ## Run Lampwright
 
@@ -116,6 +141,7 @@ the format of a theme file, and the order in which Lampwright selects a theme.
 - [Adapter runtime](./docs/adapters.md)
 - [Removal planning](./docs/planning.md)
 - [Execution and fallback](./docs/execution.md)
+- [Lampwright and similar tools](./docs/comparison.md)
 - [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
 - [0.4.1 release notes](./docs/releases/0.4.1.md)
