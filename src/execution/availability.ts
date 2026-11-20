@@ -307,9 +307,15 @@ function verify(
         check.expectedStatus === "disabled" &&
         exposure === undefined
       )
-        passed = entries.some((entry) =>
-          entry.installationIds.includes(check.installationId),
-        );
+        // A stored entry proves the suspension only while no harness can load
+        // the Installation. The Skill can return under another harness ID.
+        passed =
+          entries.some((entry) =>
+            entry.installationIds.includes(check.installationId),
+          ) &&
+          !(installation?.harnessExposures ?? []).some(
+            (item) => item.status !== "disabled",
+          );
     }
     return passed
       ? { checkId: check.id, status: "passed", details: {} }

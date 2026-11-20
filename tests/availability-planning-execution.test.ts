@@ -1,12 +1,13 @@
 import {
   access,
   mkdir,
+  readdir,
   readFile,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -699,6 +700,142 @@ describe("Availability Planning and Execution", () => {
         (result) => result.status === "failed",
       ),
     ).toBe(true);
+
+    // The same holds when the Skill returns under another subagent.
+    const moved = await eveFixture("eve-moved");
+    const movedInitial = await moved.scanLive();
+    const writerArtifact = moved.artifact.replace("reviewer", "writer");
+    const scanWithOtherSubagent = async () => {
+      await access(moved.artifact).catch(() =>
+        createSkill(writerArtifact, "review"),
+      );
+      return moved.scanLive();
+    };
+    const movedRunner = execution(moved.stateRoot, scanWithOtherSubagent, []);
+    const liveElsewhere = await movedRunner.module.executeAvailability(
+      planAvailability(movedInitial, [], {
+        ...intent,
+        targets: [
+          {
+            kind: "installation",
+            installationId: movedInitial.installations[0]!.id,
+          },
+        ],
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect((await moved.scanLive()).installations[0]!.exposedTo).toEqual([
+      "eve:writer",
+    ]);
+    expect(liveElsewhere.status).not.toBe("succeeded");
+    expect(
+      liveElsewhere.verificationResults.some(
+        (result) => result.status === "failed",
+      ),
+    ).toBe(true);
+  });
+
+  it("enables a Disabled entry that an earlier release wrote with an undeclared Eve exposure", async () => {
+    const environment = await environmentFixture();
+    const artifact = join(
+      environment.workspace,
+      "agent",
+      "subagents",
+      "reviewer",
+      "skills",
+      "review",
+    );
+    await createSkill(artifact, "review");
+    await writeFile(
+      join(environment.workspace, "skills-lock.json"),
+      `${JSON.stringify({
+        version: 1,
+        skills: {
+          review: {
+            source: "acme/project-skills",
+            sourceType: "github",
+            sourceUrl: "https://github.com/acme/project-skills.git",
+            skillPath: "skills/review/SKILL.md",
+            subagents: ["reviewer", "writer"],
+          },
+        },
+      })}\n`,
+    );
+    const scanLive = () =>
+      scan(
+        {
+          homeDirectory: environment.home,
+          workspaceDirectory: environment.workspace,
+        },
+        [],
+      );
+    const runner = execution(
+      join(environment.state, "legacy-eve-entry"),
+      scanLive,
+      [],
+    );
+    const initial = await scanLive();
+    expect(initial.installations[0]!.exposedTo).toEqual(["eve:reviewer"]);
+    const target = {
+      kind: "installation" as const,
+      installationId: initial.installations[0]!.id,
+    };
+    const disabled = await runner.module.executeAvailability(
+      planAvailability(initial, [], {
+        operation: "disable",
+        targets: [target],
+        force: false,
+      }),
+      { grants: [{ kind: "confirmation" }] },
+    );
+    expect(disabled.status).toBe("succeeded");
+    const [current] = await runner.disabledStorage.list();
+    expect(current!.harnessExposures.map((item) => item.harnessId)).toEqual([
+      "eve:reviewer",
+    ]);
+
+    // Release 0.4.1 also stored each subagent that the lock declared. Write
+    // that record into the stored manifest, as that release left it on disk.
+    const stateRoot = join(environment.state, "legacy-eve-entry");
+    const manifest = (await readdir(stateRoot, { recursive: true }))
+      .map((path) => join(stateRoot, path))
+      .find((path) => basename(path) === "manifest.json")!;
+    const stored = JSON.parse(await readFile(manifest, "utf8")) as {
+      harnessExposures: { harnessId: string }[];
+    };
+    stored.harnessExposures.push({
+      ...stored.harnessExposures[0]!,
+      harnessId: "eve:writer",
+    });
+    await writeFile(manifest, `${JSON.stringify(stored, null, 2)}\n`);
+    const [legacy] = await runner.disabledStorage.list();
+    expect(legacy!.harnessExposures.map((item) => item.harnessId)).toEqual([
+      "eve:reviewer",
+      "eve:writer",
+    ]);
+
+    const enablePlan = planAvailability(await scanLive(), [legacy!], {
+      operation: "enable",
+      targets: [target],
+      force: false,
+    });
+    expect(enablePlan.blocks).toEqual([]);
+    expect(
+      enablePlan.verificationChecks.flatMap((check) =>
+        check.kind === "harness-exposure-state" ? [check.harnessId] : [],
+      ),
+    ).toEqual(["eve:reviewer"]);
+    const enabled = await runner.module.executeAvailability(enablePlan, {
+      grants: [{ kind: "confirmation" }],
+    });
+    expect(enabled.status).toBe("succeeded");
+    expect(
+      enabled.verificationResults.every((result) => result.status === "passed"),
+    ).toBe(true);
+    expect((await scanLive()).installations[0]!.exposedTo).toEqual([
+      "eve:reviewer",
+    ]);
+    expect(await runner.disabledStorage.list()).toEqual([]);
   });
 
   it("blocks Enable when a foreign file or a live Plugin child occupies the original path", async () => {

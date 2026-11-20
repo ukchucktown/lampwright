@@ -1427,7 +1427,9 @@ function createChecks(
           expectedPresent: false,
         });
         for (const installationId of action.affectedInstallationIds)
-          for (const exposure of action.entry.harnessExposures)
+          for (const exposure of action.entry.harnessExposures.filter((item) =>
+            storedExposureIsBacked(action.entry, item.harnessId),
+          ))
             checks.push({
               id: stableId(
                 "availability-check",
@@ -1447,6 +1449,37 @@ function createChecks(
     }
   }
   return checks.sort((left, right) => compare(left.id, right.id));
+}
+
+/**
+ * False for an Eve exposure that the entry cannot restore. An entry written
+ * before release 0.4.2 also records each Eve subagent that the Vercel lock
+ * declared, with or without an artifact. Only an artifact in the stored set
+ * returns an exposure, so only those exposures need a check after Enable.
+ */
+function storedExposureIsBacked(
+  entry: DisabledEntry,
+  harnessId: string,
+): boolean {
+  if (harnessId !== "eve" && !harnessId.startsWith("eve:")) return true;
+  const subagent = harnessId === "eve" ? null : harnessId.slice(4);
+  return entryLocations(entry).some((location) => {
+    const segments = location.path.split(/[\\/]+/).slice(0, -1);
+    if (segments.at(-1) !== "skills") return false;
+    return subagent === null
+      ? segments.at(-2) === "agent"
+      : segments.at(-3) === "subagents" &&
+          segments.at(-4) === "agent" &&
+          installNameKey(segments.at(-2) ?? "") === installNameKey(subagent);
+  });
+}
+
+/** The directory name that the Vercel Manager derives from a declared name. */
+function installNameKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9._]+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "");
 }
 
 function approvalsFor(
