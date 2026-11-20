@@ -67,7 +67,7 @@ and the platform.
 | Tools for authors of Skills | No | Yes: `init`, `link`, `eval`, `publish` | `skills init` | No |
 | Full-screen terminal UI | Yes, the primary interface | Yes, optional | Interactive prompts | Yes |
 | JSON output | Yes, on each command, with a published schema | Yes, `--json` and `--machine` | `--json` on `add` and `list` | Not described |
-| Harnesses | Native controls for Codex, Claude Code, and Gemini CLI. Inventory also covers the directories of the Vercel `skills` ecosystem. | 21 providers | 4 named agents and 75 more | Claude Code, Codex, Gemini, and pi. A Cursor adapter is planned. |
+| Harnesses | Native controls for Codex, Claude Code, and Gemini CLI. Inventory, Disabled Storage, and removal also cover each harness that reads the shared `.agents/skills` directories. For a Skill that the Vercel `skills` Manager owns, Lampwright covers the directories of the 76 agents in the path registry of `skills@1.9.0`. | 21 providers | 4 named agents and 75 more | Claude Code, Codex, Gemini, and pi. A Cursor adapter is planned. |
 | Telemetry | None | None | Anonymous usage data by default. Two environment variables stop it. | Not described |
 | Operating systems | macOS, Linux, and Windows, each in CI | Not stated in the README. CI runs on Linux. | Not stated in the README. CI runs on Linux and Windows. | Windows, macOS, and Linux |
 | Node.js | 20 or newer | 22 or newer | 22.20 or newer | 22 or newer |
@@ -98,8 +98,8 @@ Use `asm` in these conditions:
 - You want to browse a catalog, scan a Skill before you install it, or measure
   the tokens that your Skills use.
 - You write Skills and want commands that create, test, and publish them.
-- You use an agent that Lampwright does not support. `asm` supports 21
-  providers.
+- You keep standalone Skills in the private directory of an agent that
+  Lampwright does not scan by default. `asm` has 21 providers.
 
 Use `skills` in these conditions:
 
@@ -132,4 +132,8 @@ Inventory.
 - It does not report the token cost of a Skill.
 - It does not create, test, or publish a Skill.
 - It has native availability controls for three harnesses only: Codex, Claude
-  Code, and Gemini CLI.
+  Code, and Gemini CLI. For a Skill of another harness, Lampwright uses
+  Disabled Storage.
+- It does not scan the private directory of another harness, for example
+  `~/.cursor`, unless the Vercel `skills` Manager owns a Skill there or a
+  local Adapter declares the directory as a root.
