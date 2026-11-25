@@ -49,6 +49,7 @@ export function modalFrame(
   return {
     left,
     top,
+    clearsHeader: top >= headerRows,
     width,
     height,
     verticalInset,

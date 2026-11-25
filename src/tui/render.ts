@@ -216,6 +216,7 @@ function browseFrame(
   );
 }
 
+const helpTitle = "Help";
 const closeHint = "esc close";
 
 interface HelpGroup {
@@ -226,15 +227,14 @@ interface HelpGroup {
 
 /**
  * Every key, one to a line, in three aligned columns: the key, its effect, and
- * the mouse action that has the same effect. The first group lists the actions
- * of the current view and gives the panel its title. A labelled rule opens
- * each later group.
+ * the mouse action that has the same effect. The current view starts the
+ * list. Each section heading uses the same labelled rule.
  */
 function helpBody(
   browse: Pick<TuiBrowseState, "view" | "inventory">,
   style: TuiPaint,
   spacing: "open" | "ruled" | "bare" = "open",
-): { readonly title: string; readonly body: readonly string[] } {
+): readonly string[] {
   const view = browse.view;
   const addAgent = browse.inventory.installations.some(
     (item) => item.agentDestinations?.length,
@@ -312,20 +312,14 @@ function helpBody(
         : ""
     }`;
   };
-  return {
-    // The top border of the panel names the first group, so that group has
-    // no rule of its own. The shared frame supplies the outer padding.
-    title: groups[0]!.label,
-    body: groups.flatMap((group, index) => [
-      // An empty row sets each later group apart from the one above it.
-      ...(spacing === "open" && index > 0 ? [""] : []),
-      ...(spacing === "bare" || index === 0 ? [] : [rule(group)]),
-      ...group.rows.map(
-        ([key, effect, mouse]) =>
-          `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
-      ),
-    ]),
-  };
+  return groups.flatMap((group, index) => [
+    ...(spacing === "open" && index > 0 ? [""] : []),
+    ...(spacing !== "bare" || index === 0 ? [rule(group)] : []),
+    ...group.rows.map(
+      ([key, effect, mouse]) =>
+        `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
+    ),
+  ]);
 }
 
 function renderHelp(
@@ -336,12 +330,26 @@ function renderHelp(
   const viewport = state.browse.model.viewport;
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
   const panel = (spacing: "open" | "ruled" | "bare") => {
-    const { title, body } = helpBody(state.browse, style, spacing);
+    const body = helpBody(state.browse, style, spacing);
     const inner = modalContentWidth(
       viewport,
       Math.max(...body.map(visibleLength)),
     );
-    return overlayPanel(frame, viewport, title, body, closeHint, inner, style);
+    // Use tighter section spacing before the frame covers a browse header row.
+    if (
+      spacing !== "bare" &&
+      !modalFrame(viewport, inner, body.length)?.clearsHeader
+    )
+      return null;
+    return overlayPanel(
+      frame,
+      viewport,
+      helpTitle,
+      body,
+      closeHint,
+      inner,
+      style,
+    );
   };
   // A short terminal gives up the empty rows between the groups first, then
   // the group rules.
@@ -351,8 +359,8 @@ function renderHelp(
     panel("bare") ??
     // Too small for a panel: the keys take the whole screen.
     [
-      style.title("Lampwright — Keys"),
-      ...helpBody(state.browse, style, "bare").body.slice(
+      style.title(helpTitle),
+      ...helpBody(state.browse, style, "bare").slice(
         0,
         Math.max(0, viewport.rows - 3),
       ),

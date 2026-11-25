@@ -259,22 +259,20 @@ the terminal UI draws over the middle of the browse view. The browse view stays
 visible behind the panel in a dim style. The panel starts below the header and
 the key hints when the terminal has the rows.
 
-The panel has one key on each line in three columns: the key, its effect, and
-the mouse action that has the same effect. The keys are in the title style. The
-effects and the mouse actions are plain text. The three group headings and the
-`mouse` heading are muted. The panel has three groups. The first group lists the actions of the current view. The
-top border of the panel shows the name of that view. Its keys start at the
-first row of the content. A labelled rule opens each of the other two
-groups: the keys for movement and selection, and the application keys. An empty
-row is above each of those two groups. The bottom border ends with
-`esc close`. An effect that removes content,
-`remove` or `purge`, is in the warning style. The `esc` row names the effect of
-Escape in the current view.
+The panel title is `Help`. Its first section lists the commands for the current
+view under `Inventory`, `Disabled`, or `Trash`. The other sections are
+`Move and select` and `App`. Each section starts with a muted heading and a
+horizontal rule. When space permits, a blank row separates the sections.
 
-`?`, `q`, Escape, or Enter closes the panel and keeps the browse position. The
-height of the panel depends on the commands available in the current view. A
-shorter terminal drops the empty rows between the groups first, then the rules,
-before the key reference fills the screen.
+The panel has one row per key, with columns for the key, its effect, and the
+equivalent mouse action. The keys use the title style. Effects and mouse
+actions use plain text, except that `remove` and `purge` use the warning style.
+The `esc` row describes Escape in the current view. The footer says `esc close`.
+
+A short terminal drops the blank separators first, then the later section rules.
+The full-screen fallback keeps the `Help` title, the current view heading, and
+the close hint. Press `?`, `q`, Escape, or Enter to return to the same browse
+position.
 
 Escape is the first byte of each arrow key and each function key, so the
 terminal waits for the rest of a key sequence before it reports a lone Escape.
@@ -282,9 +280,7 @@ The wait is 50 ms. The default of Node.js is 500 ms, which made Escape slower
 than each other key.
 
 A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
-one effect have a space between them, for example `PgUp PgDn`. `?`,
-`q`, Escape, or Enter closes the panel and keeps the browse position. When the
-terminal is too small for the panel, the key reference fills the screen.
+one effect have a space between them, for example `PgUp PgDn`.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
