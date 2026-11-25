@@ -452,12 +452,17 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
       .slice(offset, offset + listRows)
       .map((agent, index) => {
         const focused = state.index === offset + index;
-        const mark = state.selectedAgents.has(agent) ? "[x]" : "[ ]";
+        const selected = state.selectedAgents.has(agent);
+        const mark = selected ? "[x]" : "[ ]";
         const line = fit(
           `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}`,
           width,
         );
-        return focused ? style.focus(line) : line;
+        return focused
+          ? style.focus(line)
+          : selected
+            ? style.selected(line)
+            : line;
       });
     if (!matches.length) {
       const explanation = wrapPlanLine(emptyMessage, width);
@@ -477,19 +482,34 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
       }
     }
     while (options.length < listRows) options.push("");
-    const count =
+    const installedCount =
       !state.agents.length && !state.query.trim()
-        ? `${state.installedAgents.length} installed`
+        ? state.installedAgents.length
         : installedMatches.length &&
             !matches.length &&
             !state.selectedAgents.size
-          ? `${installedMatches.length} installed`
-          : installedMatches.length
-            ? `${state.selectedAgents.size} selected · ${matches.length} to add · ${installedMatches.length} installed`
-            : `${state.selectedAgents.size} selected · ${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+          ? installedMatches.length
+          : null;
+    const matchCount = installedMatches.length
+      ? `${matches.length} to add · ${installedMatches.length} installed`
+      : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+    const count =
+      installedCount !== null
+        ? style.muted(fit(`${installedCount} installed`, width))
+        : fitStyledSegments(
+            [
+              {
+                text: `${state.selectedAgents.size} selected`,
+                paint: state.selectedAgents.size ? style.selected : style.muted,
+              },
+              { text: ` · ${matchCount}`, paint: style.muted },
+            ],
+            width,
+            style.muted,
+          );
     body = [
-      style.info(fit(`Search: ${state.query || "type an agent name"}`, width)),
-      style.muted(count),
+      searchPrompt(state.query, "type an agent name", width, style),
+      count,
       ...options,
       ...shortcuts.map((line) => style.muted(fit(line, width))),
     ];
@@ -2239,6 +2259,22 @@ function countLabel(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+function searchPrompt(
+  query: string,
+  hint: string,
+  width: number,
+  style: TuiPaint,
+): string {
+  return fitStyledSegments(
+    [
+      { text: "> ", paint: style.title },
+      { text: query || hint, paint: query ? style.active : style.muted },
+    ],
+    width,
+    style.muted,
+  );
+}
+
 function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
   const style = createPaint(theme);
   const { model } = state;
@@ -2306,16 +2342,7 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
       style.muted,
     ),
     style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`),
-    `${style.border("│")}${fitStyledSegments(
-      [
-        { text: "> ", paint: style.title },
-        ...(model.query === ""
-          ? [{ text: "type a name regex", paint: style.muted }]
-          : [{ text: model.query, paint: style.active }]),
-      ],
-      Math.max(0, usable - 2),
-      style.muted,
-    )}${style.border("│")}`,
+    `${style.border("│")}${searchPrompt(model.query, "type a name regex", Math.max(0, usable - 2), style)}${style.border("│")}`,
     style.border(`├${"─".repeat(left)}┬${"─".repeat(right)}┤`),
   ];
   for (let row = 0; row < rows; row += 1) {

@@ -9,6 +9,8 @@ import {
   createTrashSections,
   createSearchModel,
   createNightfallTheme,
+  createTuiTheme,
+  parseThemeDocument,
   createNodeTuiTerminal,
   createTuiSections,
   detectTuiColorMode,
@@ -2453,6 +2455,76 @@ describe("global name-regex search", () => {
       kind: "noop",
     });
   });
+
+  it.each([32, 80])(
+    "uses the shared search roles in the Add agents modal at %i columns",
+    (columns) => {
+      const inventory = groupedInventory(["alpha"]);
+      const browse = {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 24,
+          columns,
+        }),
+      };
+      const picker = {
+        screen: "add-agent",
+        browse,
+        installation: inventory.installations[0]!,
+        previous: null,
+        agents: ["antigravity-cli", "claude-code"],
+        installedAgents: [],
+        selectedAgents: new Set(["antigravity-cli"]),
+        query: "",
+        index: 1,
+        plan: null,
+        report: null,
+        executing: false,
+        scrollOffset: 0,
+      } as const;
+      const parsed = parseThemeDocument(
+        'extends = "nightfall"\n[styles]\nselected = "green underline"\nactive = "magenta bold"\n',
+        "custom",
+      );
+      if (!parsed.ok) throw new Error("Expected valid theme fixture");
+      const theme = createTuiTheme(parsed.theme, "truecolor");
+      const color = renderTui(picker, theme);
+      expect(color.replace(ansi, "")).toBe(renderTui(picker, plainTuiTheme));
+      expect(color).toContain(styleTui(theme, "title", "> "));
+      expect(color).toContain(styleTui(theme, "muted", "type an agent name"));
+      expect(color).toContain(styleTui(theme, "selected", "1 selected"));
+      expect(color).toContain(styleTui(theme, "muted", " · 2 matches"));
+      const unchecked = renderTui(
+        { ...picker, selectedAgents: new Set() },
+        theme,
+      );
+      expect(unchecked).toContain(
+        styleTui(theme, "muted", "0 selected · 2 matches"),
+      );
+      expect(color).toContain(
+        styleTui(theme, "selected", "  [x] antigravity-cli").slice(0, -4),
+      );
+      expect(color).toContain(
+        styleTui(theme, "focus", "› [ ] claude-code").slice(0, -4),
+      );
+      const typed = renderTui({ ...picker, query: "agy", index: 0 }, theme);
+      expect(typed).toContain(styleTui(theme, "active", "agy"));
+      expect(typed).toContain(
+        styleTui(theme, "focus", "› [x] antigravity-cli").slice(0, -4),
+      );
+      const clipped = renderTui({ ...picker, query: "z".repeat(100) }, theme);
+      const prompt = clipped
+        .split("\n")
+        .find((line) => line.includes(styleTui(theme, "title", "> ")));
+      expect(prompt).toContain(styleTui(theme, "muted", "…"));
+      expect(clipped.replace(ansi, "")).toBe(
+        renderTui({ ...picker, query: "z".repeat(100) }, plainTuiTheme),
+      );
+      expect(
+        clipped.split("\n").every((line) => visibleWidth(line) < columns),
+      ).toBe(true);
+    },
+  );
 
   it("makes the prompt clear in color and plain themes, including at narrow widths", () => {
     const inventory = groupedInventory(["alpha"]);

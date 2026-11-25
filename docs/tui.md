@@ -334,8 +334,11 @@ Installation.
 
 The picker lists agents that can receive the Skill. It omits agents whose
 current destination contains the canonical Skill, a link to it, or a verified
-Manager-owned copy. Type an agent name to filter the list. For Antigravity
-CLI, type `agy`. If it already has the Skill, the picker explains why the
+Manager-owned copy. As in global search, the `> ` prompt uses the title role,
+the empty hint uses the muted role, and typed text uses the active role.
+The selected role marks the checked count and checked rows outside the focus.
+The focused row keeps its focus style. Type an agent name to filter the list.
+For Antigravity CLI, type `agy`. If it already has the Skill, the picker explains why the
 search has no selectable row. When a search matches both kinds of agent, the
 counts distinguish agents to add from agents that already have the Skill.
 Use the arrows or Page Up and Page Down to move through the results. Press

@@ -449,7 +449,7 @@ describe("Add agent", () => {
       expect(frame()).toContain("0 selected");
       const searchRow = frame()
         .split("\n")
-        .findIndex((line) => line.includes("Search:"));
+        .findIndex((line) => line.includes("> type an agent name"));
       const borderRow = frame()
         .split("\n")
         .findIndex((line) => line.includes("┌"));
@@ -465,9 +465,7 @@ describe("Add agent", () => {
         "antigravity-cli (agy)",
       );
       const lines = frame().split("\n");
-      expect(lines.findIndex((line) => line.includes("Search:"))).toBe(
-        searchRow,
-      );
+      expect(lines.findIndex((line) => line.includes("> agy"))).toBe(searchRow);
       const row = lines.findIndex((line) =>
         line.includes("antigravity-cli (agy)"),
       );
