@@ -41,7 +41,7 @@ export function quarantineLocationContains(
   );
 }
 
-function pathContains(parentPath: string, childPath: string): boolean {
+export function pathContains(parentPath: string, childPath: string): boolean {
   if (isWindowsPath(parentPath) !== isWindowsPath(childPath)) {
     return false;
   }

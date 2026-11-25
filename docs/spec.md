@@ -402,6 +402,22 @@ was absent before the operation, Lampwright removes that link after the
 operation. Lampwright does not delete content that the Owner creates at such a
 path. The final verification reports a changed Harness Exposure set.
 
+### Add an agent to an installed Skill
+
+For a Vercel-managed Skill, the user can add a Harness Exposure to an active
+canonical Installation. The canonical Installation is the directory where the
+Manager keeps the Skill content. Add agent uses the current Manager registry
+for the Scope of that Installation. Inventory supplies the supported agents
+and the paths that they share. Planning identifies the requested destination,
+the directories that it must create, and each agent that reads the destination.
+
+After confirmation, Execution creates a directory link to the canonical Skill.
+On Windows, it creates a junction. The link preserves the content and Manager
+record. If the selected agent already reads that directory, Execution verifies
+the current exposure. An occupied destination, linked parent, or Git-protected
+write blocks creation. A fresh Inventory verifies the link and the original
+Installation before Execution reports success.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal
@@ -507,6 +523,7 @@ The intended minimal command surface is:
 ```console
 lampwright                  # interactive fuzzy-search UI
 lampwright scan             # print inventory
+lampwright add-agent <target> <agent-id> # expose an installed Skill to another agent
 lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # disable selected target(s) without removal
 lampwright enable <target>  # enable native or suspended target(s)

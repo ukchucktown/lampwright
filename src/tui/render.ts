@@ -33,6 +33,7 @@ import {
 } from "./theme.js";
 import type {
   TuiBrowseState,
+  TuiAddAgentState,
   TuiAvailabilityPlanState,
   TuiAvailabilityReportState,
   TuiExecutingState,
@@ -59,6 +60,7 @@ export function renderTui(
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
+  if (state.screen === "add-agent") return renderAddAgent(state, style);
   if (state.screen === "theme") return renderThemePicker(state, theme);
   if (state.screen === "help") return renderHelp(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
@@ -231,10 +233,14 @@ interface HelpGroup {
  * each later group.
  */
 function helpBody(
-  view: TuiBrowseState["view"],
+  browse: Pick<TuiBrowseState, "view" | "inventory">,
   style: TuiPaint,
   spacing: "open" | "ruled" | "bare" = "open",
 ): { readonly title: string; readonly body: readonly string[] } {
+  const view = browse.view;
+  const addAgent = browse.inventory.installations.some(
+    (item) => item.agentDestinations?.length,
+  );
   const groups: readonly HelpGroup[] = [
     view === "trash"
       ? {
@@ -256,6 +262,7 @@ function helpBody(
             label: "Inventory",
             rows: [
               ["enter", "remove"],
+              ...(addAgent ? [["+", "add agent"] as const] : []),
               ["u", "update"],
               ["d", "disable"],
             ],
@@ -331,7 +338,7 @@ function renderHelp(
   const viewport = state.browse.model.viewport;
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
   const panel = (spacing: "open" | "ruled" | "bare") => {
-    const { title, body } = helpBody(state.browse.view, style, spacing);
+    const { title, body } = helpBody(state.browse, style, spacing);
     const inner = Math.min(
       Math.max(...body.map(visibleLength)),
       Math.max(0, viewport.columns - 7),
@@ -353,12 +360,74 @@ function renderHelp(
     // Too small for a panel: the keys take the whole screen.
     [
       style.title("Lampwright — Keys"),
-      ...helpBody(state.browse.view, style, "bare").body,
+      ...helpBody(state.browse, style, "bare").body,
       style.muted(closeHint),
     ]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
   return `${lines.join("\n")}\n`;
+}
+
+export function addAgentReviewLines(
+  state: TuiAddAgentState,
+): readonly string[] {
+  const plan = state.plan;
+  if (!plan) return [];
+  return wrapPlanLines(
+    [
+      `Skill: ${plan.skill} (${plan.scope.kind === "workspace" ? plan.scope.workspacePath : plan.scope.kind})`,
+      `Agent: ${plan.agent}`,
+      `Source: ${plan.source}`,
+      `Destination: ${plan.destination ?? "unavailable"}`,
+      `Agents at this destination: ${plan.agents.join(", ")}`,
+      ...plan.directories.map((path) => `Create directory: ${path}`),
+      `Action: ${plan.action}`,
+      ...(plan.reason ? [plan.reason] : []),
+    ],
+    Math.max(1, state.browse.model.viewport.columns - 1),
+  );
+}
+
+function renderAddAgent(state: TuiAddAgentState, style: TuiPaint): string {
+  const { rows, columns } = state.browse.model.viewport;
+  if (rows < 6 || columns < 18)
+    return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
+  const height = Math.max(1, rows - 5);
+  const offset = Math.max(
+    0,
+    Math.min(
+      state.agents.length - height,
+      state.index - Math.floor(height / 2),
+    ),
+  );
+  const list = state.plan
+    ? addAgentReviewLines(state).slice(
+        state.scrollOffset,
+        state.scrollOffset + height,
+      )
+    : state.agents
+        .slice(offset, offset + height)
+        .map((agent, index) =>
+          offset + index === state.index
+            ? style.focus(fit(`› ${agent}`, columns - 1))
+            : fit(`  ${agent}`, columns - 1),
+        );
+  const hint = state.plan
+    ? state.plan.action === "blocked"
+      ? "↑↓ scroll · esc back"
+      : "y confirm · ↑↓ scroll · esc back"
+    : "↑↓ choose agent · enter review · esc cancel";
+  return (
+    [
+      style.title(
+        fit(`Add agent — ${state.installation.skill.name}`, columns - 1),
+      ),
+      "",
+      ...list,
+      "",
+      style.muted(fit(hint, columns - 1)),
+    ].join("\n") + "\n"
+  );
 }
 
 /**
@@ -2318,6 +2387,11 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
           { key: "enter", label: "remove" },
           { key: "u", label: "update" },
           { key: "d", label: "disable" },
+          ...(state.inventory.installations.some(
+            (item) => item.agentDestinations?.length,
+          )
+            ? [{ key: "+", label: "add agent" }]
+            : []),
         ]),
     { key: "/", label: "search" },
     { key: "ctrl+u", label: "clear" },

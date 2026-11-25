@@ -133,6 +133,7 @@ export function mouseAction(
   if (
     state.screen === "plan" ||
     state.screen === "report" ||
+    state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "availability-report" ||
     state.screen === "update-plan" ||
@@ -342,6 +343,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "backspace") return { kind: "delete-query" };
     if (value === "quit" || value === "q") return { kind: "quit" };
     if (state.view === "trash") return { kind: "noop" };
+    if (value === "add-agent" || value === "+") return { kind: "add-agent" };
     if (value === "update" || value === "u") return { kind: "update-review" };
     if (value === "disable" || value === "d")
       return state.view === "inventory"
@@ -359,7 +361,10 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (state.screen === "help")
     return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
-  if (state.screen === "theme") {
+  if (
+    state.screen === "theme" ||
+    (state.screen === "add-agent" && !state.plan)
+  ) {
     if (value === "" || value === "select" || value === "use")
       return { kind: "select" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -381,6 +386,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (
     state.screen === "plan" ||
+    state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "update-plan"
   ) {
@@ -698,6 +704,7 @@ export function parseRawTuiAction(
     if (text === "/") return { kind: "open-search" };
     if (text === "?") return { kind: "open-help" };
     if (state.view === "trash") return { kind: "noop" };
+    if (text === "+") return { kind: "add-agent" };
     if (text === "u") return { kind: "update-review" };
     if (text === "d")
       return state.view === "inventory"
@@ -711,7 +718,10 @@ export function parseRawTuiAction(
       return { kind: "append-query", value: text };
     return { kind: "noop" };
   }
-  if (state.screen === "theme") {
+  if (
+    state.screen === "theme" ||
+    (state.screen === "add-agent" && !state.plan)
+  ) {
     if (key.name === "escape") return { kind: "cancel" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
@@ -735,6 +745,7 @@ export function parseRawTuiAction(
   }
   if (
     state.screen === "plan" ||
+    state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "update-plan"
   ) {

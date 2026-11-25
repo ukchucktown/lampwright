@@ -1,3 +1,5 @@
+import { addAgentInstallation } from "../planning/add-agent.js";
+import { PlanningError } from "../planning/types.js";
 import { stringifyModel } from "../model/json.js";
 import type {
   AvailabilityPlan,
@@ -23,6 +25,7 @@ import {
   type TuiBrowseCommand,
 } from "./browse.js";
 import {
+  addAgentReviewLines,
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
   planScrollMetrics,
@@ -46,6 +49,7 @@ import { createSearchModel, reduceSearch } from "./search.js";
 import type { TuiThemeDefinition } from "./theme.js";
 import type {
   TuiAction,
+  TuiAddAgentState,
   TuiAvailabilityPlanState,
   TuiAvailabilityReportState,
   TuiBrowseState,
@@ -151,6 +155,7 @@ export class TuiController {
     }
     if (action.kind === "viewport") {
       if (
+        state.screen === "add-agent" ||
         state.screen === "trash-review" ||
         state.screen === "trash-report" ||
         state.screen === "trash-executing" ||
@@ -192,6 +197,8 @@ export class TuiController {
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "search") this.searchAction(state, action);
+      else if (state.screen === "add-agent")
+        await this.addAgentAction(state, action);
       else if (state.screen === "theme") await this.themeAction(state, action);
       else if (state.screen === "help") {
         // Any closing key returns to the exact browse position.
@@ -444,6 +451,41 @@ export class TuiController {
       return;
     }
 
+    if (action.kind === "add-agent" && state.view === "inventory") {
+      const targets = this.targetsFor(state);
+      let notice = "Select one installed Skill to add an agent.";
+      if (targets.length === 1) {
+        try {
+          const installation = addAgentInstallation(
+            state.inventory,
+            targets[0]!,
+          );
+          const agents = installation.agentDestinations
+            ?.flatMap((item) => item.agents)
+            .sort();
+          if (agents?.length && this.dependencies.addAgent) {
+            this.stateValue = {
+              screen: "add-agent",
+              browse: browseSnapshot(state),
+              installation,
+              agents,
+              index: 0,
+              plan: null,
+              scrollOffset: 0,
+            };
+            return;
+          }
+          notice =
+            "Add agent requires an active canonical Vercel Skill and a host that supports Add agent.";
+        } catch (error) {
+          if (!(error instanceof PlanningError)) throw error;
+          notice = error.message;
+        }
+      }
+      this.stateValue = { ...state, model: { ...state.model, notice } };
+      return;
+    }
+
     if (action.kind === "open-help") {
       this.stateValue = { screen: "help", browse: browseSnapshot(state) };
       return;
@@ -554,6 +596,67 @@ export class TuiController {
       scrollOffset: 0,
       returnReport: null,
     };
+  }
+
+  private async addAgentAction(
+    state: TuiAddAgentState,
+    action: TuiAction,
+  ): Promise<void> {
+    const module = this.dependencies.addAgent!;
+    if (action.kind === "quit") {
+      this.stateValue = { screen: "done", report: null };
+      return;
+    }
+    if (action.kind === "cancel") {
+      this.stateValue = state.plan
+        ? { ...state, plan: null, scrollOffset: 0 }
+        : { screen: "browse", ...state.browse };
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const rows = Math.max(1, state.browse.model.viewport.rows - 5);
+      const delta = action.delta * (action.kind === "page" ? rows : 1);
+      this.stateValue = state.plan
+        ? {
+            ...state,
+            scrollOffset: Math.max(
+              0,
+              Math.min(
+                Math.max(0, addAgentReviewLines(state).length - rows),
+                state.scrollOffset + delta,
+              ),
+            ),
+          }
+        : {
+            ...state,
+            index: Math.max(
+              0,
+              Math.min(state.agents.length - 1, state.index + delta),
+            ),
+          };
+      return;
+    }
+    if (state.plan === null && action.kind === "select") {
+      const plan = await module.preview(
+        state.browse.inventory,
+        state.installation,
+        state.agents[state.index]!,
+      );
+      this.stateValue = { ...state, plan };
+    } else if (
+      state.plan !== null &&
+      state.plan.action !== "blocked" &&
+      action.kind === "confirm"
+    ) {
+      const report = await module.execute(state.plan, true);
+      await this.start();
+      const browse = this.stateValue;
+      if (browse.screen === "browse")
+        this.stateValue = {
+          ...browse,
+          model: { ...browse.model, notice: report.message },
+        };
+    }
   }
 
   private openUpdateReview(state: TuiBrowseState): void {

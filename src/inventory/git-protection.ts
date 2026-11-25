@@ -8,6 +8,7 @@ export async function inspectGitProtection(
   artifactPath: string,
   artifactIsDirectory: boolean,
   commandRunner: InventoryCommandRunner,
+  creatingDirectory = false,
 ): Promise<GitProtection> {
   const worktree = await resolveWorktree(
     artifactIsDirectory ? artifactPath : dirname(artifactPath),
@@ -29,7 +30,11 @@ export async function inspectGitProtection(
       "check-ignore",
       "--quiet",
       "--",
-      relativeArtifactPath.length === 0 ? "." : relativeArtifactPath,
+      relativeArtifactPath.length === 0
+        ? "."
+        : creatingDirectory
+          ? `${relativeArtifactPath}/`
+          : relativeArtifactPath,
     ],
   });
 

@@ -320,6 +320,13 @@ sentinel (`ESC[<`) identifies mouse input, so split report data remains one
 pointer action and its fragments do not become filter input. Incomplete or
 malformed escape sequences remain ordinary keyboard input.
 
+## Add an agent
+
+In Inventory, focus a Vercel-managed Skill and press `+` to choose an agent.
+Use the arrow keys to highlight its ID, then press Enter to review the
+destination and the agents that share it. Press `y` to confirm or Esc to
+return to the list. After execution, Inventory refreshes and shows the result.
+
 ## Sections
 
 Sections come from declared evidence, never from a name or a path:

@@ -45,6 +45,7 @@ Lampwright scans. See
 | Live Inventory | Finds standalone, Manager-owned, and Plugin-owned Skills in Codex, Claude Code, and Gemini CLI, in the shared `.agents/skills` directories that many harnesses read, and in the agent directories of the Vercel `skills` Manager. |
 | Reversible disable and enable | Uses native harness controls when possible, or safely suspends complete supported artifact sets in Disabled Storage. |
 | Plugin availability | Disables or enables a supported Plugin as one complete boundary while its files stay installed. |
+| Add an agent | Links an existing Vercel-managed Skill to the directory of a selected agent, including Antigravity CLI. |
 | Owner-managed Update | Asks the current Owner to update an existing target, then rescans and verifies the local result. |
 | Safe removal | Uses the Owner's removal operation first. A separately confirmed filesystem fallback moves content to recoverable Quarantine. |
 | Built-in protection | Blocks changes to System Skills, non-ignored Git worktree content, read-only paths, and incomplete ownership boundaries. |
@@ -165,6 +166,7 @@ or search queries.
 lampwright                  # interactive terminal UI
 lampwright --theme <name>   # interactive terminal UI with one theme
 lampwright scan             # print the live Inventory
+lampwright add-agent <target> antigravity-cli --dry-run  # preview the agent link
 lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # natively disable or safely suspend targets
 lampwright enable <target>  # enable native or Disabled Storage targets

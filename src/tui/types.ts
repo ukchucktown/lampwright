@@ -33,6 +33,8 @@ import type {
   UpdatePlan,
   UpdateReport,
 } from "../update/types.js";
+import type { AddAgentModule } from "../execution/add-agent.js";
+import type { AddAgentPlan } from "../planning/add-agent.js";
 import type { TuiThemeDefinition } from "./theme.js";
 
 /** One row of the theme picker. A choice with a problem cannot be applied. */
@@ -56,6 +58,7 @@ export interface TuiThemeDependencies {
 }
 
 export interface TuiDependencies {
+  readonly addAgent?: AddAgentModule;
   readonly scan: () => Promise<Inventory>;
   readonly plan: (
     inventory: Inventory,
@@ -311,6 +314,16 @@ export interface TuiSearchState {
   readonly model: TuiSearchModel;
 }
 
+export interface TuiAddAgentState {
+  readonly screen: "add-agent";
+  readonly browse: TuiBrowseSnapshot;
+  readonly installation: Installation;
+  readonly agents: readonly string[];
+  readonly index: number;
+  readonly plan: AddAgentPlan | null;
+  readonly scrollOffset: number;
+}
+
 export interface TuiThemeState {
   readonly screen: "theme";
   /** The untouched browse position to restore on apply or cancel. */
@@ -418,6 +431,7 @@ export type TuiState =
   | TuiLoadingState
   | TuiBrowseState
   | TuiSearchState
+  | TuiAddAgentState
   | TuiThemeState
   | TuiHelpState
   | TuiPlanState
@@ -468,6 +482,7 @@ export type TuiAction =
   | { readonly kind: "open-search"; readonly value?: string }
   | { readonly kind: "stage-all-search" }
   | { readonly kind: "apply-search" }
+  | { readonly kind: "add-agent" }
   | { readonly kind: "open-theme-picker" }
   | { readonly kind: "open-help" }
   | { readonly kind: "toggle-details" }

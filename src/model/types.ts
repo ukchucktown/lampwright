@@ -347,6 +347,11 @@ export interface Installation {
   readonly modifiedAt: string | null;
   readonly ownership: Ownership;
   readonly protection: ProtectionStatus;
+  /** Current Manager destinations for an active canonical Skill eligible for Add agent. */
+  readonly agentDestinations?: readonly {
+    readonly path: string;
+    readonly agents: readonly string[];
+  }[];
   /** Complete offline evidence for one Owner-controlled Update operation. */
   readonly update: UpdateEvidence;
   readonly removal: RemovalEvidence;

@@ -1,6 +1,6 @@
 # Non-interactive CLI
 
-`lampwright scan`, `disable`, `enable`, `update`, `remove`, `restore`, and
+`lampwright scan`, `disable`, `enable`, `add-agent`, `update`, `remove`, `restore`, and
 `purge` are thin callers of Inventory, Disabled Storage, Planning, Execution, and
 Quarantine. They do not inspect configuration, edit settings, or move Skill
 paths themselves.
@@ -38,6 +38,29 @@ complete Plugin boundary. It also accepts
 present in Inventory. Successful suspended-disable reports return these exact
 entry IDs. Prefix an ID with `disabled-entry:` for the later Enable selector.
 Names and source IDs are never inferred as Availability identity.
+
+For an active Vercel-managed Skill, `add-agent` accepts an Installation selector
+or a Logical Skill selector with one Installation. To find an agent ID, read
+`installations[].agentDestinations` in `scan --json`. Each entry lists a
+destination path and the agents that share it. A Skill without this field
+lacks the evidence for Add agent.
+
+```console
+lampwright add-agent logical-skill:<id> antigravity-cli --dry-run
+lampwright add-agent logical-skill:<id> antigravity-cli --yes
+```
+
+For a global Skill, Antigravity CLI and the Antigravity app share the same
+destination. A dry run shows the source, destination, affected agents, and
+missing parent directories. With `--yes`, Lampwright creates the local link
+and verifies it with a fresh scan. The command also accepts `--json`,
+`--adapter`, and `--trust-adapter`.
+
+The JSON response has a `kind` of `add-agent-plan`, `confirmation-required`,
+or `add-agent-report`. The plan gives its action as `link`, `unchanged`, or
+`blocked`. The report gives its status as `added`, `unchanged`, `blocked`,
+`failed`, or `unresolved`. If a write succeeds but verification fails,
+`unresolved` tells the caller to inspect the destination.
 
 `update` accepts exactly one `installation:<id>`, `logical-skill:<id>`,
 `group:<group-id>`, or `plugin:<plugin-boundary-id>` selector. A Plugin selector
