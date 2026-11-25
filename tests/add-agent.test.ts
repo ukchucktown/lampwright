@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
+import { parseRawTuiAction } from "../src/tui/terminal.js";
 import { runCli, formatCliOutput } from "../src/cli.js";
 import {
   createAddAgentModule,
@@ -67,6 +68,7 @@ async function fixture() {
   ];
   return {
     home,
+    workspace,
     source,
     destination,
     skillFile,
@@ -79,6 +81,20 @@ async function fixture() {
     scan,
     command,
   };
+}
+
+function controllerFor(f: Awaited<ReturnType<typeof fixture>>) {
+  return new TuiController(
+    {
+      scan: f.scan,
+      addAgent: f.addAgent,
+      plan,
+      execute: () => {
+        throw new Error("unexpected removal");
+      },
+    },
+    { rows: 24, columns: 90 },
+  );
 }
 
 describe("Add agent", () => {
@@ -204,42 +220,160 @@ describe("Add agent", () => {
       output: { report: { status: "added" } },
     });
   });
-  it("opens the terminal agent picker, previews the shared path, and confirms explicitly", async () => {
-    const f = await fixture();
-    const controller = new TuiController(
-      {
-        scan: f.scan,
-        addAgent: f.addAgent,
-        plan,
-        execute: () => {
-          throw new Error("unexpected removal");
+  it.each([false, true])(
+    "resolves the Skill row across user and workspace Installations (eligible workspace: %s)",
+    async (eligibleWorkspace) => {
+      const f = await fixture();
+      const skills = {
+        review: {
+          source: "acme/toolkit",
+          sourceType: "github",
+          skillPath: "skills/review",
         },
-      },
-      { rows: 24, columns: 90 },
+      };
+      await writeFile(f.lockFile, JSON.stringify({ version: 3, skills }));
+      await writeFile(
+        join(f.workspace, "skills-lock.json"),
+        JSON.stringify({ version: 1, skills }),
+      );
+      const workspaceSource = join(f.workspace, ".agents", "skills", "review");
+      if (eligibleWorkspace) {
+        await mkdir(workspaceSource, { recursive: true });
+        await writeFile(join(workspaceSource, "SKILL.md"), f.bytes);
+      }
+      const inventory = await f.scan();
+      expect(inventory.logicalSkills).toHaveLength(1);
+      expect(inventory.logicalSkills[0]!.installationIds).toHaveLength(2);
+      const controller = controllerFor(f);
+      await controller.start();
+      await controller.dispatch({ kind: "add-agent" });
+      if (eligibleWorkspace) {
+        expect(renderTui(controller.state, plainTuiTheme)).toContain(
+          "Choose an Installation",
+        );
+        const layout = renderTui(controller.state, plainTuiTheme);
+        expect(layout.replace(/\s/g, "")).toContain(
+          workspaceSource.replace(/\s/g, ""),
+        );
+        expect(layout).toContain("workspace");
+        expect(layout).toContain("user");
+        await controller.dispatch({ kind: "move", delta: 1 });
+        await controller.dispatch({ kind: "select" });
+      }
+      expect(controller.state).toMatchObject({
+        screen: "add-agent",
+        installation: {
+          location: { path: eligibleWorkspace ? workspaceSource : f.source },
+        },
+      });
+      if (eligibleWorkspace) {
+        const viewport = { rows: 20, columns: 75 };
+        await controller.dispatch({ kind: "viewport", viewport });
+        await controller.dispatch(
+          parseRawTuiAction(controller.state, "", {
+            name: "escape",
+            ctrl: false,
+            meta: false,
+            shift: false,
+          }),
+        );
+        expect(controller.state).toMatchObject({
+          screen: "add-agent-installation",
+          index: 1,
+          browse: { model: { viewport } },
+        });
+        await controller.dispatch(
+          parseRawTuiAction(controller.state, "", {
+            name: "escape",
+            ctrl: false,
+            meta: false,
+            shift: false,
+          }),
+        );
+        expect(controller.state).toMatchObject({
+          screen: "browse",
+          model: { viewport },
+        });
+      }
+      expect(
+        await runCli(
+          [
+            "add-agent",
+            `logical-skill:${inventory.logicalSkills[0]!.id}`,
+            "antigravity-cli",
+            "--yes",
+          ],
+          f,
+        ),
+      ).toMatchObject({ exitCode: 2 });
+    },
+  );
+  it("keeps a multi-Skill selection in Inventory", async () => {
+    const f = await fixture();
+    const other = join(dirname(f.source), "second");
+    await mkdir(other);
+    await writeFile(join(other, "SKILL.md"), "---\nname: second\n---\n");
+    const entry = { source: "acme/toolkit", sourceType: "github" };
+    await writeFile(
+      f.lockFile,
+      JSON.stringify({ version: 3, skills: { review: entry, second: entry } }),
     );
+    const controller = controllerFor(f);
     await controller.start();
+    await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "add-agent" });
-    const picker = controller.state;
-    expect(picker.screen).toBe("add-agent");
-    if (picker.screen !== "add-agent") throw new Error("No agent picker");
-    await controller.dispatch({
-      kind: "move",
-      delta: picker.agents.indexOf("antigravity-cli"),
-    });
-    await controller.dispatch({ kind: "select" });
-    expect(renderTui(controller.state, plainTuiTheme)).toContain(
-      "antigravity, antigravity-cli",
-    );
-    await expect(lstat(f.destination)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await controller.dispatch({ kind: "confirm" });
     expect(controller.state).toMatchObject({
       screen: "browse",
-      model: {
-        notice: expect.stringContaining("available to antigravity-cli"),
-      },
+      model: { notice: expect.stringContaining("one installed Skill") },
     });
-    expect(await realpath(f.destination)).toBe(f.source);
   });
+  it.each([false, true])(
+    "opens the terminal agent picker and confirms explicitly (staged row: %s)",
+    async (staged) => {
+      const f = await fixture();
+      const controller = controllerFor(f);
+      await controller.start();
+      if (staged) {
+        await controller.dispatch({ kind: "focus", pane: "entries" });
+        await controller.dispatch(
+          parseRawTuiAction(controller.state, " ", {
+            name: "space",
+            ctrl: false,
+            meta: false,
+            shift: false,
+          }),
+        );
+      }
+      await controller.dispatch(
+        parseRawTuiAction(controller.state, "+", {
+          name: "+",
+          ctrl: false,
+          meta: false,
+          shift: true,
+        }),
+      );
+      const picker = controller.state;
+      expect(picker.screen).toBe("add-agent");
+      if (picker.screen !== "add-agent") throw new Error("No agent picker");
+      await controller.dispatch({
+        kind: "move",
+        delta: picker.agents.indexOf("antigravity-cli"),
+      });
+      await controller.dispatch({ kind: "select" });
+      expect(renderTui(controller.state, plainTuiTheme)).toContain(
+        "antigravity, antigravity-cli",
+      );
+      await expect(lstat(f.destination)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await controller.dispatch({ kind: "confirm" });
+      expect(controller.state).toMatchObject({
+        screen: "browse",
+        model: {
+          notice: expect.stringContaining("available to antigravity-cli"),
+        },
+      });
+      expect(await realpath(f.destination)).toBe(f.source);
+    },
+  );
 });

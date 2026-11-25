@@ -133,6 +133,7 @@ export function mouseAction(
   if (
     state.screen === "plan" ||
     state.screen === "report" ||
+    state.screen === "add-agent-installation" ||
     state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "availability-report" ||
@@ -363,6 +364,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
   if (
     state.screen === "theme" ||
+    state.screen === "add-agent-installation" ||
     (state.screen === "add-agent" && !state.plan)
   ) {
     if (value === "" || value === "select" || value === "use")
@@ -720,6 +722,7 @@ export function parseRawTuiAction(
   }
   if (
     state.screen === "theme" ||
+    state.screen === "add-agent-installation" ||
     (state.screen === "add-agent" && !state.plan)
   ) {
     if (key.name === "escape") return { kind: "cancel" };

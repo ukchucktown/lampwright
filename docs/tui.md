@@ -322,8 +322,13 @@ malformed escape sequences remain ordinary keyboard input.
 
 ## Add an agent
 
-In Inventory, focus a Vercel-managed Skill and press `+` to choose an agent.
-Use the arrow keys to highlight its ID, then press Enter to review the
+In Inventory, press `+` on a Vercel-managed Skill. If you selected a row with
+Space, Add agent uses that row even after you move the cursor. Select one
+Skill at a time. If its row contains several eligible Installations, choose
+one by Scope and path. The agent picker opens directly for a single eligible
+Installation.
+
+Use the arrow keys to highlight an agent ID, then press Enter to review the
 destination and the agents that share it. Press `y` to confirm or Esc to
 return to the list. After execution, Inventory refreshes and shows the result.
 

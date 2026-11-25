@@ -34,6 +34,7 @@ import {
 import type {
   TuiBrowseState,
   TuiAddAgentState,
+  TuiAddAgentInstallationState,
   TuiAvailabilityPlanState,
   TuiAvailabilityReportState,
   TuiExecutingState,
@@ -60,7 +61,8 @@ export function renderTui(
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
-  if (state.screen === "add-agent") return renderAddAgent(state, style);
+  if (state.screen === "add-agent-installation" || state.screen === "add-agent")
+    return renderAddAgent(state, style);
   if (state.screen === "theme") return renderThemePicker(state, theme);
   if (state.screen === "help") return renderHelp(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
@@ -388,39 +390,66 @@ export function addAgentReviewLines(
   );
 }
 
-function renderAddAgent(state: TuiAddAgentState, style: TuiPaint): string {
+function renderAddAgent(
+  state: TuiAddAgentState | TuiAddAgentInstallationState,
+  style: TuiPaint,
+): string {
   const { rows, columns } = state.browse.model.viewport;
   if (rows < 6 || columns < 18)
     return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
   const height = Math.max(1, rows - 5);
+  const choosingCopy = state.screen === "add-agent-installation";
+  const choices = choosingCopy
+    ? state.installations.map(
+        (item) => `${item.scope.kind}  ${item.location.path}`,
+      )
+    : state.agents;
+  const plan = choosingCopy ? null : state.plan;
+  const blocks = choices.map((label, index) => {
+    const focused = index === state.index;
+    return wrapPlanLine(`${focused ? "›" : " "} ${label}`, columns - 1).map(
+      (line) =>
+        focused ? style.focus(fit(line, columns - 1)) : fit(line, columns - 1),
+    );
+  });
+  const lines = blocks.flat();
+  const focusedLine = blocks
+    .slice(0, state.index)
+    .reduce((sum, block) => sum + block.length, 0);
   const offset = Math.max(
     0,
     Math.min(
-      state.agents.length - height,
-      state.index - Math.floor(height / 2),
+      lines.length - height,
+      focusedLine -
+        Math.max(
+          0,
+          Math.floor((height - (blocks[state.index]?.length ?? 1)) / 2),
+        ),
     ),
   );
-  const list = state.plan
-    ? addAgentReviewLines(state).slice(
-        state.scrollOffset,
-        state.scrollOffset + height,
-      )
-    : state.agents
-        .slice(offset, offset + height)
-        .map((agent, index) =>
-          offset + index === state.index
-            ? style.focus(fit(`› ${agent}`, columns - 1))
-            : fit(`  ${agent}`, columns - 1),
-        );
-  const hint = state.plan
-    ? state.plan.action === "blocked"
-      ? "↑↓ scroll · esc back"
-      : "y confirm · ↑↓ scroll · esc back"
-    : "↑↓ choose agent · enter review · esc cancel";
+  const list =
+    !choosingCopy && state.plan
+      ? addAgentReviewLines(state).slice(
+          state.scrollOffset,
+          state.scrollOffset + height,
+        )
+      : lines.slice(offset, offset + height);
+  const hint = choosingCopy
+    ? "↑↓ choose Installation · enter choose agent · esc cancel"
+    : plan
+      ? plan.action === "blocked"
+        ? "↑↓ scroll · esc back"
+        : "y confirm · ↑↓ scroll · esc back"
+      : "↑↓ choose agent · enter review · esc cancel";
   return (
     [
       style.title(
-        fit(`Add agent — ${state.installation.skill.name}`, columns - 1),
+        fit(
+          choosingCopy
+            ? `Choose an Installation — ${state.installations[state.index]!.skill.name}`
+            : `Add agent — ${state.installation.skill.name}`,
+          columns - 1,
+        ),
       ),
       "",
       ...list,

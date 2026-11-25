@@ -153,6 +153,8 @@ export interface TuiEntry {
    * The Inventory keeps the copies as separate records; `target` is the first.
    */
   readonly targets?: readonly RemovalTarget[];
+  /** Physical Installations in this row that offer Add agent destinations. */
+  readonly addAgentInstallations?: readonly Installation[];
   /** Targets used only by the Disabled/Availability workflow. */
   readonly availabilityTargets?: readonly AvailabilityTarget[];
   /** Overrides target-based selectability for non-removal projections. */
@@ -314,7 +316,15 @@ export interface TuiSearchState {
   readonly model: TuiSearchModel;
 }
 
+export interface TuiAddAgentInstallationState {
+  readonly screen: "add-agent-installation";
+  readonly browse: TuiBrowseSnapshot;
+  readonly installations: readonly Installation[];
+  readonly index: number;
+}
+
 export interface TuiAddAgentState {
+  readonly previous: TuiAddAgentInstallationState | null;
   readonly screen: "add-agent";
   readonly browse: TuiBrowseSnapshot;
   readonly installation: Installation;
@@ -431,6 +441,7 @@ export type TuiState =
   | TuiLoadingState
   | TuiBrowseState
   | TuiSearchState
+  | TuiAddAgentInstallationState
   | TuiAddAgentState
   | TuiThemeState
   | TuiHelpState

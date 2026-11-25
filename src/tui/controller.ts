@@ -1,5 +1,3 @@
-import { addAgentInstallation } from "../planning/add-agent.js";
-import { PlanningError } from "../planning/types.js";
 import { stringifyModel } from "../model/json.js";
 import type {
   AvailabilityPlan,
@@ -7,6 +5,7 @@ import type {
 } from "../availability/types.js";
 import type {
   ApprovalRequirement,
+  Installation,
   Inventory,
   RemovalPlan,
   RemovalPlanIntent,
@@ -50,6 +49,7 @@ import type { TuiThemeDefinition } from "./theme.js";
 import type {
   TuiAction,
   TuiAddAgentState,
+  TuiAddAgentInstallationState,
   TuiAvailabilityPlanState,
   TuiAvailabilityReportState,
   TuiBrowseState,
@@ -155,6 +155,7 @@ export class TuiController {
     }
     if (action.kind === "viewport") {
       if (
+        state.screen === "add-agent-installation" ||
         state.screen === "add-agent" ||
         state.screen === "trash-review" ||
         state.screen === "trash-report" ||
@@ -197,7 +198,10 @@ export class TuiController {
     try {
       if (state.screen === "browse") await this.browseAction(state, action);
       else if (state.screen === "search") this.searchAction(state, action);
-      else if (state.screen === "add-agent")
+      else if (
+        state.screen === "add-agent-installation" ||
+        state.screen === "add-agent"
+      )
         await this.addAgentAction(state, action);
       else if (state.screen === "theme") await this.themeAction(state, action);
       else if (state.screen === "help") {
@@ -452,34 +456,38 @@ export class TuiController {
     }
 
     if (action.kind === "add-agent" && state.view === "inventory") {
-      const targets = this.targetsFor(state);
+      const selected = state.model.selected;
+      const entry =
+        selected.size === 0
+          ? currentEntry(state.model)
+          : selected.size === 1
+            ? state.model.sections
+                .flatMap((section) => section.entries)
+                .find((row) => selected.has(row.key))
+            : null;
+      const copies = entry?.addAgentInstallations ?? [];
       let notice = "Select one installed Skill to add an agent.";
-      if (targets.length === 1) {
-        try {
-          const installation = addAgentInstallation(
-            state.inventory,
-            targets[0]!,
-          );
-          const agents = installation.agentDestinations
-            ?.flatMap((item) => item.agents)
-            .sort();
-          if (agents?.length && this.dependencies.addAgent) {
+      if (entry) {
+        if (!this.dependencies.addAgent)
+          notice = "Add agent is unavailable in this host.";
+        else if (copies.length === 0)
+          notice = "Add agent requires an active canonical Vercel Skill.";
+        else {
+          const browse = browseSnapshot(state);
+          if (copies.length === 1)
+            this.openAgentPicker(browse, copies[0]!, null);
+          else
             this.stateValue = {
-              screen: "add-agent",
-              browse: browseSnapshot(state),
-              installation,
-              agents,
+              screen: "add-agent-installation",
+              browse,
+              installations: [...copies].sort(
+                (a, b) =>
+                  a.scope.kind.localeCompare(b.scope.kind) ||
+                  a.location.path.localeCompare(b.location.path),
+              ),
               index: 0,
-              plan: null,
-              scrollOffset: 0,
             };
-            return;
-          }
-          notice =
-            "Add agent requires an active canonical Vercel Skill and a host that supports Add agent.";
-        } catch (error) {
-          if (!(error instanceof PlanningError)) throw error;
-          notice = error.message;
+          return;
         }
       }
       this.stateValue = { ...state, model: { ...state.model, notice } };
@@ -598,8 +606,27 @@ export class TuiController {
     };
   }
 
+  private openAgentPicker(
+    browse: TuiBrowseSnapshot,
+    installation: Installation,
+    previous: TuiAddAgentInstallationState | null,
+  ): void {
+    this.stateValue = {
+      screen: "add-agent",
+      browse,
+      installation,
+      previous,
+      agents: installation
+        .agentDestinations!.flatMap((item) => item.agents)
+        .sort(),
+      index: 0,
+      plan: null,
+      scrollOffset: 0,
+    };
+  }
+
   private async addAgentAction(
-    state: TuiAddAgentState,
+    state: TuiAddAgentState | TuiAddAgentInstallationState,
     action: TuiAction,
   ): Promise<void> {
     const module = this.dependencies.addAgent!;
@@ -608,14 +635,26 @@ export class TuiController {
       return;
     }
     if (action.kind === "cancel") {
-      this.stateValue = state.plan
-        ? { ...state, plan: null, scrollOffset: 0 }
-        : { screen: "browse", ...state.browse };
+      if (state.screen === "add-agent" && state.plan)
+        this.stateValue = { ...state, plan: null, scrollOffset: 0 };
+      else if (state.screen === "add-agent" && state.previous)
+        this.stateValue = { ...state.previous, browse: state.browse };
+      else this.stateValue = { screen: "browse", ...state.browse };
       return;
     }
     if (action.kind === "move" || action.kind === "page") {
       const rows = Math.max(1, state.browse.model.viewport.rows - 5);
       const delta = action.delta * (action.kind === "page" ? rows : 1);
+      if (state.screen === "add-agent-installation") {
+        this.stateValue = {
+          ...state,
+          index: Math.max(
+            0,
+            Math.min(state.installations.length - 1, state.index + delta),
+          ),
+        };
+        return;
+      }
       this.stateValue = state.plan
         ? {
             ...state,
@@ -634,6 +673,15 @@ export class TuiController {
               Math.min(state.agents.length - 1, state.index + delta),
             ),
           };
+      return;
+    }
+    if (state.screen === "add-agent-installation") {
+      if (action.kind === "select")
+        this.openAgentPicker(
+          state.browse,
+          state.installations[state.index]!,
+          state,
+        );
       return;
     }
     if (state.plan === null && action.kind === "select") {
