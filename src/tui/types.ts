@@ -332,6 +332,7 @@ export interface TuiAddAgentState {
   readonly browse: TuiBrowseSnapshot;
   readonly installation: Installation;
   readonly agents: readonly string[];
+  readonly installedAgents: readonly string[];
   readonly index: number;
   readonly query: string;
   readonly selectedAgents: ReadonlySet<string>;

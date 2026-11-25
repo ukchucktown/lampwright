@@ -1272,6 +1272,7 @@ describe("terminal theme", () => {
         installation,
         previous: null,
         agents: Array.from({ length: 16 }, (_, i) => `agent-${i}`),
+        installedAgents: [],
         selectedAgents: new Set<string>(),
         query: "",
         index: 0,

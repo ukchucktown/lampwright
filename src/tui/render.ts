@@ -1,4 +1,3 @@
-import { linkedAgentIds } from "../planning/add-agent.js";
 import { modalContentWidth, modalFrame, modalInset } from "./overlay.js";
 import {
   agentLabel,
@@ -442,26 +441,52 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
   } else {
     const {
       matches,
+      installedMatches,
+      emptyMessage,
       offset,
       listRows,
       hint: pickerHint,
       shortcuts,
     } = agentPickerLayout(state);
-    const available = linkedAgentIds(state.installation);
     const options = matches
       .slice(offset, offset + listRows)
       .map((agent, index) => {
         const focused = state.index === offset + index;
         const mark = state.selectedAgents.has(agent) ? "[x]" : "[ ]";
         const line = fit(
-          `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}${available.has(agent) ? "  · available" : ""}`,
+          `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}`,
           width,
         );
         return focused ? style.focus(line) : line;
       });
-    if (!matches.length) options.push(style.muted("No matching agents"));
+    if (!matches.length) {
+      const explanation = wrapPlanLine(emptyMessage, width);
+      if (explanation.length <= listRows)
+        options.push(...explanation.map(style.muted));
+      else {
+        const compact = installedMatches.length
+          ? "Already installed"
+          : !state.agents.length && !state.query.trim()
+            ? width >= 20
+              ? "All agents installed"
+              : "All installed"
+            : "No matches";
+        options.push(
+          style.muted(compact.length <= width ? compact : "Installed"),
+        );
+      }
+    }
     while (options.length < listRows) options.push("");
-    const count = `${state.selectedAgents.size} selected · ${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+    const count =
+      !state.agents.length && !state.query.trim()
+        ? `${state.installedAgents.length} installed`
+        : installedMatches.length &&
+            !matches.length &&
+            !state.selectedAgents.size
+          ? `${installedMatches.length} installed`
+          : installedMatches.length
+            ? `${state.selectedAgents.size} selected · ${matches.length} to add · ${installedMatches.length} installed`
+            : `${state.selectedAgents.size} selected · ${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
     const clear = state.query ? "ctrl+u clear" : "";
     body = [
       style.info(fit(`Search: ${state.query || "type an agent name"}`, width)),

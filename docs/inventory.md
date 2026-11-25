@@ -308,6 +308,13 @@ using the manager's own hashing algorithm; a changed copy remains visible but
 native and declarative removal are unavailable. Legacy copy records without a
 hash retain the lock's declared ownership evidence.
 
+For Add agent, an entry in `agentDestinations` can carry `verifiedCopy: true`.
+Inventory checks regular directories at current Manager destinations for the
+active lock key. A copy needs a regular `SKILL.md` and an unlinked path to
+the directory. Its contents must match the canonical Skill or a project copy
+hash that the Manager recorded. When an older Inventory omits this optional
+field, the picker still recognizes the canonical directory and verified links.
+
 The same namespace exposes deterministic `sourceGroupId` and `pluginGroupId`
 selection hints. Source groups bind scope plus source; plugin-name groups bind
 scope, source, and plugin name so equal labels from unrelated sources cannot

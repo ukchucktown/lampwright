@@ -332,12 +332,17 @@ Skill at a time. If its row contains several eligible Installations, choose
 one by Scope and path. The agent picker opens directly for a single eligible
 Installation.
 
-Type an agent name to filter the picker. For Antigravity CLI, type `agy`.
+The picker lists agents that can receive the Skill. It omits agents whose
+current destination contains the canonical Skill, a link to it, or a verified
+Manager-owned copy. Type an agent name to filter the list. For Antigravity
+CLI, type `agy`. If it already has the Skill, the picker explains why the
+search has no selectable row. When a search matches both kinds of agent, the
+counts distinguish agents to add from agents that already have the Skill.
 Use the arrows or Page Up and Page Down to move through the results. Press
 Space or click a result to select or clear that agent. A selection stays
 checked when another search hides it. Ctrl+U clears the search and keeps the
-checked agents. The available label means that Inventory found the canonical
-Skill at the current destination.
+checked agents. If all supported agents have the Skill, the picker shows that
+result and offers Esc to return.
 
 Press Enter to review the checked agents. If none are checked, Enter reviews
 the highlighted agent. The review shows each distinct destination and every

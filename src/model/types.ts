@@ -349,6 +349,8 @@ export interface Installation {
   readonly protection: ProtectionStatus;
   /** Current Manager destinations for an active canonical Skill eligible for Add agent. */
   readonly agentDestinations?: readonly {
+    /** Inventory confirmed a directory copy against this Installation. */
+    readonly verifiedCopy?: true;
     readonly path: string;
     readonly agents: readonly string[];
   }[];

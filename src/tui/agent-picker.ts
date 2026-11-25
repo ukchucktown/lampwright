@@ -3,8 +3,12 @@ import { currentEntry } from "./browse.js";
 import type { TuiAddAgentState, TuiBrowseState } from "./types.js";
 
 export function filteredAgents(state: TuiAddAgentState): readonly string[] {
-  const query = state.query.toLowerCase().trim();
-  return state.agents.filter(
+  return matchingAgents(state.agents, state.query);
+}
+
+function matchingAgents(agents: readonly string[], value: string) {
+  const query = value.trim().toLowerCase();
+  return agents.filter(
     (agent) =>
       agentLabel(agent).includes(query) ||
       agentLabel(agent).replaceAll("-", " ").includes(query),
@@ -28,19 +32,31 @@ export function agentModalSize(state: TuiAddAgentState) {
 export function agentPickerLayout(state: TuiAddAgentState) {
   const { width, listRows } = agentModalSize(state);
   const matches = filteredAgents(state);
+  const installedMatches = state.query.trim()
+    ? matchingAgents(state.installedAgents, state.query)
+    : [];
+  let emptyMessage = "No matching agents";
+  if (!state.query.trim() && state.agents.length === 0)
+    emptyMessage = "All supported agents already have this skill.";
+  else if (installedMatches.length === 1) {
+    const agent = installedMatches[0]!;
+    emptyMessage = `${agent === "antigravity-cli" ? "Antigravity CLI" : agent} already has this skill.`;
+  } else if (installedMatches.length > 1)
+    emptyMessage = `All ${installedMatches.length} matching agents already have this skill.`;
   const offset = Math.max(
     0,
     Math.min(matches.length - listRows, state.index - Math.floor(listRows / 2)),
   );
   const longHint = "↑↓ PgUp/PgDn move · space select · enter review · esc back";
-  const hint =
-    width >= longHint.length + 3
+  const hint = !state.agents.length
+    ? "esc back"
+    : width >= longHint.length + 3
       ? longHint
       : width >= 30
         ? "enter review · esc back"
         : "enter review";
   const shortcuts =
-    hint === longHint
+    !state.agents.length || hint === longHint
       ? []
       : width >= 30
         ? [
@@ -59,6 +75,8 @@ export function agentPickerLayout(state: TuiAddAgentState) {
     width,
     listRows,
     matches,
+    installedMatches,
+    emptyMessage,
     offset,
     hint,
     shortcuts,

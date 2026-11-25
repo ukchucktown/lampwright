@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
+  cp,
   lstat,
   mkdir,
   readFile,
@@ -7,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, isAbsolute } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -20,6 +22,8 @@ import {
   createAddAgentModule,
   createInventoryScanner,
   plan,
+  parseInventory,
+  installedAgentIds,
   renderTui,
   plainTuiTheme,
   TuiController,
@@ -259,6 +263,163 @@ describe("Add agent", () => {
       ],
     });
     expect(await realpath(f.destination)).toBe(f.source);
+  });
+  it("hides confirmed copies, links and canonical readers while leaving a conflicting directory for review", async () => {
+    const f = await fixture();
+    const claude = join(f.home, ".claude", "skills", "review");
+    await mkdir(dirname(claude), { recursive: true });
+    await symlink(
+      f.source,
+      claude,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await mkdir(dirname(f.destination), { recursive: true });
+    await cp(f.source, f.destination, { recursive: true });
+    const occupied = join(f.home, ".qwen", "skills", "review");
+    await mkdir(occupied, { recursive: true });
+    await writeFile(join(occupied, "SKILL.md"), f.bytes);
+    await writeFile(join(occupied, "private.txt"), "from another installation");
+    const outside = join(f.home, "other-agent");
+    await mkdir(join(outside, "skills"), { recursive: true });
+    await cp(f.source, join(outside, "skills", "review"), { recursive: true });
+    await symlink(
+      outside,
+      join(f.home, ".augment"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const controller = controllerFor(f);
+    await controller.start();
+    await controller.dispatch({ kind: "add-agent" });
+    expect(controller.state).toMatchObject({ screen: "add-agent" });
+    if (controller.state.screen !== "add-agent")
+      throw new Error("Expected agent picker");
+    expect(controller.state.agents).not.toContain("claude-code");
+    expect(controller.state.agents).not.toContain("codex");
+    expect(controller.state.agents).not.toContain("antigravity-cli");
+    expect(controller.state.agents).not.toContain("antigravity");
+    expect(controller.state.agents).toContain("qwen-code");
+    expect(controller.state.agents).toContain("augment");
+    await controller.dispatch({ kind: "append-query", value: "cli" });
+    const mixed = renderTui(controller.state, plainTuiTheme);
+    expect(mixed).toMatch(/\d+ to add · \d+ installed/u);
+    expect(mixed).not.toContain("[ ] antigravity-cli");
+    await controller.dispatch({ kind: "clear-query" });
+    await controller.dispatch({ kind: "append-query", value: "agy" });
+    expect(renderTui(controller.state, plainTuiTheme)).toContain(
+      "Antigravity CLI already has this skill",
+    );
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "select" });
+    expect(controller.state.plan).toBe(null);
+    await controller.dispatch({ kind: "clear-query" });
+    await controller.dispatch({ kind: "append-query", value: "misspelled" });
+    expect(renderTui(controller.state, plainTuiTheme)).toContain(
+      "No matching agents",
+    );
+    await controller.dispatch({ kind: "clear-query" });
+    await controller.dispatch({ kind: "append-query", value: "qwen" });
+    await controller.dispatch({ kind: "select" });
+    expect(controller.state.plan).toMatchObject({
+      destinations: [{ action: "blocked" }],
+    });
+    expect(await readFile(join(occupied, "private.txt"), "utf8")).toBe(
+      "from another installation",
+    );
+    expect(await runCli([...f.command, "--yes"], f)).toMatchObject({
+      exitCode: 3,
+      output: { plan: { action: "blocked" } },
+    });
+  });
+
+  it("recognizes a project copy that matches its Manager record despite ignored local files", async () => {
+    const f = await fixture();
+    const source = join(f.workspace, ".agents", "skills", "review");
+    const copy = join(f.workspace, ".claude", "skills", "review");
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, "SKILL.md"), f.bytes);
+    await mkdir(dirname(copy), { recursive: true });
+    await cp(source, copy, { recursive: true });
+    // The Vercel version 1 project hash excludes node_modules.
+    await mkdir(join(copy, "node_modules"));
+    await writeFile(
+      join(copy, "node_modules", "local.txt"),
+      "unrelated local content",
+    );
+    const computedHash = createHash("sha256")
+      .update("SKILL.md")
+      .update(f.bytes)
+      .digest("hex");
+    await writeFile(
+      join(f.workspace, "skills-lock.json"),
+      JSON.stringify({
+        version: 1,
+        skills: {
+          review: { source: "acme/skills", sourceType: "github", computedHash },
+        },
+      }),
+    );
+    const project = (await f.scan()).installations.find(
+      (item) => item.scope.kind === "workspace",
+    )!;
+    expect(
+      project.agentDestinations?.find((item) => item.path === copy),
+    ).toMatchObject({ verifiedCopy: true });
+    expect(installedAgentIds(project)).toContain("claude-code");
+  });
+  it("still reads saved Inventory without copy evidence", async () => {
+    const f = await fixture();
+    await mkdir(dirname(f.destination), { recursive: true });
+    await cp(f.source, f.destination, { recursive: true });
+    const fresh = await f.scan();
+    const old = parseInventory(
+      JSON.parse(
+        JSON.stringify(fresh, (key, value: unknown) =>
+          key === "verifiedCopy" ? undefined : value,
+        ),
+      ),
+    );
+    expect(installedAgentIds(old.installations[0]!)).toContain("codex");
+    expect(installedAgentIds(old.installations[0]!)).not.toContain(
+      "antigravity-cli",
+    );
+    expect(installedAgentIds(fresh.installations[0]!)).toContain(
+      "antigravity-cli",
+    );
+  });
+
+  it("reports when every supported agent already has the Skill and creates no plan", async () => {
+    const f = await fixture();
+    for (const { path } of f.installation.agentDestinations!) {
+      const withinHome = relative(f.home, path);
+      if (withinHome.startsWith("..") || isAbsolute(withinHome))
+        throw new Error("Expected fixture path");
+      if (path === f.source) continue;
+      await mkdir(dirname(path), { recursive: true });
+      await symlink(
+        f.source,
+        path,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    }
+    const controller = controllerFor(f);
+    await controller.start();
+    await controller.dispatch({ kind: "add-agent" });
+    expect(controller.state).toMatchObject({ screen: "add-agent", agents: [] });
+    const frame = () => renderTui(controller.state, plainTuiTheme);
+    expect(frame()).toContain("All supported agents already have this skill");
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 10, columns: 32 },
+    });
+    expect(frame()).toContain("All agents installed");
+    expect(frame()).not.toContain("none to…");
+    await controller.dispatch({ kind: "append-query", value: "agy" });
+    expect(frame()).toContain("Already installed");
+
+    expect(frame()).not.toContain("space select · enter review");
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "select" });
+    expect(controller.state).toMatchObject({ plan: null });
   });
   it.each([10, 24])(
     "keeps checked agents across filters at %i rows",

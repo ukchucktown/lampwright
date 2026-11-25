@@ -86,6 +86,17 @@ export function linkedAgentIds(
   );
 }
 
+export function installedAgentIds(
+  installation: Installation,
+): ReadonlySet<string> {
+  return new Set([
+    ...linkedAgentIds(installation),
+    ...(installation.agentDestinations ?? []).flatMap((item) =>
+      item.verifiedCopy ? item.agents : [],
+    ),
+  ]);
+}
+
 export function addAgentInstallation(
   inventory: Inventory,
   target: RemovalTarget,

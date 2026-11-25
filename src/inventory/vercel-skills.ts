@@ -9,7 +9,15 @@ import {
   realpath,
   stat,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 import { parseTree, type ParseError } from "jsonc-parser";
 
@@ -473,10 +481,13 @@ async function materializeLockEntry(input: {
     removalUnsafeReason === null &&
     contentHash !== null
       ? {
-          agentDestinations: agentDestinations(
+          agentDestinations: await agentDestinations(
             currentPaths,
             canonicalPath,
             input.lock.format,
+            artifacts,
+            contentHash,
+            localChanges.kind === "unchanged",
           ),
         }
       : {}),
@@ -1017,10 +1028,13 @@ function managedRemoval(input: {
   };
 }
 
-function agentDestinations(
+async function agentDestinations(
   paths: readonly VercelAgentPath[],
   canonicalPath: string,
   scope: "global" | "project",
+  artifacts: readonly LocatedArtifact[],
+  canonicalHash: string,
+  verifiedProjectHashes: boolean,
 ) {
   const canonicalAgents = new Set(
     scope === "global" ? canonicalGlobalAgentIds() : [],
@@ -1035,10 +1049,43 @@ function agentDestinations(
     destination.agents.push(candidate.agentId);
     destinations.set(key, destination);
   }
-  return [...destinations.values()].map(({ path, agents }) => ({
-    path,
-    agents: agents.sort(),
-  }));
+  const directories = new Map(
+    artifacts
+      .filter(
+        ({ location }) =>
+          location.artifactType.kind === "directory" &&
+          location.canonicalPath !== null &&
+          pathKey(location.canonicalPath) === pathKey(location.path) &&
+          pathKey(location.path) !== pathKey(canonicalPath),
+      )
+      .map(({ location }) => [pathKey(location.path), location] as const),
+  );
+  return Promise.all(
+    [...destinations.values()].map(async ({ path, agents }) => {
+      const directory = directories.get(pathKey(path));
+      let verifiedCopy = false;
+      if (directory) {
+        try {
+          // Only an Owner-declared current path with a real Skill file can represent a copy.
+          if (pathKey(await realpath(path)) === pathKey(path)) {
+            const metadata = await skillMetadata(directory, basename(path));
+            verifiedCopy =
+              metadata?.status === "active" &&
+              (verifiedProjectHashes ||
+                (await hashSkillDirectory(path)) === canonicalHash) &&
+              pathKey(await realpath(path)) === pathKey(path);
+          }
+        } catch {
+          // A failed read leaves this destination unverified. Execution still protects occupied paths.
+        }
+      }
+      return {
+        path,
+        agents: agents.sort(),
+        ...(verifiedCopy ? { verifiedCopy: true as const } : {}),
+      };
+    }),
+  );
 }
 
 async function locateArtifacts(

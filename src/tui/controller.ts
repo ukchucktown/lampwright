@@ -1,3 +1,4 @@
+import { installedAgentIds } from "../planning/add-agent.js";
 import {
   filteredAgents,
   agentModalSize,
@@ -644,6 +645,7 @@ export class TuiController {
     installation: Installation,
     previous: TuiAddAgentInstallationState | null,
   ): void {
+    const installed = installedAgentIds(installation);
     this.stateValue = {
       screen: "add-agent",
       browse,
@@ -653,8 +655,10 @@ export class TuiController {
       selectedAgents: new Set(),
       query: "",
       report: null,
+      installedAgents: [...installed].sort(),
       agents: installation
         .agentDestinations!.flatMap((item) => item.agents)
+        .filter((agent) => !installed.has(agent))
         .sort(),
       index: 0,
       plan: null,
