@@ -178,8 +178,10 @@ usable.
 ### Modal frames
 
 Help, Theme, and Add agents use `overlayPanel` to draw a muted title and footer
-hint against the left and right content edges, one space inside each border.
-For a new modal, use `modalFrame` to locate the content for pointer input.
+hint against the left and right content edges, two spaces inside each side
+border. The frame adds a blank row above and below the body when both rows fit
+below the Inventory header and key hints. For a new modal, use `modalFrame`
+to locate the content for pointer input.
 
 ### Theme picker
 
@@ -261,11 +263,11 @@ The panel has one key on each line in three columns: the key, its effect, and
 the mouse action that has the same effect. The keys are in the title style. The
 effects and the mouse actions are plain text. The three group headings and the
 `mouse` heading are muted. The panel has three groups. The first group lists the actions of the current view. The
-top border of the panel shows the name of that view, and the keys of the group
-start directly under the border. A labelled rule opens each of the other two
+top border of the panel shows the name of that view. Its keys start at the
+first row of the content. A labelled rule opens each of the other two
 groups: the keys for movement and selection, and the application keys. An empty
-row is above each of those two groups. The last key is directly above the
-bottom border, which ends with `esc close`. An effect that removes content,
+row is above each of those two groups. The bottom border ends with
+`esc close`. An effect that removes content,
 `remove` or `purge`, is in the warning style. The `esc` row names the effect of
 Escape in the current view.
 

@@ -1,7 +1,8 @@
 import type { TuiViewport } from "./types.js";
 
 const border = 1;
-export const modalInset = " ";
+export const modalInset = "  ";
+const headerRows = 2;
 const contentOffset = border + modalInset.length;
 const backdropMargin = 1;
 
@@ -28,7 +29,10 @@ export function modalFrame(
   const columns = viewport.columns - 1;
   const rows = viewport.rows - 1;
   const width = contentWidth + 2 * contentOffset;
-  const height = bodyRows + 2 * border;
+  const minimumHeight = bodyRows + 2 * border;
+  // Padding must not cover either Inventory header row or displace a body row.
+  const verticalInset = minimumHeight + 2 <= rows - headerRows ? 1 : 0;
+  const height = minimumHeight + 2 * verticalInset;
   if (
     viewport.columns < 24 ||
     viewport.rows < 7 ||
@@ -40,14 +44,15 @@ export function modalFrame(
   const left = Math.floor((columns - width) / 2);
   const top = Math.min(
     rows - height,
-    Math.max(2, Math.floor((rows - height) / 2)),
+    Math.max(headerRows, Math.floor((rows - height) / 2)),
   );
   return {
     left,
     top,
     width,
     height,
+    verticalInset,
     contentLeft: left + contentOffset,
-    contentTop: top + border,
+    contentTop: top + border + verticalInset,
   };
 }

@@ -161,9 +161,10 @@ function overlayPanel(
       ? style.border("┌") + style.muted(text) + fill + style.border("┐")
       : style.border("└") + fill + style.muted(text) + style.border("┘");
   };
+  const paddingRows = Array<string>(frame.verticalInset).fill("");
   const panel = [
     rule(title, true),
-    ...body.map(
+    ...[...paddingRows, ...body, ...paddingRows].map(
       (line) =>
         style.border("│") +
         modalInset +
@@ -313,7 +314,7 @@ function helpBody(
   };
   return {
     // The top border of the panel names the first group, so that group has
-    // no rule of its own and its keys start directly under the border.
+    // no rule of its own. The shared frame supplies the outer padding.
     title: groups[0]!.label,
     body: groups.flatMap((group, index) => [
       // An empty row sets each later group apart from the one above it.
@@ -351,7 +352,10 @@ function renderHelp(
     // Too small for a panel: the keys take the whole screen.
     [
       style.title("Lampwright — Keys"),
-      ...helpBody(state.browse, style, "bare").body,
+      ...helpBody(state.browse, style, "bare").body.slice(
+        0,
+        Math.max(0, viewport.rows - 3),
+      ),
       style.muted(closeHint),
     ]
       .slice(0, Math.max(1, viewport.rows - 1))

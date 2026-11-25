@@ -1096,17 +1096,17 @@ describe("terminal theme", () => {
     expect(lines).toHaveLength(23);
     const text = lines.join("\n");
     // The top border names the first group: the actions of the current view.
-    expect(text).toContain("┌ Inventory ─");
-    expect(text).toContain(" esc close ┘");
+    expect(text).toContain("┌  Inventory  ─");
+    expect(text).toContain("  esc close  ┘");
     expect(text).not.toContain("Keys");
     // One key to a line: the key, its effect, then the matching mouse action.
-    expect(text).toMatch(/│ enter +remove +│/u);
-    expect(text).toMatch(/│ space +select +dbl-click │/u);
-    expect(text).toMatch(/│ tab +next pane +click +│/u);
-    expect(text).toMatch(/│ ↑↓ +move +wheel +│/u);
+    expect(text).toMatch(/│ {2}enter +remove +│/u);
+    expect(text).toMatch(/│ {2}space +select +dbl-click +│/u);
+    expect(text).toMatch(/│ {2}tab +next pane +click +│/u);
+    expect(text).toMatch(/│ {2}↑↓ +move +wheel +│/u);
     // A labelled rule opens each later group.
-    expect(text).toMatch(/│ Move and select ─+ mouse ─+ │/u);
-    expect(text).toMatch(/│ App ─+ │/u);
+    expect(text).toMatch(/│ {2}Move and select ─+ mouse ─+ {2}│/u);
+    expect(text).toMatch(/│ {2}App ─+ {2}│/u);
     // The mouse actions share one column, under their heading.
     const start = (word: string) =>
       lines.find((line) => line.includes(` ${word}`))!.lastIndexOf(word);
@@ -1140,27 +1140,26 @@ describe("terminal theme", () => {
         { screen: "help", browse: { ...before, view } } as TuiState,
         plainTuiTheme,
       );
-    expect(reference("disabled")).toMatch(/│ e +enable +│/u);
-    expect(reference("disabled")).toContain("┌ Disabled ─");
+    expect(reference("disabled")).toMatch(/│ {2}e +enable +│/u);
+    expect(reference("disabled")).toContain("┌  Disabled  ─");
     // Escape is named for what it does in the view, not as a second "close".
-    expect(text).toMatch(/│ esc +step back +│/u);
-    expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
-    // The keys of the first group start directly under the top border, the
-    // last key sits directly on the bottom border, and an empty row is above
-    // each later group.
+    expect(text).toMatch(/│ {2}esc +step back +│/u);
+    expect(reference("trash")).toMatch(/│ {2}esc +Inventory +│/u);
+    // This height fits the open groups below the header only without outer
+    // padding. Internal group separators remain visible.
     const blank = /│ +│/u;
-    const top = lines.findIndex((line) => line.includes("┌ Inventory "));
-    const bottom = lines.findIndex((line) => line.includes(" esc close ┘"));
+    const top = lines.findIndex((line) => line.includes("┌  Inventory  "));
+    const bottom = lines.findIndex((line) => line.includes("  esc close  ┘"));
     const row = (label: string) =>
-      lines.findIndex((line) => line.includes(`│ ${label} ─`));
-    expect(lines[top + 1]).toMatch(/│ enter +remove +│/u);
-    expect(lines[bottom - 1]).toMatch(/│ q +quit +│/u);
+      lines.findIndex((line) => line.includes(`│  ${label} ─`));
+    expect(lines[top + 1]).toMatch(/│ {2}enter +remove +│/u);
+    expect(lines[bottom - 1]).toMatch(/│ {2}q +quit +│/u);
     expect(lines[row("Move and select") - 1]).toMatch(blank);
     expect(lines[row("App") - 1]).toMatch(blank);
     // The three group headings start in the same column.
     expect(
       new Set(
-        ["Inventory ─", "Move and select ─", "App ─"].map((heading) =>
+        ["Inventory  ─", "Move and select ─", "App ─"].map((heading) =>
           lines.find((line) => line.includes(heading))!.indexOf(heading),
         ),
       ).size,
@@ -1179,9 +1178,16 @@ describe("terminal theme", () => {
     );
     // The three group headings share the muted style, and the mouse actions
     // are plain text like the effects.
-    for (const heading of [" Inventory ", "Move and select ", "App ", "mouse"])
+    for (const heading of [
+      "  Inventory  ",
+      "Move and select ",
+      "App ",
+      "mouse",
+    ])
       expect(colored).toContain(styleTui(nightfall, "muted", heading));
-    expect(colored).not.toContain(styleTui(nightfall, "title", " Inventory "));
+    expect(colored).not.toContain(
+      styleTui(nightfall, "title", "  Inventory  "),
+    );
     for (const mouse of ["wheel", "click", "dbl-click"]) {
       expect(colored).not.toContain(
         styleTui(nightfall, "muted", mouse).slice(0, -4),
@@ -1190,9 +1196,9 @@ describe("terminal theme", () => {
         styleTui(nightfall, "title", mouse).slice(0, -4),
       );
     }
-    expect(reference("trash")).toContain("┌ Trash ─");
-    expect(reference("trash")).toMatch(/│ enter +restore +│/u);
-    expect(reference("trash")).toMatch(/│ p +purge +│/u);
+    expect(reference("trash")).toContain("┌  Trash  ─");
+    expect(reference("trash")).toMatch(/│ {2}enter +restore +│/u);
+    expect(reference("trash")).toMatch(/│ {2}p +purge +│/u);
 
     for (const [value, key] of [
       ["?", browseKey],
@@ -1290,19 +1296,21 @@ describe("terminal theme", () => {
           right = lines[top]!.indexOf("┐");
         expect(right - left).toBeGreaterThan(4);
         const title = lines[top]!.slice(left, right + 1);
-        expect(title).toMatch(/^┌ [^ ─]/u);
+        expect(title).toMatch(/^┌ {2}[^ ─]/u);
         const titleText = title.slice(1, -1).replace(/─+$/u, "");
         expect(colored).toContain(styleTui(color, "muted", titleText));
         const footer = lines[bottom]!.slice(left, right + 1);
-        expect(footer).toMatch(/^└(?:─+|─* .+ )┘$/u);
+        expect(footer).toMatch(/^└(?:─+|─* {2}.+ {2})┘$/u);
         for (const line of lines.slice(top + 1, bottom)) {
-          expect(line.slice(left, left + 2)).toBe("│ ");
-          expect(line.slice(right - 1, right + 1)).toBe(" │");
+          expect(line.slice(left, left + 3)).toBe("│  ");
+          expect(line.slice(right - 2, right + 1)).toBe("  │");
         }
-        expect(lines[top + 1]!.slice(left + 2, right - 1).trim()).not.toBe("");
+        expect(lines[top + 1]!.slice(left + 3, right - 2).trim()).toBe("");
+        expect(lines[bottom - 1]!.slice(left + 3, right - 2).trim()).toBe("");
+        expect(lines[top + 2]!.slice(left + 3, right - 2).trim()).not.toBe("");
         // Filtered results reserve their slots so the Search field stays in place.
         if (state.screen !== "add-agent" || !state.query)
-          expect(lines[bottom - 1]!.slice(left + 2, right - 1).trim()).not.toBe(
+          expect(lines[bottom - 2]!.slice(left + 3, right - 2).trim()).not.toBe(
             "",
           );
       }

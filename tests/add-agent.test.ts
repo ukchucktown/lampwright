@@ -260,93 +260,108 @@ describe("Add agent", () => {
     });
     expect(await realpath(f.destination)).toBe(f.source);
   });
-  it("retains checked agents across searches and reviews distinct destinations in the modal", async () => {
-    const f = await fixture();
-    const controller = controllerFor(f);
-    await controller.start();
-    const press = async (text: string, name = text) =>
-      controller.dispatch(
-        parseRawTuiAction(controller.state, text, {
-          name,
-          ctrl: false,
+  it.each([10, 24])(
+    "keeps checked agents across filters at %i rows",
+    async (rows) => {
+      const f = await fixture();
+      const controller = controllerFor(f);
+      await controller.start();
+      const press = async (text: string, name = text) =>
+        controller.dispatch(
+          parseRawTuiAction(controller.state, text, {
+            name,
+            ctrl: false,
+            meta: false,
+            shift: false,
+          }),
+        );
+      await controller.dispatch({
+        kind: "viewport",
+        viewport: { rows, columns: 80 },
+      });
+      expect(
+        renderTui(controller.state, plainTuiTheme).split("\n")[1],
+      ).toContain("+ add agent");
+      await press("+");
+      const frame = () => renderTui(controller.state, plainTuiTheme);
+      expect(frame()).toContain("┌");
+      expect(frame()).toContain("0 selected");
+      const searchRow = frame()
+        .split("\n")
+        .findIndex((line) => line.includes("Search:"));
+      const borderRow = frame()
+        .split("\n")
+        .findIndex((line) => line.includes("┌"));
+      expect(borderRow).toBeGreaterThanOrEqual(2);
+      expect(searchRow - borderRow).toBe(rows === 10 ? 1 : 2);
+      for (const char of "agy") await press(char);
+      expect(frame()).toContain("antigravity-cli");
+      expect(frame()).toContain("1 match");
+      expect(frame()).not.toContain("1 matches");
+      expect(frame()).toContain("ctrl+u clear");
+      const lines = frame().split("\n");
+      expect(lines.findIndex((line) => line.includes("Search:"))).toBe(
+        searchRow,
+      );
+      const row = lines.findIndex((line) =>
+        line.includes("antigravity-cli (agy)"),
+      );
+      const column = lines[row]!.indexOf("[ ]");
+      const click = async (x: number, y: number) => {
+        const event = parseMouseReport(`\u001b[<0;${x};${y}M`)!;
+        await controller.dispatch(
+          mouseAction(controller.state, event, {
+            dragging: false,
+            doubleClick: false,
+          }),
+        );
+      };
+      await click(1, 1);
+      expect(frame()).toContain("0 selected");
+      await click(column + 1, row + 1);
+      expect(frame()).toContain("1 selected");
+      await controller.dispatch(
+        parseRawTuiAction(controller.state, "", {
+          name: "u",
+          ctrl: true,
           meta: false,
           shift: false,
         }),
       );
-    await controller.dispatch({
-      kind: "viewport",
-      viewport: { rows: 24, columns: 80 },
-    });
-    expect(renderTui(controller.state, plainTuiTheme).split("\n")[1]).toContain(
-      "+ add agent",
-    );
-    await press("+");
-    const frame = () => renderTui(controller.state, plainTuiTheme);
-    expect(frame()).toContain("┌");
-    expect(frame()).toContain("0 selected");
-    const searchRow = frame()
-      .split("\n")
-      .findIndex((line) => line.includes("Search:"));
-    for (const char of "agy") await press(char);
-    expect(frame()).toContain("antigravity-cli");
-    expect(frame()).toContain("1 match");
-    expect(frame()).not.toContain("1 matches");
-    expect(frame()).toContain("ctrl+u clear");
-    const lines = frame().split("\n");
-    expect(lines.findIndex((line) => line.includes("Search:"))).toBe(searchRow);
-    const row = lines.findIndex((line) =>
-      line.includes("antigravity-cli (agy)"),
-    );
-    const column = lines[row]!.indexOf("[ ]");
-    const click = async (x: number, y: number) => {
-      const event = parseMouseReport(`\u001b[<0;${x};${y}M`)!;
-      await controller.dispatch(
-        mouseAction(controller.state, event, {
-          dragging: false,
-          doubleClick: false,
-        }),
+      for (const char of "claude") await press(char);
+      await press(" ", "space");
+      expect(frame()).toContain("2 selected");
+      for (let i = 0; i < 6; i++) await press("", "backspace");
+      await press("q");
+      expect(controller.state).toMatchObject({
+        screen: "add-agent",
+        query: "q",
+      });
+      for (const char of "wen") await press(char);
+      expect(frame()).toContain("qwen-code");
+      await press("", "return");
+      expect(controller.state).toMatchObject({
+        plan: { selectedAgents: ["antigravity-cli", "claude-code"] },
+      });
+      await expect(lstat(f.destination)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await press("", "escape");
+      expect(frame()).toContain("2 selected");
+      await press("", "return");
+      await press("y");
+      expect(frame()).toContain("Applying and verifying");
+      await press("y");
+      await Promise.all([
+        controller.waitForAddAgentExecution(),
+        controller.waitForAddAgentExecution(),
+      ]);
+      expect(await realpath(f.destination)).toBe(f.source);
+      expect(await realpath(join(f.home, ".claude", "skills", "review"))).toBe(
+        f.source,
       );
-    };
-    await click(1, 1);
-    expect(frame()).toContain("0 selected");
-    await click(column + 1, row + 1);
-    expect(frame()).toContain("1 selected");
-    await controller.dispatch(
-      parseRawTuiAction(controller.state, "", {
-        name: "u",
-        ctrl: true,
-        meta: false,
-        shift: false,
-      }),
-    );
-    for (const char of "claude") await press(char);
-    await press(" ", "space");
-    expect(frame()).toContain("2 selected");
-    for (let i = 0; i < 6; i++) await press("", "backspace");
-    await press("q");
-    expect(frame()).toContain("qwen-code");
-    await press("", "return");
-    expect(controller.state).toMatchObject({
-      plan: { selectedAgents: ["antigravity-cli", "claude-code"] },
-    });
-    await expect(lstat(f.destination)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await press("", "escape");
-    expect(frame()).toContain("2 selected");
-    await press("", "return");
-    await press("y");
-    expect(frame()).toContain("Applying and verifying");
-    await press("y");
-    await Promise.all([
-      controller.waitForAddAgentExecution(),
-      controller.waitForAddAgentExecution(),
-    ]);
-    expect(await realpath(f.destination)).toBe(f.source);
-    expect(await realpath(join(f.home, ".claude", "skills", "review"))).toBe(
-      f.source,
-    );
-  });
+    },
+  );
   it("rejects forged and stale plans without overwriting an occupied destination", async () => {
     const f = await fixture();
     const plan = await f.addAgent.preview(
@@ -430,13 +445,13 @@ describe("Add agent", () => {
         const layout = renderTui(controller.state, plainTuiTheme);
         const lines = layout.split("\n");
         const header = lines.find((line) =>
-          line.includes("┌ Choose an Installation"),
+          line.includes("┌  Choose an Installation"),
         )!;
         const left = header.indexOf("┌"),
           right = header.indexOf("┐");
         const choices = lines
           .filter((line) => line[left] === "│" && line[right] === "│")
-          .map((line) => line.slice(left + 2, right - 1))
+          .map((line) => line.slice(left + 3, right - 2))
           .join("");
         expect(choices.replace(/\s/g, "")).toContain(
           workspaceSource.replace(/\s/g, ""),
