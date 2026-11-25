@@ -37,6 +37,6 @@ trust, or bypasses project and System Skill protection.
 
 Add agent has its own local mutation boundary. For an active canonical Skill
 that the Vercel Manager owns, an explicit Add agent plan authorizes a link at
-one current Manager destination and the missing directories that contain it.
+each selected Manager destination and the missing directories that contain it.
 Lampwright keeps the Manager record and the Skill content intact. A direct
 link avoids the source refresh and collateral writes of a Manager reinstall.

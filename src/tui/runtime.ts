@@ -47,6 +47,10 @@ export async function runTui(
         await controller.waitForAvailabilityExecution();
         draw(controller.state);
       }
+      if (nextState.screen === "add-agent" && nextState.executing) {
+        await controller.waitForAddAgentExecution();
+        draw(controller.state);
+      }
       if (nextState.screen === "update-executing") {
         await controller.waitForUpdateExecution();
         draw(controller.state);

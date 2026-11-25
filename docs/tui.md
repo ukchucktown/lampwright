@@ -221,17 +221,16 @@ The second row shows the key hints that apply in the current context. Each key
 is in the title style and its description is muted. The view, the focused pane,
 and the selection decide the hints:
 
-- Inventory: `space select`, `enter remove`, `u update`, `d disable`,
-  `/ search`, and `ctrl+u clear`.
+- Inventory: `space select`, `+ add agent` for an eligible Skill row,
+  `enter remove`, `u update`, `d disable`, `/ search`, and `ctrl+u clear`.
 - Disabled: `space select`, `e enable`, `u update`, `/ search`, and
   `ctrl+u clear`.
 - Trash: `enter restore`, `p purge`, and `esc inventory`.
 - A focused detail pane: `↑↓ scroll`, `PgUp PgDn page`, and `tab pane`.
 - A focused row that no plan can contain: `/ search` and `tab pane`.
 
-The hints of a view do not change with the selection: the row is the same with
-no rows, one row, or more rows selected, and it does not show the number of
-selected rows, because the header status shows it. `u update` stays in the row
+The header status shows the number of selected rows. Inventory shows the Add
+agent hint when the focused or selected row offers Add agent. `u update` stays in the row
 when two or more rows are selected. Update accepts one target, and the terminal
 UI shows a notice when the user presses `u` with more.
 
@@ -328,9 +327,22 @@ Skill at a time. If its row contains several eligible Installations, choose
 one by Scope and path. The agent picker opens directly for a single eligible
 Installation.
 
-Use the arrow keys to highlight an agent ID, then press Enter to review the
-destination and the agents that share it. Press `y` to confirm or Esc to
-return to the list. After execution, Inventory refreshes and shows the result.
+Type an agent name to filter the picker. For Antigravity CLI, type `agy`.
+Use the arrows or Page Up and Page Down to move through the results. Press
+Space or click a result to select or clear that agent. A selection stays
+checked when another search hides it. Ctrl+U clears the search and keeps the
+checked agents. The available label means that Inventory found the canonical
+Skill at the current destination.
+
+Press Enter to review the checked agents. If none are checked, Enter reviews
+the highlighted agent. The review shows each distinct destination and every
+agent that shares it. Press `y` to confirm all destinations. Esc returns to
+the picker, where Esc again closes it without a write.
+
+Lampwright checks the complete selection before it creates any link. After
+confirmation, the modal shows progress until verification finishes. If a
+write or verification fails, the report gives each destination and its result.
+Links that succeeded remain in place.
 
 ## Sections
 

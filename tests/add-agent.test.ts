@@ -10,7 +10,11 @@ import {
 import { dirname, join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
-import { parseRawTuiAction } from "../src/tui/terminal.js";
+import {
+  mouseAction,
+  parseMouseReport,
+  parseRawTuiAction,
+} from "../src/tui/terminal.js";
 import { runCli, formatCliOutput } from "../src/cli.js";
 import {
   createAddAgentModule,
@@ -170,6 +174,178 @@ describe("Add agent", () => {
       expect(validate(response.output), JSON.stringify(validate.errors)).toBe(
         true,
       );
+  });
+  it("reviews one action per destination and verifies a batch after its own writes", async () => {
+    const f = await fixture();
+    const checked = ["claude-code", "antigravity-cli", "antigravity"];
+    const plan = await f.addAgent.previewBatch(
+      f.inventory,
+      f.installation,
+      checked,
+    );
+    expect(plan.destinations).toHaveLength(2);
+    expect(plan.selectedAgents).toEqual([
+      "antigravity",
+      "antigravity-cli",
+      "claude-code",
+    ]);
+    expect((await f.addAgent.executeBatch(plan, false)).status).toBe("blocked");
+    expect(
+      (await f.addAgent.executeBatch(plan, true)).results.map(
+        (result) => result.status,
+      ),
+    ).toEqual(["added", "added"]);
+    expect(await realpath(f.destination)).toBe(f.source);
+    expect(await realpath(join(f.home, ".claude", "skills", "review"))).toBe(
+      f.source,
+    );
+  });
+
+  it("blocks the whole batch when a later destination is occupied", async () => {
+    const f = await fixture();
+    const claude = join(f.home, ".claude", "skills", "review");
+    const plan = await f.addAgent.previewBatch(f.inventory, f.installation, [
+      "antigravity-cli",
+      "claude-code",
+    ]);
+    await mkdir(dirname(claude), { recursive: true });
+    await writeFile(claude, "occupied");
+    expect((await f.addAgent.executeBatch(plan, true)).status).toBe("blocked");
+    await expect(lstat(f.destination)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    const fresh = await f.scan();
+    const blocked = await f.addAgent.previewBatch(
+      fresh,
+      fresh.installations[0]!,
+      plan.selectedAgents,
+    );
+    expect(blocked.destinations.map((action) => action.action)).toContain(
+      "blocked",
+    );
+    expect((await f.addAgent.executeBatch(blocked, true)).status).toBe(
+      "blocked",
+    );
+    await expect(lstat(f.destination)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("reports a partial batch and preserves the verified link if a later write fails", async () => {
+    const f = await fixture();
+    const module = createAddAgentModule({
+      scan: f.scan,
+      inspectGit: (path) =>
+        inspectGitProtection(path, false, systemCommandRunner),
+      fileSystem: {
+        ...nodeArtifactFileSystem,
+        symlink: async (source, destination, type) => {
+          if (destination.includes(".claude"))
+            throw new Error("write failed in fixture");
+          await nodeArtifactFileSystem.symlink(source, destination, type);
+        },
+      },
+    });
+    const plan = await module.previewBatch(f.inventory, f.installation, [
+      "antigravity-cli",
+      "claude-code",
+    ]);
+    const report = await module.executeBatch(plan, true);
+    expect(report).toMatchObject({
+      status: "partial",
+      results: [
+        { status: "added" },
+        { status: "failed", message: "write failed in fixture" },
+      ],
+    });
+    expect(await realpath(f.destination)).toBe(f.source);
+  });
+  it("retains checked agents across searches and reviews distinct destinations in the modal", async () => {
+    const f = await fixture();
+    const controller = controllerFor(f);
+    await controller.start();
+    const press = async (text: string, name = text) =>
+      controller.dispatch(
+        parseRawTuiAction(controller.state, text, {
+          name,
+          ctrl: false,
+          meta: false,
+          shift: false,
+        }),
+      );
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 24, columns: 80 },
+    });
+    expect(renderTui(controller.state, plainTuiTheme).split("\n")[1]).toContain(
+      "+ add agent",
+    );
+    await press("+");
+    const frame = () => renderTui(controller.state, plainTuiTheme);
+    expect(frame()).toContain("┌");
+    expect(frame()).toContain("0 selected");
+    const searchRow = frame()
+      .split("\n")
+      .findIndex((line) => line.includes("Search:"));
+    for (const char of "agy") await press(char);
+    expect(frame()).toContain("antigravity-cli");
+    expect(frame()).toContain("1 match");
+    expect(frame()).not.toContain("1 matches");
+    expect(frame()).toContain("ctrl+u clear");
+    const lines = frame().split("\n");
+    expect(lines.findIndex((line) => line.includes("Search:"))).toBe(searchRow);
+    const row = lines.findIndex((line) =>
+      line.includes("antigravity-cli (agy)"),
+    );
+    const column = lines[row]!.indexOf("[ ]");
+    const click = async (x: number, y: number) => {
+      const event = parseMouseReport(`\u001b[<0;${x};${y}M`)!;
+      await controller.dispatch(
+        mouseAction(controller.state, event, {
+          dragging: false,
+          doubleClick: false,
+        }),
+      );
+    };
+    await click(1, 1);
+    expect(frame()).toContain("0 selected");
+    await click(column + 1, row + 1);
+    expect(frame()).toContain("1 selected");
+    await controller.dispatch(
+      parseRawTuiAction(controller.state, "", {
+        name: "u",
+        ctrl: true,
+        meta: false,
+        shift: false,
+      }),
+    );
+    for (const char of "claude") await press(char);
+    await press(" ", "space");
+    expect(frame()).toContain("2 selected");
+    for (let i = 0; i < 6; i++) await press("", "backspace");
+    await press("q");
+    expect(frame()).toContain("qwen-code");
+    await press("", "return");
+    expect(controller.state).toMatchObject({
+      plan: { selectedAgents: ["antigravity-cli", "claude-code"] },
+    });
+    await expect(lstat(f.destination)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await press("", "escape");
+    expect(frame()).toContain("2 selected");
+    await press("", "return");
+    await press("y");
+    expect(frame()).toContain("Applying and verifying");
+    await press("y");
+    await Promise.all([
+      controller.waitForAddAgentExecution(),
+      controller.waitForAddAgentExecution(),
+    ]);
+    expect(await realpath(f.destination)).toBe(f.source);
+    expect(await realpath(join(f.home, ".claude", "skills", "review"))).toBe(
+      f.source,
+    );
   });
   it("rejects forged and stale plans without overwriting an occupied destination", async () => {
     const f = await fixture();
@@ -367,6 +543,7 @@ describe("Add agent", () => {
         code: "ENOENT",
       });
       await controller.dispatch({ kind: "confirm" });
+      await controller.waitForAddAgentExecution();
       expect(controller.state).toMatchObject({
         screen: "browse",
         model: {

@@ -4,6 +4,7 @@ import type {
   RemovalTarget,
   Scope,
 } from "../model/types.js";
+import { pathKey } from "../inventory/evidence.js";
 import { pathContains } from "../model/paths.js";
 import { PlanningError } from "./types.js";
 
@@ -19,6 +20,70 @@ export interface AddAgentPlan {
   readonly directories: readonly string[];
   readonly action: "link" | "unchanged" | "blocked";
   readonly reason: string | null;
+}
+
+export interface AddAgentBatchPlan {
+  readonly installationId: Installation["id"];
+  readonly selectedAgents: readonly string[];
+  readonly destinations: readonly AddAgentPlan[];
+  readonly block: string | null;
+}
+
+export function planAddAgentBatch(
+  installation: Installation,
+  selectedAgents: readonly string[],
+  plans: readonly AddAgentPlan[],
+): AddAgentBatchPlan {
+  const destinations = plans.filter(
+    (plan, index) =>
+      !plan.destination ||
+      plans.findIndex((other) => other.destination === plan.destination) ===
+        index,
+  );
+  const overlap = destinations.some(
+    (a) =>
+      a.destination !== null &&
+      destinations.some(
+        (b) =>
+          b !== a &&
+          b.destination !== null &&
+          pathContains(a.destination!, b.destination),
+      ),
+  );
+  const block = !selectedAgents.length
+    ? "Select at least one agent."
+    : overlap
+      ? "The selected destinations overlap."
+      : (destinations.find((plan) => plan.action === "blocked")?.reason ??
+        null);
+  return {
+    installationId: installation.id,
+    selectedAgents,
+    destinations,
+    block,
+  };
+}
+
+/** Targets that Inventory already resolves to the canonical Skill at their current destination. */
+export function linkedAgentIds(
+  installation: Installation,
+): ReadonlySet<string> {
+  const canonical = pathKey(installation.location.path);
+  const present = new Set([canonical]);
+  for (const { location } of installation.removal.supplementalArtifacts ?? []) {
+    if (
+      (location.artifactType.kind === "symbolic-link" ||
+        location.artifactType.kind === "junction") &&
+      location.canonicalPath &&
+      pathKey(location.canonicalPath) === canonical
+    )
+      present.add(pathKey(location.path));
+  }
+  return new Set(
+    installation.agentDestinations?.flatMap((item) =>
+      present.has(pathKey(item.path)) ? item.agents : [],
+    ),
+  );
 }
 
 export function addAgentInstallation(

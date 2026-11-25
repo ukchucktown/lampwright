@@ -418,6 +418,14 @@ the current exposure. An occupied destination, linked parent, or Git-protected
 write blocks creation. A fresh Inventory verifies the link and the original
 Installation before Execution reports success.
 
+The terminal picker accepts several agents for one Installation. A single
+confirmation applies to every distinct destination in the reviewed set. Before
+the first write, Execution checks each destination against a fresh plan.
+During execution it checks the remaining destinations and allows the parent
+directories that an earlier action created. The final scan verifies each
+result. If only some links succeed, the report identifies those links and the
+reason for each failure.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal

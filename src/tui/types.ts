@@ -33,8 +33,11 @@ import type {
   UpdatePlan,
   UpdateReport,
 } from "../update/types.js";
-import type { AddAgentModule } from "../execution/add-agent.js";
-import type { AddAgentPlan } from "../planning/add-agent.js";
+import type {
+  AddAgentModule,
+  AddAgentBatchReport,
+} from "../execution/add-agent.js";
+import type { AddAgentBatchPlan } from "../planning/add-agent.js";
 import type { TuiThemeDefinition } from "./theme.js";
 
 /** One row of the theme picker. A choice with a problem cannot be applied. */
@@ -330,7 +333,11 @@ export interface TuiAddAgentState {
   readonly installation: Installation;
   readonly agents: readonly string[];
   readonly index: number;
-  readonly plan: AddAgentPlan | null;
+  readonly query: string;
+  readonly selectedAgents: ReadonlySet<string>;
+  readonly plan: AddAgentBatchPlan | null;
+  readonly report: AddAgentBatchReport | null;
+  readonly executing: boolean;
   readonly scrollOffset: number;
 }
 
@@ -464,6 +471,7 @@ export type TuiAction =
   | { readonly kind: "noop" }
   | { readonly kind: "append-query"; readonly value: string }
   | { readonly kind: "delete-query" }
+  | { readonly kind: "clear-query" }
   | { readonly kind: "move"; readonly delta: number }
   | {
       readonly kind: "move-pane";
@@ -493,6 +501,7 @@ export type TuiAction =
   | { readonly kind: "open-search"; readonly value?: string }
   | { readonly kind: "stage-all-search" }
   | { readonly kind: "apply-search" }
+  | { readonly kind: "point-agent"; readonly index: number }
   | { readonly kind: "add-agent" }
   | { readonly kind: "open-theme-picker" }
   | { readonly kind: "open-help" }

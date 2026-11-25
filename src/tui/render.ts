@@ -1,3 +1,11 @@
+import { linkedAgentIds } from "../planning/add-agent.js";
+import { overlayPosition } from "./overlay.js";
+import {
+  agentLabel,
+  agentModalSize,
+  agentPickerLayout,
+  addAgentEntry,
+} from "./agent-picker.js";
 import type {
   ApprovalRequirement,
   ExecutableCommand,
@@ -61,8 +69,9 @@ export function renderTui(
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
-  if (state.screen === "add-agent-installation" || state.screen === "add-agent")
-    return renderAddAgent(state, style);
+  if (state.screen === "add-agent-installation")
+    return renderAddAgentInstallation(state, style);
+  if (state.screen === "add-agent") return renderAgentModal(state, theme);
   if (state.screen === "theme") return renderThemePicker(state, theme);
   if (state.screen === "help") return renderHelp(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
@@ -141,13 +150,9 @@ function overlayPanel(
   const width = visibleLength(panel[0] ?? "");
   const usable = Math.max(0, viewport.columns - 1);
   const rows = Math.max(0, viewport.rows - 1);
-  if (width + 2 > usable || panel.length > rows) return null;
-  const left = Math.floor((usable - width) / 2);
-  // Centered, but below `firstRow` whenever the frame has rows to spare.
-  const top = Math.min(
-    rows - panel.length,
-    Math.max(firstRow, Math.floor((rows - panel.length) / 2)),
-  );
+  const position = overlayPosition(viewport, width, panel.length, firstRow);
+  if (!position) return null;
+  const { left, top } = position;
   const lines = Array.from({ length: Math.max(rows, frame.length) }, (_, row) =>
     fit(frame[row] ?? "", usable),
   );
@@ -373,43 +378,142 @@ function renderHelp(
 export function addAgentReviewLines(
   state: TuiAddAgentState,
 ): readonly string[] {
+  const { width } = agentModalSize(state);
+  if (state.report)
+    return wrapPlanLines(
+      [
+        state.report.message,
+        ...state.report.results.flatMap((result) => [
+          "",
+          `${result.status} · ${result.agents.join(", ")}`,
+          result.destination ?? "",
+          result.message,
+        ]),
+      ],
+      width,
+    );
   const plan = state.plan;
   if (!plan) return [];
+  const scope = state.installation.scope;
   return wrapPlanLines(
     [
-      `Skill: ${plan.skill} (${plan.scope.kind === "workspace" ? plan.scope.workspacePath : plan.scope.kind})`,
-      `Agent: ${plan.agent}`,
-      `Source: ${plan.source}`,
-      `Destination: ${plan.destination ?? "unavailable"}`,
-      `Agents at this destination: ${plan.agents.join(", ")}`,
-      ...plan.directories.map((path) => `Create directory: ${path}`),
-      `Action: ${plan.action}`,
-      ...(plan.reason ? [plan.reason] : []),
+      `Selected: ${plan.selectedAgents.join(", ")}`,
+      `Scope: ${scope.kind === "workspace" ? scope.workspacePath : scope.kind}`,
+      `Source: ${state.installation.location.path}`,
+      ...(plan.block ? [`Blocked: ${plan.block}`] : []),
+      ...plan.destinations.flatMap((item) => [
+        "",
+        `${item.action === "link" ? "Create link" : item.action} · ${item.agents.join(", ") || item.agent}`,
+        item.destination ?? "Destination unavailable",
+        ...item.directories.map((path) => `Create directory: ${path}`),
+        ...(item.reason ? [item.reason] : []),
+      ]),
     ],
-    Math.max(1, state.browse.model.viewport.columns - 1),
+    width,
   );
 }
 
-function renderAddAgent(
-  state: TuiAddAgentState | TuiAddAgentInstallationState,
+function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
+  const style = createPaint(theme);
+  const viewport = state.browse.model.viewport;
+  const { width, reviewRows } = agentModalSize(state);
+  if (viewport.rows < 8 || viewport.columns < 24)
+    return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
+  let body: readonly string[];
+  let hint: string;
+  if (state.executing) {
+    body = [style.info("Applying and verifying agent links…")];
+    hint = "";
+  } else if (state.plan) {
+    const lines = addAgentReviewLines(state);
+    const offset = Math.min(
+      state.scrollOffset,
+      Math.max(0, lines.length - reviewRows),
+    );
+    body = lines.slice(offset, offset + reviewRows);
+    if (lines.length > reviewRows)
+      body = [
+        ...body,
+        style.muted(
+          `${offset + 1}–${offset + body.length} of ${lines.length} · ↑↓ scroll`,
+        ),
+      ];
+    hint = state.report
+      ? "esc inventory"
+      : state.plan.block
+        ? "esc back"
+        : "y confirm · esc back";
+  } else {
+    const {
+      matches,
+      offset,
+      listRows,
+      hint: pickerHint,
+      shortcuts,
+    } = agentPickerLayout(state);
+    const available = linkedAgentIds(state.installation);
+    const options = matches
+      .slice(offset, offset + listRows)
+      .map((agent, index) => {
+        const focused = state.index === offset + index;
+        const mark = state.selectedAgents.has(agent) ? "[x]" : "[ ]";
+        const line = fit(
+          `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}${available.has(agent) ? "  · available" : ""}`,
+          width,
+        );
+        return focused ? style.focus(line) : line;
+      });
+    if (!matches.length) options.push(style.muted("No matching agents"));
+    while (options.length < listRows) options.push("");
+    const count = `${state.selectedAgents.size} selected · ${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+    const clear = state.query ? "ctrl+u clear" : "";
+    body = [
+      style.info(fit(`Search: ${state.query || "type an agent name"}`, width)),
+      style.muted(count),
+      style.muted(clear),
+      ...options,
+      ...shortcuts.map((line) => style.muted(fit(line, width))),
+    ];
+    hint = pickerHint;
+  }
+  const title = `${state.report ? "Add agent results" : state.plan ? "Review agents" : "Add agents"} · ${state.installation.skill.name}`;
+  const panel = panelLines(
+    fit(title, width - 2).trimEnd(),
+    body,
+    hint,
+    width,
+    style,
+  );
+  const frame = overlayPanel(
+    dimFrame(browseFrame(state.browse, theme), theme),
+    panel,
+    viewport,
+  );
+  if (frame) return frame.join("\n") + "\n";
+  return (
+    [
+      fit(title, viewport.columns - 1),
+      ...body.slice(0, viewport.rows - 3),
+      fit(hint, viewport.columns - 1),
+    ].join("\n") + "\n"
+  );
+}
+
+function renderAddAgentInstallation(
+  state: TuiAddAgentInstallationState,
   style: TuiPaint,
 ): string {
   const { rows, columns } = state.browse.model.viewport;
   if (rows < 6 || columns < 18)
     return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
   const height = Math.max(1, rows - 5);
-  const choosingCopy = state.screen === "add-agent-installation";
-  const choices = choosingCopy
-    ? state.installations.map(
-        (item) => `${item.scope.kind}  ${item.location.path}`,
-      )
-    : state.agents;
-  const plan = choosingCopy ? null : state.plan;
-  const blocks = choices.map((label, index) => {
+  const blocks = state.installations.map((item, index) => {
     const focused = index === state.index;
-    return wrapPlanLine(`${focused ? "›" : " "} ${label}`, columns - 1).map(
-      (line) =>
-        focused ? style.focus(fit(line, columns - 1)) : fit(line, columns - 1),
+    return wrapPlanLine(
+      `${focused ? "›" : " "} ${item.scope.kind}  ${item.location.path}`,
+      columns - 1,
+    ).map((line) =>
+      focused ? style.focus(fit(line, columns - 1)) : fit(line, columns - 1),
     );
   });
   const lines = blocks.flat();
@@ -427,34 +531,23 @@ function renderAddAgent(
         ),
     ),
   );
-  const list =
-    !choosingCopy && state.plan
-      ? addAgentReviewLines(state).slice(
-          state.scrollOffset,
-          state.scrollOffset + height,
-        )
-      : lines.slice(offset, offset + height);
-  const hint = choosingCopy
-    ? "↑↓ choose Installation · enter choose agent · esc cancel"
-    : plan
-      ? plan.action === "blocked"
-        ? "↑↓ scroll · esc back"
-        : "y confirm · ↑↓ scroll · esc back"
-      : "↑↓ choose agent · enter review · esc cancel";
   return (
     [
       style.title(
         fit(
-          choosingCopy
-            ? `Choose an Installation — ${state.installations[state.index]!.skill.name}`
-            : `Add agent — ${state.installation.skill.name}`,
+          `Choose an Installation — ${state.installations[state.index]!.skill.name}`,
           columns - 1,
         ),
       ),
       "",
-      ...list,
+      ...lines.slice(offset, offset + height),
       "",
-      style.muted(fit(hint, columns - 1)),
+      style.muted(
+        fit(
+          "↑↓ choose Installation · enter choose agent · esc cancel",
+          columns - 1,
+        ),
+      ),
     ].join("\n") + "\n"
   );
 }
@@ -2413,14 +2506,12 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
           { key: "u", label: "update" },
         ]
       : [
+          ...(addAgentEntry(state)?.addAgentInstallations?.length
+            ? [{ key: "+", label: "add agent" }]
+            : []),
           { key: "enter", label: "remove" },
           { key: "u", label: "update" },
           { key: "d", label: "disable" },
-          ...(state.inventory.installations.some(
-            (item) => item.agentDestinations?.length,
-          )
-            ? [{ key: "+", label: "add agent" }]
-            : []),
         ]),
     { key: "/", label: "search" },
     { key: "ctrl+u", label: "clear" },

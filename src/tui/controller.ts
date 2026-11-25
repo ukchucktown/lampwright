@@ -1,3 +1,8 @@
+import {
+  filteredAgents,
+  agentModalSize,
+  addAgentEntry,
+} from "./agent-picker.js";
 import { stringifyModel } from "../model/json.js";
 import type {
   AvailabilityPlan,
@@ -73,6 +78,7 @@ export class TuiController {
   private execution: Promise<void> | null = null;
   private trashExecution: Promise<void> | null = null;
   private availabilityExecution: Promise<void> | null = null;
+  private addAgentExecution: Promise<void> | null = null;
   private updateExecution: Promise<void> | null = null;
   private appliedTheme: TuiThemeDefinition | null = null;
 
@@ -98,7 +104,7 @@ export class TuiController {
     return preview ?? this.appliedTheme;
   }
 
-  async start(): Promise<void> {
+  async start(viewport = this.viewport): Promise<void> {
     try {
       const inventory = await this.dependencies.scan();
       let operations: readonly QuarantineOperation[] | undefined;
@@ -124,7 +130,7 @@ export class TuiController {
         screen: "browse",
         inventory,
         model: {
-          ...createBrowseModel(createTuiSections(inventory), this.viewport),
+          ...createBrowseModel(createTuiSections(inventory), viewport),
           notice,
         },
         view: "inventory",
@@ -324,6 +330,41 @@ export class TuiController {
     await this.availabilityExecution;
   }
 
+  async waitForAddAgentExecution(): Promise<void> {
+    const state = this.stateValue;
+    if (
+      !this.addAgentExecution &&
+      state.screen === "add-agent" &&
+      state.executing &&
+      state.plan
+    ) {
+      this.addAgentExecution = this.dependencies
+        .addAgent!.executeBatch(state.plan, true)
+        .then(async (report) => {
+          const latest =
+            this.stateValue.screen === "add-agent" ? this.stateValue : state;
+          if (report.status !== "succeeded") {
+            this.stateValue = {
+              ...latest,
+              report,
+              executing: false,
+              scrollOffset: 0,
+            };
+            return;
+          }
+          await this.start(latest.browse.model.viewport);
+          const browse = this.stateValue;
+          if (browse.screen === "browse")
+            this.stateValue = {
+              ...browse,
+              model: { ...browse.model, notice: report.message },
+            };
+        })
+        .catch((error: unknown) => this.fail(error));
+    }
+    await this.addAgentExecution;
+  }
+
   async waitForUpdateExecution(): Promise<void> {
     if (
       this.updateExecution === null &&
@@ -456,15 +497,7 @@ export class TuiController {
     }
 
     if (action.kind === "add-agent" && state.view === "inventory") {
-      const selected = state.model.selected;
-      const entry =
-        selected.size === 0
-          ? currentEntry(state.model)
-          : selected.size === 1
-            ? state.model.sections
-                .flatMap((section) => section.entries)
-                .find((row) => selected.has(row.key))
-            : null;
+      const entry = addAgentEntry(state);
       const copies = entry?.addAgentInstallations ?? [];
       let notice = "Select one installed Skill to add an agent.";
       if (entry) {
@@ -616,6 +649,10 @@ export class TuiController {
       browse,
       installation,
       previous,
+      executing: false,
+      selectedAgents: new Set(),
+      query: "",
+      report: null,
       agents: installation
         .agentDestinations!.flatMap((item) => item.agents)
         .sort(),
@@ -629,9 +666,18 @@ export class TuiController {
     state: TuiAddAgentState | TuiAddAgentInstallationState,
     action: TuiAction,
   ): Promise<void> {
+    if (state.screen === "add-agent" && state.executing) return;
     const module = this.dependencies.addAgent!;
     if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: null };
+      return;
+    }
+    if (
+      state.screen === "add-agent" &&
+      state.report &&
+      (action.kind === "cancel" || action.kind === "select")
+    ) {
+      await this.start(state.browse.model.viewport);
       return;
     }
     if (action.kind === "cancel") {
@@ -643,7 +689,12 @@ export class TuiController {
       return;
     }
     if (action.kind === "move" || action.kind === "page") {
-      const rows = Math.max(1, state.browse.model.viewport.rows - 5);
+      const rows =
+        state.screen === "add-agent"
+          ? state.plan
+            ? agentModalSize(state).reviewRows
+            : agentModalSize(state).listRows
+          : Math.max(1, state.browse.model.viewport.rows - 5);
       const delta = action.delta * (action.kind === "page" ? rows : 1);
       if (state.screen === "add-agent-installation") {
         this.stateValue = {
@@ -670,7 +721,7 @@ export class TuiController {
             ...state,
             index: Math.max(
               0,
-              Math.min(state.agents.length - 1, state.index + delta),
+              Math.min(filteredAgents(state).length - 1, state.index + delta),
             ),
           };
       return;
@@ -684,26 +735,50 @@ export class TuiController {
         );
       return;
     }
-    if (state.plan === null && action.kind === "select") {
-      const plan = await module.preview(
-        state.browse.inventory,
-        state.installation,
-        state.agents[state.index]!,
-      );
-      this.stateValue = { ...state, plan };
-    } else if (
-      state.plan !== null &&
-      state.plan.action !== "blocked" &&
-      action.kind === "confirm"
-    ) {
-      const report = await module.execute(state.plan, true);
-      await this.start();
-      const browse = this.stateValue;
-      if (browse.screen === "browse")
-        this.stateValue = {
-          ...browse,
-          model: { ...browse.model, notice: report.message },
-        };
+    if (state.report) return;
+    if (state.plan === null) {
+      if (
+        action.kind === "append-query" ||
+        action.kind === "delete-query" ||
+        action.kind === "clear-query"
+      ) {
+        const query =
+          action.kind === "append-query"
+            ? state.query + action.value
+            : action.kind === "clear-query"
+              ? ""
+              : [...state.query].slice(0, -1).join("");
+        this.stateValue = { ...state, query, index: 0 };
+        return;
+      }
+      const index = action.kind === "point-agent" ? action.index : state.index;
+      const focused = filteredAgents(state)[index];
+      if (
+        (action.kind === "toggle-select" || action.kind === "point-agent") &&
+        focused
+      ) {
+        const checked = new Set(state.selectedAgents);
+        if (checked.has(focused)) checked.delete(focused);
+        else checked.add(focused);
+        this.stateValue = { ...state, index, selectedAgents: checked };
+      }
+      if (action.kind === "select") {
+        const agents = state.selectedAgents.size
+          ? [...state.selectedAgents]
+          : focused
+            ? [focused]
+            : [];
+        if (!agents.length) return;
+        const plan = await module.previewBatch(
+          state.browse.inventory,
+          state.installation,
+          agents,
+        );
+        this.stateValue = { ...state, plan, scrollOffset: 0 };
+      }
+    } else if (!state.plan.block && action.kind === "confirm") {
+      this.addAgentExecution = null;
+      this.stateValue = { ...state, executing: true };
     }
   }
 
