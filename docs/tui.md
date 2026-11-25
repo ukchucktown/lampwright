@@ -175,6 +175,12 @@ themes have the same name, or a custom theme has the name of a built-in theme,
 the first theme keeps the name and the picker lists the other file as not
 usable.
 
+### Modal frames
+
+Help, Theme, and Add agents use `overlayPanel` to draw a muted title and footer
+hint against the left and right content edges, one space inside each border.
+For a new modal, use `modalFrame` to locate the content for pointer input.
+
 ### Theme picker
 
 `ctrl+p` in a browse view opens the theme picker. The key reference lists this
@@ -264,8 +270,9 @@ bottom border, which ends with `esc close`. An effect that removes content,
 Escape in the current view.
 
 `?`, `q`, Escape, or Enter closes the panel and keeps the browse position. The
-complete panel has 21 rows. A shorter terminal drops the empty rows between the
-groups first, then the rules, before the key reference fills the screen.
+height of the panel depends on the commands available in the current view. A
+shorter terminal drops the empty rows between the groups first, then the rules,
+before the key reference fills the screen.
 
 Escape is the first byte of each arrow key and each function key, so the
 terminal waits for the rest of a key sequence before it reports a lone Escape.

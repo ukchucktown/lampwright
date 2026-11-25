@@ -556,7 +556,7 @@ describe("theme picker", () => {
       controller.state,
       createTuiTheme(terminalThemeDefinition, "none"),
     );
-    expect(rendered).toContain("┌─ Theme ");
+    expect(rendered).toContain("┌ Theme ");
     expect(rendered).toContain("› broken  custom  not usable");
     expect(rendered).toContain("ocean  custom");
     expect(rendered).toContain('"broken" cannot be used: title: "x" is not');

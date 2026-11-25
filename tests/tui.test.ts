@@ -1097,7 +1097,7 @@ describe("terminal theme", () => {
     const text = lines.join("\n");
     // The top border names the first group: the actions of the current view.
     expect(text).toContain("┌ Inventory ─");
-    expect(text).toContain(" esc close ─┘");
+    expect(text).toContain(" esc close ┘");
     expect(text).not.toContain("Keys");
     // One key to a line: the key, its effect, then the matching mouse action.
     expect(text).toMatch(/│ enter +remove +│/u);
@@ -1150,7 +1150,7 @@ describe("terminal theme", () => {
     // each later group.
     const blank = /│ +│/u;
     const top = lines.findIndex((line) => line.includes("┌ Inventory "));
-    const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
+    const bottom = lines.findIndex((line) => line.includes(" esc close ┘"));
     const row = (label: string) =>
       lines.findIndex((line) => line.includes(`│ ${label} ─`));
     expect(lines[top + 1]).toMatch(/│ enter +remove +│/u);
@@ -1207,6 +1207,107 @@ describe("terminal theme", () => {
     expect(controller.state).toEqual(before);
   });
 
+  it.each([32, 80])(
+    "aligns Help, Theme and every Add agents frame to the same content insets at %i columns",
+    (columns) => {
+      const inventory = groupedInventory(["only"]);
+      const browse = {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          columns,
+          rows: 28,
+        }),
+      };
+      const installation = {
+        ...inventory.installations[0]!,
+        skill: { name: "l".repeat(120), description: null },
+      };
+      const picker = {
+        screen: "add-agent",
+        browse,
+        installation,
+        previous: null,
+        agents: Array.from({ length: 16 }, (_, i) => `agent-${i}`),
+        selectedAgents: new Set<string>(),
+        query: "",
+        index: 0,
+        plan: null,
+        report: null,
+        executing: false,
+        scrollOffset: 0,
+      } as const;
+      const plan = {
+        installationId: installation.id,
+        selectedAgents: ["antigravity-cli"],
+        destinations: [],
+        block: null,
+      };
+      const states: TuiState[] = [
+        { screen: "help", browse },
+        {
+          screen: "theme",
+          browse,
+          choices: [
+            {
+              name: "nightfall",
+              source: "built-in",
+              path: null,
+              theme: nightfallThemeDefinition,
+              problem: null,
+            },
+          ],
+          index: 0,
+          notice: null,
+        },
+        {
+          screen: "add-agent-installation",
+          browse,
+          installations: [installation],
+          index: 0,
+        },
+        picker,
+        { ...picker, query: "no match" },
+        { ...picker, plan },
+        { ...picker, plan, executing: true },
+        {
+          ...picker,
+          plan,
+          report: {
+            status: "blocked",
+            message: "Destination changed",
+            results: [],
+          },
+        },
+      ];
+      const color = createNightfallTheme("truecolor");
+      for (const state of states) {
+        const colored = renderTui(state, color);
+        const lines = colored.replace(ansi, "").split("\n");
+        const top = lines.findIndex((line) => line.includes("┌"));
+        const bottom = lines.findIndex((line) => line.includes("└"));
+        expect(top, state.screen).toBeGreaterThanOrEqual(0);
+        const left = lines[top]!.indexOf("┌"),
+          right = lines[top]!.indexOf("┐");
+        expect(right - left).toBeGreaterThan(4);
+        const title = lines[top]!.slice(left, right + 1);
+        expect(title).toMatch(/^┌ [^ ─]/u);
+        const titleText = title.slice(1, -1).replace(/─+$/u, "");
+        expect(colored).toContain(styleTui(color, "muted", titleText));
+        const footer = lines[bottom]!.slice(left, right + 1);
+        expect(footer).toMatch(/^└(?:─+|─* .+ )┘$/u);
+        for (const line of lines.slice(top + 1, bottom)) {
+          expect(line.slice(left, left + 2)).toBe("│ ");
+          expect(line.slice(right - 1, right + 1)).toBe(" │");
+        }
+        expect(lines[top + 1]!.slice(left + 2, right - 1).trim()).not.toBe("");
+        // Filtered results reserve their slots so the Search field stays in place.
+        if (state.screen !== "add-agent" || !state.query)
+          expect(lines[bottom - 1]!.slice(left + 2, right - 1).trim()).not.toBe(
+            "",
+          );
+      }
+    },
+  );
   it.each([
     { columns: 110, rows: 30 },
     { columns: 80, rows: 24 },

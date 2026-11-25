@@ -1,4 +1,4 @@
-import { overlayPosition } from "./overlay.js";
+import { modalContentWidth, modalFrame } from "./overlay.js";
 import { currentEntry } from "./browse.js";
 import type { TuiAddAgentState, TuiBrowseState } from "./types.js";
 
@@ -16,9 +16,10 @@ export function agentLabel(agent: string): string {
 }
 
 export function agentModalSize(state: TuiAddAgentState) {
-  const { columns, rows } = state.browse.model.viewport;
+  const viewport = state.browse.model.viewport;
+  const { rows } = viewport;
   return {
-    width: Math.max(1, Math.min(70, columns - 7)),
+    width: modalContentWidth(viewport, 70),
     listRows: Math.max(1, Math.min(12, rows - 10)),
     reviewRows: Math.max(1, Math.min(18, rows - 8)),
   };
@@ -48,10 +49,11 @@ export function agentPickerLayout(state: TuiAddAgentState) {
               : "↑↓ move · space select",
           ]
         : ["space select", "esc back"];
-  const position = overlayPosition(
+  const headers = 3;
+  const frame = modalFrame(
     state.browse.model.viewport,
-    width + 4,
-    3 + listRows + shortcuts.length + 2,
+    width,
+    headers + listRows + shortcuts.length,
   );
   return {
     width,
@@ -60,8 +62,8 @@ export function agentPickerLayout(state: TuiAddAgentState) {
     offset,
     hint,
     shortcuts,
-    firstRow: position ? position.top + 5 : null,
-    firstColumn: position ? position.left + 3 : null,
+    firstRow: frame ? frame.contentTop + headers + 1 : null,
+    firstColumn: frame ? frame.contentLeft + 1 : null,
   };
 }
 

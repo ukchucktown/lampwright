@@ -1,20 +1,53 @@
 import type { TuiViewport } from "./types.js";
 
-/** Zero-based position shared by the drawing and pointer paths. */
-export function overlayPosition(
+const border = 1;
+export const modalInset = " ";
+const contentOffset = border + modalInset.length;
+const backdropMargin = 1;
+
+/** Leave a visible column of backdrop on either side, and the terminal's wrap column free. */
+export function modalContentWidth(
   viewport: TuiViewport,
-  width: number,
-  height: number,
-  firstRow = 1,
-) {
-  const usable = Math.max(0, viewport.columns - 1);
-  const rows = Math.max(0, viewport.rows - 1);
-  if (width + 2 > usable || height > rows) return null;
-  return {
-    left: Math.floor((usable - width) / 2),
-    top: Math.min(
-      rows - height,
-      Math.max(firstRow, Math.floor((rows - height) / 2)),
+  preferred: number,
+): number {
+  return Math.max(
+    0,
+    Math.min(
+      preferred,
+      viewport.columns - 1 - 2 * (backdropMargin + contentOffset),
     ),
+  );
+}
+
+/** Coordinates are zero-based. Pointer input converts to terminal coordinates at its boundary. */
+export function modalFrame(
+  viewport: TuiViewport,
+  contentWidth: number,
+  bodyRows: number,
+) {
+  const columns = viewport.columns - 1;
+  const rows = viewport.rows - 1;
+  const width = contentWidth + 2 * contentOffset;
+  const height = bodyRows + 2 * border;
+  if (
+    viewport.columns < 24 ||
+    viewport.rows < 7 ||
+    contentWidth <= 0 ||
+    width + 2 * backdropMargin > columns ||
+    height > rows
+  )
+    return null;
+  const left = Math.floor((columns - width) / 2);
+  const top = Math.min(
+    rows - height,
+    Math.max(2, Math.floor((rows - height) / 2)),
+  );
+  return {
+    left,
+    top,
+    width,
+    height,
+    contentLeft: left + contentOffset,
+    contentTop: top + border,
   };
 }

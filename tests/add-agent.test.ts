@@ -428,7 +428,17 @@ describe("Add agent", () => {
           "Choose an Installation",
         );
         const layout = renderTui(controller.state, plainTuiTheme);
-        expect(layout.replace(/\s/g, "")).toContain(
+        const lines = layout.split("\n");
+        const header = lines.find((line) =>
+          line.includes("┌ Choose an Installation"),
+        )!;
+        const left = header.indexOf("┌"),
+          right = header.indexOf("┐");
+        const choices = lines
+          .filter((line) => line[left] === "│" && line[right] === "│")
+          .map((line) => line.slice(left + 2, right - 1))
+          .join("");
+        expect(choices.replace(/\s/g, "")).toContain(
           workspaceSource.replace(/\s/g, ""),
         );
         expect(layout).toContain("workspace");
