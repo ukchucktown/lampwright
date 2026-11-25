@@ -421,7 +421,7 @@ describe("Add agent", () => {
     await controller.dispatch({ kind: "select" });
     expect(controller.state).toMatchObject({ plan: null });
   });
-  it.each([10, 24])(
+  it.each([9, 24])(
     "keeps checked agents across filters at %i rows",
     async (rows) => {
       const f = await fixture();
@@ -454,12 +454,16 @@ describe("Add agent", () => {
         .split("\n")
         .findIndex((line) => line.includes("┌"));
       expect(borderRow).toBeGreaterThanOrEqual(2);
-      expect(searchRow - borderRow).toBe(rows === 10 ? 1 : 2);
+      expect(searchRow - borderRow).toBe(rows === 9 ? 1 : 2);
+      expect(frame().split("\n")[searchRow + 1]).toContain("0 selected");
+      expect(frame().split("\n")[searchRow + 2]).toContain("[ ]");
       for (const char of "agy") await press(char);
       expect(frame()).toContain("antigravity-cli");
       expect(frame()).toContain("1 match");
       expect(frame()).not.toContain("1 matches");
-      expect(frame()).toContain("ctrl+u clear");
+      expect(frame().split("\n")[searchRow + 2]).toContain(
+        "antigravity-cli (agy)",
+      );
       const lines = frame().split("\n");
       expect(lines.findIndex((line) => line.includes("Search:"))).toBe(
         searchRow,
@@ -489,6 +493,11 @@ describe("Add agent", () => {
           shift: false,
         }),
       );
+      expect(controller.state).toMatchObject({
+        query: "",
+        selectedAgents: new Set(["antigravity-cli"]),
+      });
+      expect(frame().split("\n")[searchRow + 1]).toContain("1 selected");
       for (const char of "claude") await press(char);
       await press(" ", "space");
       expect(frame()).toContain("2 selected");

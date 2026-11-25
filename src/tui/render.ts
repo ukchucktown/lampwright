@@ -487,11 +487,9 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
           : installedMatches.length
             ? `${state.selectedAgents.size} selected · ${matches.length} to add · ${installedMatches.length} installed`
             : `${state.selectedAgents.size} selected · ${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
-    const clear = state.query ? "ctrl+u clear" : "";
     body = [
       style.info(fit(`Search: ${state.query || "type an agent name"}`, width)),
       style.muted(count),
-      style.muted(clear),
       ...options,
       ...shortcuts.map((line) => style.muted(fit(line, width))),
     ];

@@ -65,7 +65,7 @@ export function agentPickerLayout(state: TuiAddAgentState) {
               : "↑↓ move · space select",
           ]
         : ["space select", "esc back"];
-  const headers = 3;
+  const headers = 2;
   const frame = modalFrame(
     state.browse.model.viewport,
     width,
