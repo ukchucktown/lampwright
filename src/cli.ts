@@ -86,7 +86,7 @@ interface PackageMetadata {
   readonly version: string;
 }
 export interface CliDependencies {
-  readonly addAgent?: AddAgentModule;
+  readonly addAgent?: Pick<AddAgentModule, "preview" | "execute">;
   readonly scan?: (adapterPaths: readonly string[]) => Promise<Inventory>;
   readonly execute?: (
     plan: RemovalPlan,
