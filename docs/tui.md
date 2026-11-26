@@ -259,8 +259,9 @@ checkboxes and the header status show the result.
 
 Press `?` in Inventory, Disabled, or Trash to open Help for that view.
 The left pane lists the current view, `Move and select`, and `App`.
-Highlight a section to see its name and key count at the top of the right
-pane. Each row below the count contains one key or chord. The bottom pane
+Highlight a section to see its name at the top of the right pane. The
+summary includes the key count when it fits. Each row below the summary
+contains one key or chord. The bottom pane
 shows the highlighted key, its action, a short explanation and any mouse
 gesture that has the same effect.
 
@@ -271,10 +272,18 @@ the pane under the pointer. The dividers start in the same positions as in
 Inventory. Drag a divider or use Shift with the arrow keys to resize the Help
 panes.
 
-In a narrow or short terminal, Help shows the focused pane at full width.
-Press Enter or Right on a section to open its keys. Press Enter on a key
-to read the full explanation. Left returns to the previous list. A click on
-a section or key opens the next pane.
+In a wide, short terminal, Help uses the top border row for content when
+it needs the space. A single detail row shows the explanation and mouse
+gesture together when they fit. Otherwise the explanation comes first.
+Scroll the detail pane to read the remaining lines. The close hint stays visible. If one more row is
+needed, Help also omits the horizontal divider.
+
+In a narrow terminal, the lists stay side by side above the detail pane.
+Section names use shorter labels when necessary. Enter or Right moves focus
+from sections to keys, or from keys to detail. Left moves focus back.
+At the minimum height the section summary carries the Escape hint. If the
+terminal cannot show a section marker, a complete chord and a detail row,
+Help asks you to resize. Escape still closes Help.
 
 Help is read-only. Press Escape, `?`, or `q` to return to the same
 browse view with its focus and checked rows.
@@ -590,8 +599,8 @@ accept `up`, `down`, `pageup`, `pagedown`, `details`, `back`, and `quit`. The
 `back` command reads the Inventory again and then returns to the Inventory
 view. Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
 `up`, `down`, `select`, `back`, and `quit`. In Help, `up`, `down`, `pageup`, and
-`pagedown` navigate the focused pane. Use `in` or Enter to open a section’s keys
-or a key’s detail. Use `out` to return to the previous list. The `back` command closes Help and `quit` exits Lampwright. End-of-input cancels safely.
+`pagedown` navigate the focused pane. Use `in` or Enter to focus a section’s keys
+or a key’s detail. Use `out` to focus the previous list. The `back` command closes Help and `quit` exits Lampwright. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 

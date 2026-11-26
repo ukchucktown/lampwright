@@ -4,7 +4,13 @@ import { emitKeypressEvents } from "node:readline";
 import type { Interface as ReadlineInterface, Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
-import { layout, panes, nextPane } from "./browse.js";
+import {
+  layout,
+  panes,
+  nextPane,
+  paneBounds,
+  type PaneGrid,
+} from "./browse.js";
 import { searchLayout } from "./search.js";
 import { browseTabHitboxes, renderTui } from "./render.js";
 import {
@@ -133,31 +139,21 @@ export function mouseAction(
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
   if (state.screen === "help") {
-    const { grid, split, focus, sections, keys, compact, wrapSummary } =
-      helpLayout(state);
-    const row = report.row - 2;
-    const pane = split
-      ? gridPointerPane(grid, report)
-      : row >= 0 &&
-          row < compact.bodyRows &&
-          report.column >= 1 &&
-          report.column <= grid.usable
-        ? focus
-        : null;
+    const { grid, visible, sections, keys } = helpLayout(state);
+    if (!visible) return { kind: "noop" };
+    const row = report.row - paneBounds(grid).firstListRow;
+    const pane = gridPointerPane(grid, report);
     if ((report.button & 64) !== 0)
       return pane
         ? { kind: "move-pane", pane, delta: (report.button & 1) === 0 ? -1 : 1 }
         : { kind: "noop" };
     if (!report.pressed || (report.button & 3) !== 0) return { kind: "noop" };
-    if (split) {
-      const resize = paneResizeAction(grid, report, context.dragging);
-      if (resize) return resize;
-    }
+    const resize = paneResizeAction(grid, report, context.dragging);
+    if (resize) return resize;
     if ((report.button & 32) !== 0 || !pane) return { kind: "noop" };
     if (pane === "detail") return { kind: "focus", pane };
     const view = pane === "sections" ? sections : keys;
-    const itemRow =
-      row - ((split || wrapSummary) && pane === "entries" ? 1 : 0);
+    const itemRow = row - (pane === "entries" ? 1 : 0);
     if (itemRow < 0 || itemRow >= view.items.length) return { kind: "noop" };
     return {
       kind: pane === "sections" ? "point-section" : "point-entry",
@@ -284,15 +280,17 @@ function inColumns(column: number, range: readonly [number, number]): boolean {
 }
 
 function paneResizeAction(
-  grid: ReturnType<typeof layout>,
+  grid: PaneGrid,
   report: MouseReport,
   dragging: DragTarget,
 ): TuiAction | null {
-  const { leftWidth, columns, paneRows, rows } = grid;
-  const paneTop = grid.headerRows + 1;
-  const detailDividerRow = paneTop + paneRows + 1;
+  const { leftWidth, columns, rows } = grid;
+  const { firstListRow, afterLists } = paneBounds(grid);
 
-  if (dragging === "detail" || report.row === detailDividerRow)
+  if (
+    !grid.hideDetailRule &&
+    (dragging === "detail" || report.row === afterLists)
+  )
     return {
       kind: "set-detail-rows",
       rows: rows - report.row - 2,
@@ -301,8 +299,8 @@ function paneResizeAction(
   if (
     dragging === "panes" ||
     (report.column === leftWidth + 1 &&
-      report.row > paneTop &&
-      report.row < detailDividerRow)
+      report.row >= firstListRow &&
+      report.row < afterLists)
   )
     return {
       kind: "set-left-percent",
@@ -318,19 +316,19 @@ function pointerPane(state: TuiState, report: MouseReport): PointerPane | null {
 }
 
 function gridPointerPane(
-  grid: ReturnType<typeof layout>,
+  grid: PaneGrid,
   report: MouseReport,
 ): PointerPane | null {
-  const { headerRows, paneRows, detailRows, leftWidth, usable } = grid;
-  const paneTop = headerRows + 1;
-  const paneRow = report.row - paneTop - 1;
+  const { paneRows, detailRows, leftWidth, usable } = grid;
+  const { firstListRow, firstDetailRow } = paneBounds(grid);
+  const paneRow = report.row - firstListRow;
   if (paneRow >= 0 && paneRow < paneRows) {
     if (report.column >= 1 && report.column <= leftWidth) return "sections";
     if (report.column > leftWidth + 1 && report.column <= usable)
       return "entries";
     return null;
   }
-  const detailRow = report.row - (paneTop + paneRows + 2);
+  const detailRow = report.row - firstDetailRow;
   if (
     detailRow >= 0 &&
     detailRow < detailRows &&

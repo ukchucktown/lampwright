@@ -83,6 +83,23 @@ export function layout(
   };
 }
 
+/** Inventory draws both rules; compact Help can spend those rows on content. */
+export interface PaneGrid extends TuiLayout {
+  readonly hideTopRule?: boolean;
+  readonly hideDetailRule?: boolean;
+}
+
+/** One-based terminal coordinates shared by list clicks, wheel input and divider dragging. */
+export function paneBounds(grid: PaneGrid) {
+  const firstListRow = grid.headerRows + (grid.hideTopRule ? 0 : 1) + 1;
+  const afterLists = firstListRow + grid.paneRows;
+  return {
+    firstListRow,
+    afterLists,
+    firstDetailRow: afterLists + (grid.hideDetailRule ? 0 : 1),
+  };
+}
+
 type Pane = TuiBrowseModel["focus"];
 
 export function nextPane(focus: Pane, reverse = false): Pane {
