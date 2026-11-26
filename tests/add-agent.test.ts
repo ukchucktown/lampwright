@@ -25,6 +25,7 @@ import {
   parseInventory,
   installedAgentIds,
   renderTui,
+  searchLayout,
   plainTuiTheme,
   TuiController,
   type InventoryCommandRunner,
@@ -678,6 +679,55 @@ describe("Add agent", () => {
     },
   );
 
+  it("requires a new visible confirmation after resizing the agent review", async () => {
+    const f = await fixture();
+    const executeBatch = vi.fn(f.addAgent.executeBatch);
+    const controller = controllerFor({
+      ...f,
+      addAgent: { ...f.addAgent, executeBatch },
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "add-agent" });
+    await controller.dispatch({ kind: "append-query", value: "agy" });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "select" });
+    const review = controller.state;
+    if (review.screen !== "add-agent" || review.stage !== "review")
+      throw new Error("Expected agent review");
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 7, columns: 40 },
+    });
+    await controller.dispatch(
+      parseRawTuiAction(controller.state, "y", {
+        name: "y",
+        ctrl: false,
+        meta: false,
+        shift: false,
+      }),
+    );
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAddAgentExecution();
+    expect(executeBatch).not.toHaveBeenCalled();
+    expect(controller.state).toMatchObject({
+      stage: "review",
+      plan: review.plan,
+    });
+    await expect(lstat(f.destination)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 20, columns: 80 },
+    });
+    await controller.waitForAddAgentExecution();
+    expect(executeBatch).not.toHaveBeenCalled();
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAddAgentExecution();
+    expect(executeBatch).toHaveBeenCalledTimes(1);
+    expect(await realpath(f.destination)).toBe(f.source);
+  });
+
   it("ignores pointer input at the resize prompt and accepts a click after the picker appears", async () => {
     const f = await fixture();
     const controller = controllerFor(f);
@@ -688,7 +738,7 @@ describe("Add agent", () => {
       viewport: { rows: 7, columns: 80 },
     });
     expect(renderTui(controller.state, plainTuiTheme)).toContain(
-      "Resize terminal",
+      "Resize the terminal",
     );
     for (let row = 1; row <= 7; row++) {
       const click = { pressed: true, button: 0, column: 40, row };
@@ -701,17 +751,26 @@ describe("Add agent", () => {
           ),
         ).toEqual({ kind: "noop" });
     }
+    const hidden = controller.state;
+    for (const action of [
+      { kind: "append-query", value: "agy" },
+      { kind: "toggle-select" },
+      { kind: "point-agent", index: 1 },
+      { kind: "select" },
+    ] as const)
+      await controller.dispatch(action);
+    expect(controller.state).toBe(hidden);
     await controller.dispatch({
       kind: "viewport",
       viewport: { rows: 8, columns: 80 },
     });
     const lines = renderTui(controller.state, plainTuiTheme).split("\n");
-    const index = lines.findIndex((line) => line.includes("› [ ]"));
+    const index = lines.findIndex((line) => line.includes("│[ ]"));
     expect(index).toBeGreaterThan(0);
     const click = {
       pressed: true,
       button: 0,
-      column: lines[index]!.indexOf("› [ ]") + 1,
+      column: lines[index]!.indexOf("[ ]") + 1,
       row: index + 1,
     };
     expect(
@@ -888,7 +947,111 @@ describe("Add agent", () => {
     expect(controller.state).toMatchObject({ stage: "selection" });
     expect(controller.state).not.toHaveProperty("plan");
   });
-  it.each([9, 24])(
+  it.each([22, 28])(
+    "keeps the search, review, result and their controls visible at %i by 8",
+    async (columns) => {
+      const f = await fixture();
+      const report = {
+        status: "failed" as const,
+        message: "Write failed",
+        results: [
+          {
+            destination: f.destination,
+            agents: ["antigravity-cli"],
+            status: "failed" as const,
+            message: "Fixture failure",
+          },
+        ],
+      };
+      const executeBatch = vi.fn(async () => report);
+      const controller = controllerFor({
+        ...f,
+        addAgent: { ...f.addAgent, executeBatch },
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "add-agent" });
+      await controller.dispatch({ kind: "append-query", value: "agy" });
+      await controller.dispatch({ kind: "toggle-select" });
+      await controller.dispatch({ kind: "select" });
+      await controller.dispatch({
+        kind: "viewport",
+        viewport: { columns, rows: 8 },
+      });
+      const frame = () =>
+        renderTui(controller.state, plainTuiTheme).trimEnd().split("\n");
+      expect(frame()[0]!.startsWith("Review agents")).toBe(true);
+      expect(frame().at(-1)).toContain("y confirm · esc back");
+      await controller.dispatch({ kind: "page", delta: 1 });
+      expect(controller.state).toMatchObject({
+        stage: "review",
+        scrollOffset: expect.any(Number),
+      });
+      await controller.dispatch({ kind: "cancel" });
+      expect(frame()[0]).toContain("1 selected");
+      expect(frame()[1]).toContain("space · enter · esc");
+      expect(frame().join("\n")).toContain("[x] antigravity-cli");
+      await controller.dispatch({ kind: "select" });
+      await controller.dispatch({ kind: "confirm" });
+      await controller.waitForAddAgentExecution();
+      expect(frame()[0]!.startsWith("Add agent results")).toBe(true);
+      expect(frame().at(-1)).toContain("esc inventory");
+      await controller.dispatch({ kind: "page", delta: 100 });
+      expect(frame().join("\n")).toContain("Fixture failure");
+      await controller.dispatch({ kind: "cancel" });
+      expect(controller.state).toMatchObject({
+        screen: "browse",
+        model: { viewport: { columns, rows: 8 } },
+      });
+    },
+  );
+
+  it("shares the search results viewport, page navigation and mouse targets", async () => {
+    const f = await fixture();
+    const controller = controllerFor(f);
+    const viewport = { rows: 15, columns: 118 };
+    await controller.start();
+    await controller.dispatch({ kind: "viewport", viewport });
+    await controller.dispatch({ kind: "focus", pane: "entries" });
+    await controller.dispatch({ kind: "toggle-select" });
+    const before = controller.state;
+    await controller.dispatch({ kind: "add-agent" });
+    const grid = searchLayout(viewport);
+    const click = async (column: number, row: number, doubleClick = false) =>
+      controller.dispatch(
+        mouseAction(
+          controller.state,
+          { button: 0, column, row, pressed: true },
+          { dragging: false, doubleClick },
+        ),
+      );
+    await click(8, grid.resultStartRow + 1);
+    expect(controller.state).toMatchObject({
+      screen: "add-agent",
+      stage: "selection",
+      picker: { index: 1, selectedAgents: new Set() },
+    });
+    await click(8, grid.resultStartRow + 1, true);
+    const checked = controller.state;
+    if (checked.screen !== "add-agent" || checked.stage !== "selection")
+      throw new Error("Missing agent list");
+    const agent = checked.picker.agents[1]!;
+    expect(checked.picker.selectedAgents).toEqual(new Set([agent]));
+    const lines = renderTui(checked, plainTuiTheme).split("\n");
+    expect(lines[grid.resultStartRow]).toContain("[x] " + agent);
+    expect(lines[grid.resultStartRow - 1]!.slice(grid.leftWidth + 2)).toContain(
+      agent,
+    );
+    await click(grid.leftWidth + 4, grid.resultStartRow);
+    expect(controller.state).toEqual(checked);
+    await controller.dispatch({ kind: "page", delta: 1 });
+    expect(controller.state).toMatchObject({
+      picker: { index: grid.resultRows + 1 },
+    });
+    await controller.dispatch({ kind: "cancel" });
+    expect(controller.state).toEqual(before);
+  });
+
+  it.each([8, 9, 15, 24])(
     "keeps checked agents across filters at %i rows",
     async (rows) => {
       const f = await fixture();
@@ -912,23 +1075,19 @@ describe("Add agent", () => {
       ).toContain("+ add agent");
       await press("+");
       const frame = () => renderTui(controller.state, plainTuiTheme);
-      expect(frame()).toContain("┌");
+      expect(frame().split("\n")[0]).toContain("Add agents · review");
       expect(frame()).toContain("0 selected");
       const searchRow = frame()
         .split("\n")
         .findIndex((line) => line.includes("> type an agent name"));
-      const borderRow = frame()
-        .split("\n")
-        .findIndex((line) => line.includes("┌"));
-      expect(borderRow).toBeGreaterThanOrEqual(2);
-      expect(searchRow - borderRow).toBe(rows === 9 ? 1 : 2);
-      expect(frame().split("\n")[searchRow + 1]).toContain("0 selected");
-      expect(frame().split("\n")[searchRow + 2]).toContain("[ ]");
+      const grid = searchLayout({ rows, columns: 80 });
+      expect(frame().split("\n")[0]).toContain("0 selected");
+      expect(frame().split("\n")[grid.resultStartRow - 1]).toContain("[ ]");
       for (const char of "agy") await press(char);
       expect(frame()).toContain("antigravity-cli");
       expect(frame()).toContain("1 match");
       expect(frame()).not.toContain("1 matches");
-      expect(frame().split("\n")[searchRow + 2]).toContain(
+      expect(frame().split("\n")[grid.resultStartRow - 1]).toContain(
         "antigravity-cli (agy)",
       );
       const lines = frame().split("\n");
@@ -962,7 +1121,7 @@ describe("Add agent", () => {
         stage: "selection",
         picker: { query: "", selectedAgents: new Set(["antigravity-cli"]) },
       });
-      expect(frame().split("\n")[searchRow + 1]).toContain("1 selected");
+      expect(frame().split("\n")[0]).toContain("1 selected");
       for (const char of "claude") await press(char);
       await press(" ", "space");
       expect(frame()).toContain("2 selected");

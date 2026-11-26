@@ -327,6 +327,7 @@ export interface TuiAddAgentInstallationState {
 }
 
 export interface TuiAddAgentPickerModel {
+  readonly scroll?: number;
   readonly previous: TuiAddAgentInstallationState | null;
   readonly agents: readonly string[];
   readonly installedAgents: readonly string[];
@@ -364,8 +365,21 @@ export interface TuiThemeState {
   readonly notice: string | null;
 }
 
-/** The key reference, drawn over the browse view it was opened from. */
-export interface TuiHelpState {
+/** Context-sensitive shortcuts for the saved browse view. */
+export interface TuiHelpState extends Partial<
+  Pick<
+    TuiBrowseModel,
+    | "focus"
+    | "sectionIndex"
+    | "entryIndex"
+    | "sectionScroll"
+    | "entryScroll"
+    | "leftPercent"
+    | "detailRows"
+  >
+> {
+  /** First visible detail line for the highlighted shortcut. */
+  readonly scrollOffset?: number;
   readonly screen: "help";
   readonly browse: TuiBrowseSnapshot;
 }

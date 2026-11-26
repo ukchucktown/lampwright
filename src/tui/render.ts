@@ -1,7 +1,14 @@
-import { modalContentWidth, modalFrame, modalInset } from "./overlay.js";
+import { helpLayout, helpSectionLabel } from "./help.js";
+import { wrapTerminalLine as wrapPlanLine } from "./text.js";
+import {
+  modalContentWidth,
+  modalFrame,
+  modalInset,
+  modalSurface,
+  fullPaneSize,
+} from "./overlay.js";
 import {
   agentLabel,
-  agentModalSize,
   agentPickerLayout,
   addAgentEntry,
 } from "./agent-picker.js";
@@ -26,11 +33,12 @@ import {
   currentEntry,
   currentSection,
   detailPane,
+  type PaneGrid,
   layout,
   panes,
   sharedPathCount,
 } from "./browse.js";
-import { searchLayout } from "./search.js";
+import { searchLayout, type TuiSearchLayout } from "./search.js";
 import {
   terminalTheme,
   plainTuiTheme,
@@ -56,11 +64,101 @@ import type {
   TuiUpdateReportState,
 } from "./types.js";
 
+type Viewport = TuiBrowseState["model"]["viewport"];
+
+function compactReview(viewport: Viewport): boolean {
+  return viewport.rows < 7 || viewport.columns < 20;
+}
+
+/** A scrollable review reserves one terminal row, its footer, and an overflow indicator. */
+function bodyRowBudget(viewport: Viewport, footerRows: number) {
+  return Math.max(0, viewport.rows - 1 - footerRows);
+}
+
+function reviewBodyFits(viewport: Viewport, footerRows: number) {
+  return bodyRowBudget(viewport, footerRows) > 1;
+}
+
+function compactBrowse(grid: ReturnType<typeof layout>) {
+  return grid.paneRows < 2 || grid.columns < 9;
+}
+
+/** The same decision guards drawing, terminal input and direct controller actions. */
+export function resizeOnlyViewport(
+  state: TuiState,
+  override?: Viewport,
+): Viewport | null {
+  if (state.screen === "browse") {
+    const viewport = override ?? state.model.viewport;
+    return compactBrowse(
+      layout(override ? { ...state.model, viewport } : state.model),
+    )
+      ? viewport
+      : null;
+  }
+  if (state.screen === "search") {
+    const viewport = override ?? state.model.viewport;
+    return searchLayout(viewport).compact ? viewport : null;
+  }
+  if (!("browse" in state)) return null;
+  const viewport = override ?? state.browse.model.viewport;
+  switch (state.screen) {
+    case "add-agent":
+      return state.stage !== "execution" && searchLayout(viewport).compact
+        ? viewport
+        : null;
+    case "add-agent-installation":
+      return viewport.rows < 6 || viewport.columns < 18 ? viewport : null;
+    case "theme": {
+      const { width, bodyRows } = fullPaneSize(viewport);
+      return bodyRows < 1 || width < "enter use · esc".length ? viewport : null;
+    }
+    case "trash-review": {
+      const footer = trashReviewFooterLines(state, createPaint(plainTuiTheme));
+      return viewport.columns < 20 || !reviewBodyFits(viewport, footer.length)
+        ? viewport
+        : null;
+    }
+    case "trash-report": {
+      const footer = trashReportFooterLines(state, createPaint(plainTuiTheme));
+      return viewport.columns < 20 || !reviewBodyFits(viewport, footer.length)
+        ? viewport
+        : null;
+    }
+    case "availability-plan":
+    case "update-plan":
+    case "availability-report":
+    case "update-report":
+      return compactReview(viewport) ? viewport : null;
+    case "plan": {
+      if (compactReview(viewport)) return viewport;
+      const footer = planFooterLines(
+        state,
+        createPaint(plainTuiTheme),
+        viewport.columns,
+      );
+      return reviewBodyFits(viewport, footer.length) ? null : viewport;
+    }
+    case "report":
+      if (compactReview(viewport)) return viewport;
+      return reviewBodyFits(
+        viewport,
+        reportFooterLines(state, createPaint(plainTuiTheme)).length,
+      )
+        ? null
+        : viewport;
+    default:
+      return null;
+  }
+}
+
 export function renderTui(
   state: TuiState,
   theme: TuiTheme = terminalTheme,
 ): string {
   const style = createPaint(theme);
+  const hidden = resizeOnlyViewport(state);
+  if (hidden) return renderResizeNotice(hidden, style);
   if (state.screen === "loading")
     return `${style.title("Lampwright")}\n\n${style.info("Scanning known skill roots…")}\n`;
   if (state.screen === "error")
@@ -215,221 +313,206 @@ function browseFrame(
   );
 }
 
-const helpTitle = "Help";
-const closeHint = "esc close";
-
-interface HelpGroup {
-  readonly label: string;
-  /** Key, effect, and the mouse action with the same effect, if any. */
-  readonly rows: readonly (readonly [string, string, string?])[];
-}
-
-/**
- * Every key, one to a line, in three aligned columns: the key, its effect, and
- * the mouse action that has the same effect. The current view starts the
- * list. Each section heading uses the same labelled rule.
- */
-function helpBody(
-  browse: Pick<TuiBrowseState, "view" | "inventory">,
+function fullPaneLines(
+  title: string,
+  body: readonly string[],
+  hint: string,
+  viewport: TuiBrowseState["model"]["viewport"],
   style: TuiPaint,
-  spacing: "open" | "ruled" | "bare" = "open",
 ): readonly string[] {
-  const view = browse.view;
-  const addAgent = browse.inventory.installations.some(
-    (item) => item.agentDestinations?.length,
+  const { rows: height, width, bodyRows } = fullPaneSize(viewport);
+  if (height < 2) return height ? [style.muted(fit(hint, width))] : [];
+  const rows = Array.from({ length: bodyRows }, (_, index) =>
+    fit(body[index] ?? "", width),
   );
-  const groups: readonly HelpGroup[] = [
-    view === "trash"
-      ? {
-          label: "Trash",
-          rows: [
-            ["enter", "restore"],
-            ["p", "purge"],
-          ],
-        }
-      : view === "disabled"
-        ? {
-            label: "Disabled",
-            rows: [
-              ["e", "enable"],
-              ["u", "update"],
-            ],
-          }
-        : {
-            label: "Inventory",
-            rows: [
-              ["enter", "remove"],
-              ...(addAgent ? [["+", "add agent"] as const] : []),
-              ["u", "update"],
-              ["d", "disable"],
-            ],
-          },
-    {
-      label: "Move and select",
-      rows: [
-        ["↑↓", "move", "wheel"],
-        ["PgUp PgDn", "page"],
-        ["tab", "next pane", "click"],
-        ["space", "select", "dbl-click"],
-        ["ctrl+u", "clear selection"],
-        ["/", "search, or just type"],
-        ["ctrl+t", "next view"],
-      ],
-    },
-    {
-      label: "App",
-      rows: [
-        ["ctrl+p", "theme"],
-        ["shift+←→", "pane width"],
-        ["shift+↑↓", "detail height"],
-        [
-          "esc",
-          view === "disabled" || view === "trash" ? "Inventory" : "step back",
-        ],
-        ["q", "quit"],
-      ],
-    },
+  return [
+    style.title(fit(title, width)),
+    ...rows,
+    style.muted(fit(hint, width)),
   ];
-  const rows = groups.flatMap((group) => group.rows);
-  const width = (column: 0 | 1 | 2): number =>
-    Math.max(...rows.map((row) => [...(row[column] ?? "")].length));
-  const keyWidth = width(0) + 2;
-  const effectWidth = width(1) + 2;
-  const mouseWidth = Math.max(width(2), "mouse".length);
-  const inner = keyWidth + effectWidth + mouseWidth;
-  const dashes = (count: number): string =>
-    style.border("─".repeat(Math.max(0, count)));
-  const rule = (group: HelpGroup): string => {
-    const label = `${group.label} `;
-    // The mouse column gets its heading on the rule of the group that uses it.
-    if (!group.rows.some((row) => row[2] !== undefined))
-      return `${style.muted(label)}${dashes(inner - label.length)}`;
-    const lead = keyWidth + effectWidth - label.length - 1;
-    return `${style.muted(label)}${dashes(lead)} ${style.muted("mouse")}${
-      mouseWidth > "mouse".length
-        ? ` ${dashes(mouseWidth - "mouse".length - 1)}`
-        : ""
-    }`;
-  };
-  return groups.flatMap((group, index) => [
-    ...(spacing === "open" && index > 0 ? [""] : []),
-    ...(spacing !== "bare" || index === 0 ? [rule(group)] : []),
-    ...group.rows.map(
-      ([key, effect, mouse]) =>
-        `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
-    ),
-  ]);
 }
 
 function renderHelp(
   state: Extract<TuiState, { screen: "help" }>,
   theme: TuiTheme,
 ): string {
+  const {
+    grid,
+    visible,
+    footerRows,
+    focus,
+    sections,
+    current,
+    sectionIndex,
+    keys,
+    keyIndex,
+    keyCount,
+    detail,
+  } = helpLayout(state);
   const style = createPaint(theme);
-  const viewport = state.browse.model.viewport;
-  const frame = dimFrame(browseFrame(state.browse, theme), theme);
-  const panel = (spacing: "open" | "ruled" | "bare") => {
-    const body = helpBody(state.browse, style, spacing);
-    const inner = modalContentWidth(
-      viewport,
-      Math.max(...body.map(visibleLength)),
+  if (!visible) {
+    const rows = Math.max(0, grid.rows - 1);
+    if (!rows) return "";
+    const message =
+      rows === 1
+        ? "Esc · Resize"
+        : grid.usable >= "Resize terminal".length
+          ? "Resize terminal"
+          : "Resize";
+    return (
+      [
+        style.muted(fit(message, grid.usable)),
+        style.muted(fit("Esc close", grid.usable)),
+      ]
+        .slice(0, rows)
+        .join("\n") + "\n"
     );
-    // Use tighter section spacing before the frame covers a browse header row.
-    if (
-      spacing !== "bare" &&
-      !modalFrame(viewport, inner, body.length)?.clearsHeader
-    )
-      return null;
-    return overlayPanel(
-      frame,
-      viewport,
-      helpTitle,
-      body,
-      closeHint,
-      inner,
-      style,
+  }
+  const sectionRow = (row: number) => {
+    const item = sections.items[row];
+    const text = fit(
+      item ? helpSectionLabel(item.label, grid.leftWidth) : "",
+      grid.leftWidth,
     );
+    return focus === "sections" &&
+      item &&
+      sections.offset + row === sectionIndex
+      ? style.focus(text)
+      : text;
   };
-  // A short terminal gives up the empty rows between the groups first, then
-  // the group rules.
-  const lines =
-    panel("open") ??
-    panel("ruled") ??
-    panel("bare") ??
-    // Too small for a panel: the keys take the whole screen.
-    [
-      style.title(helpTitle),
-      ...helpBody(state.browse, style, "bare").slice(
-        0,
-        Math.max(0, viewport.rows - 3),
-      ),
-      style.muted(closeHint),
-    ]
-      .slice(0, Math.max(1, viewport.rows - 1))
-      .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
-  return `${lines.join("\n")}\n`;
+  const keyRow = (row: number) => {
+    const item = keys.items[row];
+    if (!item) return fit("", grid.rightWidth);
+    if (focus === "entries" && item.index === keyIndex)
+      return style.focus(fit(item.key + item.definition, grid.rightWidth));
+    return fit(item.key + style.muted(item.definition), grid.rightWidth);
+  };
+  const summaryWidth = grid.rightWidth - (footerRows ? 0 : " Esc".length);
+  const label = helpSectionLabel(current.label, summaryWidth);
+  const count = " · " + keyCount;
+  const heading =
+    style.title(label) +
+    (label.length + count.length <= summaryWidth ? style.muted(count) : "") +
+    (footerRows ? "" : style.muted(" Esc"));
+  const detailRow = (row: number) => {
+    const line = detail.items[row];
+    return line ? (line.role ? style[line.role] : plain)(line.text) : "";
+  };
+  const pane = focus === "entries" ? "keys" : focus;
+  const next =
+    focus === "sections"
+      ? "→ keys"
+      : focus === "entries"
+        ? "Enter detail"
+        : "← keys";
+  const hints = [
+    `↑↓ ${pane} · PgUp/PgDn page · tab pane · ${next} · esc close`,
+    `${next} · tab pane · esc close`,
+    ...(focus === "entries"
+      ? ["← sections · → detail · esc close", "←/→ panes · esc"]
+      : []),
+    `${next} · esc close`,
+    `${next}  esc`,
+    "esc close",
+    "esc",
+  ];
+  const hint = style.muted(
+    fit(hints.find((text) => text.length <= grid.usable) ?? "esc", grid.usable),
+  );
+  const lines = renderPaneRows(
+    grid,
+    style,
+    focus,
+    keys,
+    detail,
+    sectionRow,
+    (row) => (row === 0 ? fit(heading, grid.rightWidth) : keyRow(row - 1)),
+    detailRow,
+  );
+  return (footerRows ? [...lines, hint] : lines).join("\n") + "\n";
 }
 
-export function addAgentReviewLines(
+export function agentReviewLayout(
   state: Extract<TuiAddAgentState, { stage: "result" | "review" }>,
-): readonly string[] {
-  const { width } = agentModalSize(state);
-  if (state.stage === "result")
-    return wrapPlanLines(
-      [
-        state.report.message,
-        ...state.report.results.flatMap((result) => [
-          "",
-          `${result.status} · ${result.agents.join(", ")}`,
-          result.destination ?? "",
-          result.message,
-        ]),
-      ],
-      width,
-    );
-  const plan = state.plan;
+) {
+  const viewport = state.browse.model.viewport;
   const scope = state.installation.scope;
-  return wrapPlanLines(
-    [
-      `Selected: ${plan.selectedAgents.join(", ")}`,
-      `Scope: ${scope.kind === "workspace" ? scope.workspacePath : scope.kind}`,
-      `Source: ${state.installation.location.path}`,
-      ...(plan.block ? [`Blocked: ${plan.block}`] : []),
-      ...plan.destinations.flatMap((item) => [
-        "",
-        `${item.action === "link" ? "Create link" : item.action} · ${item.agents.join(", ") || item.agent}`,
-        item.destination ?? "Destination unavailable",
-        ...item.directories.map((path) => `Create directory: ${path}`),
-        ...(item.reason ? [item.reason] : []),
-      ]),
-    ],
-    width,
+  const paragraphs =
+    state.stage === "result"
+      ? [
+          state.report.message,
+          ...state.report.results.flatMap((result) => [
+            "",
+            `${result.status} · ${result.agents.join(", ")}`,
+            result.destination ?? "",
+            result.message,
+          ]),
+        ]
+      : [
+          `Selected: ${state.plan.selectedAgents.join(", ")}`,
+          `Scope: ${scope.kind === "workspace" ? scope.workspacePath : scope.kind}`,
+          `Source: ${state.installation.location.path}`,
+          ...(state.plan.block ? [`Blocked: ${state.plan.block}`] : []),
+          ...state.plan.destinations.flatMap((item) => [
+            "",
+            `${item.action === "link" ? "Create link" : item.action} · ${item.agents.join(", ") || item.agent}`,
+            item.destination ?? "Destination unavailable",
+            ...item.directories.map((path) => `Create directory: ${path}`),
+            ...(item.reason ? [item.reason] : []),
+          ]),
+        ];
+  const inner = modalContentWidth(viewport, 70);
+  const preferred = wrapPlanLines(paragraphs, inner);
+  // Size the frame for the content before comparing it to the available rows.
+  const surface = modalSurface(
+    viewport,
+    70,
+    Math.min(18, preferred.length) + (preferred.length > 18 ? 1 : 0),
   );
+  const lines =
+    surface.kind === "pane"
+      ? wrapPlanLines(paragraphs, surface.width)
+      : preferred;
+  const pageRows =
+    lines.length > surface.bodyRows
+      ? Math.max(1, surface.bodyRows - 1)
+      : surface.bodyRows;
+  return {
+    surface,
+    lines,
+    pageRows,
+    maximumOffset: Math.max(0, lines.length - pageRows),
+  };
 }
 
 function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const { compact, width, reviewRows } = agentModalSize(state);
-  if (compact)
+  if (state.stage === "selection") return renderAgentSearch(state, style);
+  if (state.stage === "execution" && searchLayout(viewport).compact)
     return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
+  let surface: ReturnType<typeof modalSurface>;
   let body: readonly string[];
   let hint: string;
   if (state.stage === "execution") {
-    body = [style.info("Applying and verifying agent links…")];
-    hint = "";
-  } else if (state.stage === "review" || state.stage === "result") {
-    const lines = addAgentReviewLines(state);
-    const offset = Math.min(
-      state.scrollOffset,
-      Math.max(0, lines.length - reviewRows),
+    const message = "Applying and verifying agent links…";
+    surface = modalSurface(
+      viewport,
+      70,
+      wrapPlanLine(message, modalContentWidth(viewport, 70)).length,
     );
-    body = lines.slice(offset, offset + reviewRows);
-    if (lines.length > reviewRows)
+    body = wrapPlanLine(message, surface.width).map(style.info);
+    hint = "";
+  } else {
+    const layout = agentReviewLayout(state);
+    surface = layout.surface;
+    const offset = Math.min(state.scrollOffset, layout.maximumOffset);
+    body = layout.lines.slice(offset, offset + layout.pageRows);
+    if (layout.maximumOffset > 0)
       body = [
         ...body,
         style.muted(
-          `${offset + 1}–${offset + body.length} of ${lines.length} · ↑↓ scroll`,
+          `${offset + 1}–${offset + body.length} of ${layout.lines.length} · ↑↓ scroll`,
         ),
       ];
     hint =
@@ -437,105 +520,24 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
         ? "esc inventory"
         : state.plan.block
           ? "esc back"
-          : "y confirm · esc back";
-  } else {
-    const picker = state.picker;
-    const {
-      matches,
-      installedMatches,
-      emptyMessage,
-      offset,
-      listRows,
-      hint: pickerHint,
-      shortcuts,
-    } = agentPickerLayout(state);
-    const options = matches
-      .slice(offset, offset + listRows)
-      .map((agent, index) => {
-        const focused = picker.index === offset + index;
-        const selected = picker.selectedAgents.has(agent);
-        const mark = selected ? "[x]" : "[ ]";
-        const line = fit(
-          `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}`,
-          width,
-        );
-        return focused
-          ? style.focus(line)
-          : selected
-            ? style.selected(line)
-            : line;
-      });
-    if (!matches.length) {
-      const explanation = wrapPlanLine(emptyMessage, width);
-      if (explanation.length <= listRows)
-        options.push(...explanation.map(style.muted));
-      else {
-        const compact = installedMatches.length
-          ? "Already installed"
-          : !picker.agents.length && !picker.query.trim()
-            ? width >= 20
-              ? "All agents installed"
-              : "All installed"
-            : "No matches";
-        options.push(
-          style.muted(compact.length <= width ? compact : "Installed"),
-        );
-      }
-    }
-    while (options.length < listRows) options.push("");
-    const installedCount =
-      !picker.agents.length && !picker.query.trim()
-        ? picker.installedAgents.length
-        : installedMatches.length &&
-            !matches.length &&
-            !picker.selectedAgents.size
-          ? installedMatches.length
-          : null;
-    const matchCount = installedMatches.length
-      ? `${matches.length} to add · ${installedMatches.length} installed`
-      : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
-    const count =
-      installedCount !== null
-        ? style.muted(fit(`${installedCount} installed`, width))
-        : fitStyledSegments(
-            [
-              {
-                text: `${picker.selectedAgents.size} selected`,
-                paint: picker.selectedAgents.size
-                  ? style.selected
-                  : style.muted,
-              },
-              { text: ` · ${matchCount}`, paint: style.muted },
-            ],
-            width,
-            style.muted,
-          );
-    body = [
-      searchPrompt(picker.query, "type an agent name", width, style),
-      count,
-      ...options,
-      ...shortcuts.map((line) => style.muted(fit(line, width))),
-    ];
-    hint = pickerHint;
+          : surface.width >= 20
+            ? "y confirm · esc back"
+            : "y yes · esc back";
   }
-  const title = `${state.stage === "result" ? "Add agent results" : state.stage === "selection" ? "Add agents" : "Review agents"} · ${state.installation.skill.name}`;
-  const frame = overlayPanel(
-    dimFrame(browseFrame(state.browse, theme), theme),
-    viewport,
-    title,
-    body,
-    hint,
-    width,
-    style,
-  );
-  if (frame) return frame.join("\n") + "\n";
-  return (
-    [
-      fit(title, viewport.columns - 1),
-      ...body.slice(0, viewport.rows - 3),
-      fit(hint, viewport.columns - 1),
-    ].join("\n") + "\n"
-  );
+  const title = `${state.stage === "result" ? "Add agent results" : "Review agents"} · ${state.installation.skill.name}`;
+  const lines =
+    surface.kind === "pane"
+      ? fullPaneLines(title, body, hint, viewport, style)
+      : overlayPanel(
+          dimFrame(browseFrame(state.browse, theme), theme),
+          viewport,
+          title,
+          body,
+          hint,
+          surface.width,
+          style,
+        )!;
+  return lines.join("\n") + "\n";
 }
 
 function renderAddAgentInstallation(
@@ -544,20 +546,23 @@ function renderAddAgentInstallation(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const { rows, columns } = viewport;
-  const inner = modalContentWidth(viewport, 70);
-  if (rows < 6 || columns < 18)
-    return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
-  const height = Math.max(1, rows - 5);
-  const blocks = state.installations.map((item, index) => {
-    const focused = index === state.index;
-    return wrapPlanLine(
-      `${focused ? "›" : " "} ${item.scope.kind}  ${item.location.path}`,
-      inner,
-    ).map((line) =>
-      focused ? style.focus(fit(line, inner)) : fit(line, inner),
-    );
-  });
+  const options = (width: number) =>
+    state.installations.map((item, index) => {
+      const focused = index === state.index;
+      return wrapPlanLine(
+        `${focused ? "›" : " "} ${item.scope.kind}  ${item.location.path}`,
+        width,
+      ).map((line) =>
+        focused ? style.focus(fit(line, width)) : fit(line, width),
+      );
+    });
+  const initialWidth = modalContentWidth(viewport, 70);
+  const preferred = options(initialWidth);
+  const count = preferred.reduce((n, block) => n + block.length, 0);
+  const surface = modalSurface(viewport, 70, Math.min(18, count));
+  const inner = surface.width;
+  const height = Math.max(1, surface.bodyRows);
+  const blocks = surface.kind === "pane" ? options(inner) : preferred;
   const lines = blocks.flat();
   const focusedLine = blocks
     .slice(0, state.index)
@@ -574,22 +579,27 @@ function renderAddAgentInstallation(
     ),
   );
   const title = `Choose an Installation — ${state.installations[state.index]!.skill.name}`;
-  const hint = "↑↓ choose Installation · enter choose agent · esc cancel";
+  const hint =
+    [
+      "↑↓ choose Installation · enter choose agent · esc cancel",
+      "enter choose agent · esc cancel",
+      "enter use · esc back",
+      "enter · esc",
+    ].find((label) => label.length <= inner) ?? "esc";
   const body = lines.slice(offset, offset + height);
-  const overlay = overlayPanel(
-    dimFrame(browseFrame(state.browse, theme), theme),
-    viewport,
-    title,
-    body,
-    hint,
-    inner,
-    style,
-  );
-  return (
-    (
-      overlay ?? [fit(title, columns - 1), ...body, fit(hint, columns - 1)]
-    ).join("\n") + "\n"
-  );
+  const frame =
+    surface.kind === "overlay"
+      ? overlayPanel(
+          dimFrame(browseFrame(state.browse, theme), theme),
+          viewport,
+          title,
+          body,
+          hint,
+          inner,
+          style,
+        )!
+      : fullPaneLines(title, body, hint, viewport, style);
+  return frame.join("\n") + "\n";
 }
 
 /**
@@ -606,18 +616,18 @@ function renderThemePicker(
   const choice = state.choices[state.index];
   const label = (item: (typeof state.choices)[number]): string =>
     `${item.name}${item.source === "custom" ? "  custom" : ""}${item.problem === null ? "" : "  not usable"}`;
-  const inner = modalContentWidth(
-    viewport,
-    Math.max(
-      48,
-      ...state.choices.map((item) => [...label(item)].length + 2),
-      [...(state.notice ?? choice?.problem ?? "")].length,
-    ),
+  const preferredWidth = Math.max(
+    48,
+    ...state.choices.map((item) => [...label(item)].length + 2),
+    [...(state.notice ?? choice?.problem ?? "")].length,
   );
-  const listRows = Math.max(
-    1,
-    Math.min(state.choices.length, viewport.rows - 10),
-  );
+  const preferredListRows = Math.max(1, Math.min(18, state.choices.length));
+  const surface = modalSurface(viewport, preferredWidth, preferredListRows + 2);
+  const inner = surface.width;
+  const listRows =
+    surface.kind === "overlay"
+      ? preferredListRows
+      : Math.max(1, Math.min(state.choices.length, surface.bodyRows - 1));
   const offset = Math.min(
     Math.max(0, state.index - Math.floor(listRows / 2)),
     Math.max(0, state.choices.length - listRows),
@@ -653,23 +663,30 @@ function renderThemePicker(
             );
   const body = [
     ...rows,
-    ...(message ? [...(rows.length ? [""] : []), message] : []),
+    ...(message
+      ? [...(surface.kind === "overlay" && rows.length ? [""] : []), message]
+      : []),
   ];
   if (!body.length) body.push(style.muted("No themes available."));
-  const hint = "↑↓ preview · enter use and save · esc cancel";
+  const hint =
+    [
+      "↑↓ preview · enter use and save · esc cancel",
+      "enter use · esc cancel",
+      "enter use · esc",
+      "esc cancel",
+    ].find((text) => text.length <= inner) ?? "esc";
   const lines =
-    overlayPanel(
-      browseFrame(state.browse, theme),
-      viewport,
-      "Theme",
-      body,
-      hint.length <= inner ? hint : "enter use · esc cancel",
-      inner,
-      style,
-    ) ??
-    [style.title("Lampwright — Theme"), ...body, style.muted(hint)]
-      .slice(0, Math.max(1, viewport.rows - 1))
-      .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
+    surface.kind === "overlay"
+      ? overlayPanel(
+          browseFrame(state.browse, theme),
+          viewport,
+          "Theme",
+          body,
+          hint,
+          inner,
+          style,
+        )!
+      : fullPaneLines("Theme", body, hint, viewport, style);
   return `${lines.join("\n")}\n`;
 }
 
@@ -706,7 +723,7 @@ function renderTrashScrollable(
   rangeLabel = "review",
 ): string {
   const width = Math.max(1, viewport.columns - 1);
-  const metrics = trashScrollMetricsFor(viewport, body.length, footer.length);
+  const metrics = scrollMetricsFor(viewport, body.length, footer.length);
   const clamped = Math.min(Math.max(0, offset), metrics.maximumOffset);
   const visible = body.slice(clamped, clamped + metrics.pageRows);
   const range =
@@ -882,7 +899,7 @@ function trashReportFooterLines(
 export function trashReviewScrollMetrics(
   state: Extract<TuiState, { screen: "trash-review" }>,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     trashReviewBodyLines(state, createPaint(plainTuiTheme)).length,
     trashReviewFooterLines(state, createPaint(plainTuiTheme)).length,
@@ -892,24 +909,21 @@ export function trashReviewScrollMetrics(
 export function trashReportScrollMetrics(
   state: Extract<TuiState, { screen: "trash-report" }>,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     trashReportBodyLines(state, createPaint(plainTuiTheme)).length,
     trashReportFooterLines(state, createPaint(plainTuiTheme)).length,
   );
 }
 
-function trashScrollMetricsFor(
+function scrollMetricsFor(
   viewport: TuiBrowseState["model"]["viewport"],
   bodyRows: number,
   footerRows: number,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
-  const usableRows = Math.max(0, viewport.rows - 1);
-  const overflows = bodyRows + footerRows > usableRows;
-  const pageRows = Math.max(
-    0,
-    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
-  );
+  const available = bodyRowBudget(viewport, footerRows);
+  const pageRows =
+    bodyRows > available ? Math.max(0, available - 1) : available;
   return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
 }
 
@@ -917,11 +931,6 @@ function renderAvailabilityPlan(
   state: TuiAvailabilityPlanState,
   style: TuiPaint,
 ): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     availabilityPlanBodyLines(state, style),
     availabilityPlanFooterLines(state, style),
@@ -1187,12 +1196,9 @@ export function availabilityPlanScrollMetrics(
   state: TuiAvailabilityPlanState,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
   const style = createPaint(plainTuiTheme);
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     availabilityPlanBodyLines(state, style).length,
     availabilityPlanFooterLines(state, style).length,
@@ -1212,11 +1218,6 @@ function renderAvailabilityReport(
   state: TuiAvailabilityReportState,
   style: TuiPaint,
 ): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     availabilityReportBodyLines(state, style),
     [
@@ -1352,12 +1353,9 @@ export function availabilityReportScrollMetrics(
   state: TuiAvailabilityReportState,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
   const style = createPaint(plainTuiTheme);
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     availabilityReportBodyLines(state, style).length,
     1,
@@ -1365,11 +1363,6 @@ export function availabilityReportScrollMetrics(
 }
 
 function renderUpdatePlan(state: TuiUpdatePlanState, style: TuiPaint): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     updatePlanBodyLines(state, style),
     updatePlanFooterLines(state, style),
@@ -1955,13 +1948,10 @@ export function updatePlanScrollMetrics(state: TuiUpdatePlanState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     updatePlanBodyLines(state, style).length,
     updatePlanFooterLines(state, style).length,
@@ -1979,11 +1969,6 @@ function renderUpdateReport(
   state: TuiUpdateReportState,
   style: TuiPaint,
 ): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     updateReportBodyLines(state, style),
     updateReportFooterLines(state, style),
@@ -2110,13 +2095,10 @@ export function updateReportScrollMetrics(state: TuiUpdateReportState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     updateReportBodyLines(state, style).length,
     updateReportFooterLines(state, style).length,
@@ -2216,19 +2198,20 @@ function describeUpdateTarget(target: UpdateTarget): string {
   return `Plugin ${target.pluginBoundaryId}`;
 }
 
-function renderCompactAvailability(
-  viewport: TuiBrowseState["model"]["viewport"],
-  style: TuiPaint,
-): string {
+function renderResizeNotice(viewport: Viewport, style: TuiPaint): string {
+  const rows = Math.max(0, viewport.rows - 1);
   const width = Math.max(0, viewport.columns - 1);
-  return `${[
-    style.title("Lampwright"),
+  const lines = [
+    ...(rows >= 3 ? [style.title("Lampwright")] : []),
     style.warning("Resize the terminal"),
-    style.muted("q quit"),
-  ]
-    .slice(0, Math.max(0, viewport.rows - 1))
-    .map((line) => fit(line, width))
-    .join("\n")}\n`;
+    style.muted("Esc back · q quit"),
+  ];
+  return (
+    lines
+      .slice(0, rows)
+      .map((line) => fit(line, width))
+      .join("\n") + "\n"
+  );
 }
 
 function renderExecuting(state: TuiExecutingState, style: TuiPaint): string {
@@ -2278,121 +2261,262 @@ function searchPrompt(
   );
 }
 
-function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
-  const style = createPaint(theme);
-  const { model } = state;
-  const grid = searchLayout(model.viewport);
-  const { usable, resultRows: rows, leftWidth: left, rightWidth: right } = grid;
-  if (grid.compact)
-    return [
-      style.title(fit("Lampwright", usable)),
-      style.warning(fit("Resize the terminal", usable)),
-    ]
-      .slice(0, Math.max(0, model.viewport.rows - 1))
-      .join("\n");
-  const focused = model.results[model.index];
-  const preview =
-    focused === undefined
-      ? []
-      : [
-          `Owner: ${focused.entry.owner}`,
-          `Category: ${focused.category}`,
-          `Exposure: ${focused.entry.exposedTo.join(", ") || "none"}`,
-          "",
-          ...wrapPlanLine(
-            focused.entry.description ?? "No description.",
-            right,
-          ),
-          "",
-          ...focused.entry.paths.flatMap((path) =>
-            wrapPlanLine(`Path: ${path}`, right),
-          ),
-        ];
+interface SearchSurface {
+  readonly title: string;
+  readonly context: string;
+  readonly selectedCount: number;
+  readonly selectionLabel: string;
+  readonly hints: readonly (readonly [string, string])[];
+  readonly query: string;
+  readonly placeholder: string;
+  readonly index: number;
+  readonly scroll: number;
+  readonly result: (
+    index: number,
+  ) => { label: string; marker: string; selected: boolean } | undefined;
+  readonly previewTitle: string | undefined;
+  readonly preview: readonly string[];
+  readonly status: string;
+  readonly warning?: boolean;
+}
+
+function renderSearchSurface(
+  grid: TuiSearchLayout,
+  surface: SearchSurface,
+  style: TuiPaint,
+): string {
+  const { usable, leftWidth: left, rightWidth: right } = grid;
   const out = [
     fitStyledSegments(
       [
-        { text: "Lampwright", paint: style.title },
-        { text: " search  ", paint: style.muted },
+        { text: surface.title, paint: style.title },
+        { text: surface.context, paint: style.muted },
         {
-          text:
-            model.staged.size === 0
-              ? "nothing staged"
-              : `${String(model.staged.size)} staged`,
-          paint: model.staged.size === 0 ? style.muted : style.selected,
+          text: surface.selectionLabel,
+          paint: surface.selectedCount ? style.selected : style.muted,
         },
       ],
       usable,
       style.muted,
     ),
     fitStyledSegments(
-      [
-        { text: "↑↓", paint: style.title },
-        { text: " move · ", paint: style.muted },
-        { text: "space", paint: style.title },
-        { text: " stage · ", paint: style.muted },
-        { text: "ctrl+a", paint: style.title },
-        { text: " all · ", paint: style.muted },
-        { text: "enter", paint: style.title },
-        { text: " done · ", paint: style.muted },
-        { text: "esc", paint: style.title },
-        { text: " cancel · ", paint: style.muted },
-        { text: "ctrl+u", paint: style.title },
-        { text: " clear · ", paint: style.muted },
-        { text: "ctrl+c", paint: style.title },
-        { text: " quit", paint: style.muted },
-      ],
+      surface.hints.flatMap(([key, label], index) => [
+        { text: key, paint: style.title },
+        {
+          text:
+            (label ? " " + label : "") +
+            (index + 1 < surface.hints.length ? " · " : ""),
+          paint: style.muted,
+        },
+      ]),
       usable,
       style.muted,
     ),
-    style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`),
-    `${style.border("│")}${searchPrompt(model.query, "type a name regex", Math.max(0, usable - 2), style)}${style.border("│")}`,
-    style.border(`├${"─".repeat(left)}┬${"─".repeat(right)}┤`),
+    ...(grid.resultStartRow === 6
+      ? [style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`)]
+      : []),
+    `${style.border("│")}${searchPrompt(surface.query, surface.placeholder, usable - 2, style)}${style.border("│")}`,
+    style.border(
+      `├${"─".repeat(left)}${right ? "┬" + "─".repeat(right) : ""}┤`,
+    ),
   ];
-  for (let row = 0; row < rows; row += 1) {
-    const index = model.scroll + row;
-    const result = model.results[index];
-    const marker =
-      result === undefined
-        ? "   "
-        : !result.selectable
-          ? " - "
-          : result.existing
-            ? "[x]"
-            : model.staged.has(result.entry.key)
-              ? "[+]"
-              : "[ ]";
-    const text = result === undefined ? "" : `${marker} ${result.entry.name}`;
-    const leftCell =
-      index === model.index
-        ? style.focus(fit(text, left))
-        : result !== undefined && model.staged.has(result.entry.key)
-          ? style.selected(fit(text, left))
-          : fit(text, left);
-    const rightCell =
-      row === 0 && focused !== undefined
-        ? style.active(fit(focused.entry.name, right))
-        : row > 0 && preview[row - 1] !== undefined
-          ? style.muted(fit(preview[row - 1]!, right))
+  for (let row = 0; row < grid.resultRows; row++) {
+    const index = surface.scroll + row;
+    const result = surface.result(index);
+    const text = fit(result ? `${result.marker} ${result.label}` : "", left);
+    const cell =
+      result && index === surface.index
+        ? style.focus(text)
+        : result?.selected
+          ? style.selected(text)
+          : text;
+    const details =
+      row === 0 && surface.previewTitle !== undefined
+        ? style.active(fit(surface.previewTitle, right))
+        : row > 0 && surface.preview[row - 1] !== undefined
+          ? style.muted(fit(surface.preview[row - 1]!, right))
           : fit("", right);
     out.push(
-      `${style.border("│")}${leftCell}${style.border("│")}${rightCell}${style.border("│")}`,
+      style.border("│") +
+        cell +
+        (right ? style.border("│") + details : "") +
+        style.border("│"),
     );
   }
-  out.push(style.border(`└${"─".repeat(left)}┴${"─".repeat(right)}┘`));
   out.push(
-    model.matchError === null
-      ? style.muted(
-          fit(
-            model.notice ??
-              `matching ${String(model.results.length)} ${
-                model.results.length === 1 ? "Skill" : "Skills"
-              }${model.query === "" ? " · all Skills" : ""} · result=${String(model.results.length === 0 ? 0 : model.index + 1)}/${String(model.results.length)}`,
-            usable,
-          ),
-        )
-      : style.warning(fit(model.matchError, usable)),
+    style.border(
+      `└${"─".repeat(left)}${right ? "┴" + "─".repeat(right) : ""}┘`,
+    ),
+    (surface.warning ? style.warning : style.muted)(
+      fit(surface.status, usable),
+    ),
   );
   return out.join("\n");
+}
+
+function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
+  const { model } = state;
+  const grid = searchLayout(model.viewport);
+  const focused = model.results[model.index];
+  return renderSearchSurface(
+    grid,
+    {
+      title: "Lampwright",
+      context: " search  ",
+      selectedCount: model.staged.size,
+      selectionLabel: model.staged.size
+        ? `${model.staged.size} staged`
+        : "nothing staged",
+      hints: [
+        ["↑↓", "move"],
+        ["space", "stage"],
+        ["ctrl+a", "all"],
+        ["enter", "done"],
+        ["esc", "cancel"],
+        ["ctrl+u", "clear"],
+        ["ctrl+c", "quit"],
+      ],
+      query: model.query,
+      placeholder: "type a name regex",
+      index: model.index,
+      scroll: model.scroll,
+      result(index) {
+        const result = model.results[index];
+        if (!result) return undefined;
+        const selected = model.staged.has(result.entry.key);
+        return {
+          label: result.entry.name,
+          selected,
+          marker: !result.selectable
+            ? " - "
+            : result.existing
+              ? "[x]"
+              : selected
+                ? "[+]"
+                : "[ ]",
+        };
+      },
+      previewTitle: focused?.entry.name,
+      preview: focused
+        ? [
+            `Owner: ${focused.entry.owner}`,
+            `Category: ${focused.category}`,
+            `Exposure: ${focused.entry.exposedTo.join(", ") || "none"}`,
+            "",
+            ...wrapPlanLine(
+              focused.entry.description ?? "No description.",
+              grid.rightWidth,
+            ),
+            "",
+            ...focused.entry.paths.flatMap((path) =>
+              wrapPlanLine(`Path: ${path}`, grid.rightWidth),
+            ),
+          ]
+        : [],
+      status:
+        model.matchError ??
+        model.notice ??
+        `matching ${model.results.length} ${model.results.length === 1 ? "Skill" : "Skills"}${model.query === "" ? " · all Skills" : ""} · result=${model.results.length === 0 ? 0 : model.index + 1}/${model.results.length}`,
+      warning: model.matchError !== null,
+    },
+    createPaint(theme),
+  );
+}
+
+function renderAgentSearch(
+  state: Extract<TuiAddAgentState, { stage: "selection" }>,
+  style: TuiPaint,
+): string {
+  const { picker, installation } = state;
+  const { matches, installedMatches, emptyMessage, grid, index, scroll } =
+    agentPickerLayout(state);
+  const focused = matches[index];
+  const destination = installation.agentDestinations?.find(
+    (item) => focused && item.agents.includes(focused),
+  );
+  const noAgents = !picker.agents.length && !picker.query.trim();
+  const count = installedMatches.length
+    ? `${matches.length} to add · ${installedMatches.length} installed`
+    : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+  const compactEmpty = installedMatches.length
+    ? "Already installed"
+    : noAgents
+      ? "All agents installed"
+      : "No matches";
+  const status = matches.length
+    ? count
+    : emptyMessage.length <= grid.usable
+      ? emptyMessage
+      : compactEmpty;
+  const selectionLabel = `${picker.selectedAgents.size} ${grid.usable >= 21 ? "selected" : "sel"}`;
+  const context = ` · ${installation.skill.name}  `;
+  return renderSearchSurface(
+    grid,
+    {
+      title: "Add agents",
+      context:
+        "Add agents".length + [...context].length + selectionLabel.length <=
+        grid.usable
+          ? context
+          : " ",
+      selectedCount: picker.selectedAgents.size,
+      selectionLabel,
+      hints: picker.agents.length
+        ? grid.usable >= 68
+          ? [
+              ["↑↓", "move"],
+              ["space", "select"],
+              ["enter", "review"],
+              ["esc", "back"],
+              ["ctrl+u", "clear"],
+            ]
+          : grid.usable >= 38
+            ? [
+                ["space", "select"],
+                ["enter", "review"],
+                ["esc", "back"],
+              ]
+            : [
+                ["space", ""],
+                ["enter", ""],
+                ["esc", ""],
+              ]
+        : [["esc", "back"]],
+      query: picker.query,
+      placeholder: "type an agent name",
+      index,
+      scroll,
+      result(row) {
+        const agent = matches[row];
+        if (!agent) return undefined;
+        const selected = picker.selectedAgents.has(agent);
+        return {
+          label:
+            agentLabel(agent).length + 4 <= grid.leftWidth
+              ? agentLabel(agent)
+              : agent,
+          selected,
+          marker: selected ? "[x]" : "[ ]",
+        };
+      },
+      previewTitle: focused ? agentLabel(focused) : undefined,
+      preview: destination
+        ? [
+            `Skill: ${installation.skill.name}`,
+            ...wrapPlanLine(
+              `Destination: ${destination.path}`,
+              grid.rightWidth,
+            ),
+            ...wrapPlanLine(
+              `Agents: ${destination.agents.join(", ")}`,
+              grid.rightWidth,
+            ),
+          ]
+        : [],
+      status,
+    },
+    style,
+  );
 }
 
 /**
@@ -2436,10 +2560,8 @@ export function renderBrowseLines(
   const style = createPaint(theme);
   const model = state.model;
   const grid = layout(model);
-  const { rows, columns, usable, paneRows, detailRows, leftWidth, rightWidth } =
-    grid;
-  if (rows < grid.headerRows + 4 || columns < 9)
-    return renderCompactBrowse(rows, usable, style);
+  const { rows, usable, leftWidth, rightWidth } = grid;
+  if (compactBrowse(grid)) return renderCompactBrowse(rows, usable, style);
   const view = panes(model);
   const section = currentSection(model);
   const out: string[] = [];
@@ -2466,51 +2588,80 @@ export function renderBrowseLines(
     `${views}${" ".repeat(Math.max(0, usable - visibleLength(views) - statusText.length))}${status}`,
   );
   out.push(browseHints(state, view.entries.total, usable, style));
-  out.push(
-    style.border(
-      `${"─".repeat(leftWidth)}┬${"─".repeat(usable - leftWidth - 1)}`,
-    ),
-  );
-
-  for (let row = 0; row < paneRows; row += 1) {
-    out.push(
-      `${sectionCell(model, view.sections, row, leftWidth, style, isTrash)}${style.border("│")}${entryCell(
-        model,
-        view.entries,
-        section,
-        row,
-        rightWidth,
-        style,
-        isTrash,
-      )}${scrollMark(view.entries, row, style)}`,
-    );
-  }
-
-  out.push(
-    (model.focus === "detail" ? style.title : style.border)(
-      `${"─".repeat(leftWidth)}┴${"─".repeat(usable - leftWidth - 1)}`,
-    ),
-  );
-
   const detail = detailPane(model);
-  for (let row = 0; row < detailRows; row += 1) {
-    const line = detail.items[row];
-    const paint =
-      line?.kind === "heading"
-        ? style.active
-        : line?.kind === "path"
-          ? style.path
-          : plain;
-    out.push(
-      `${line === undefined ? " ".repeat(Math.max(0, usable - 1)) : paint(fit(line.text, Math.max(0, usable - 1)))}${scrollMark(detail, row, style)}`,
-    );
-  }
-
+  out.push(
+    ...renderPaneRows(
+      grid,
+      style,
+      model.focus,
+      view.entries,
+      detail,
+      (row) =>
+        sectionCell(model, view.sections, row, leftWidth, style, isTrash),
+      (row) =>
+        entryCell(
+          model,
+          view.entries,
+          section,
+          row,
+          rightWidth,
+          style,
+          isTrash,
+        ),
+      (row) => {
+        const line = detail.items[row];
+        const paint =
+          line?.kind === "heading"
+            ? style.active
+            : line?.kind === "path"
+              ? style.path
+              : plain;
+        return line ? paint(fit(line.text, Math.max(0, usable - 1))) : "";
+      },
+    ),
+  );
   out.push(
     model.notice === null ? "" : style.info(fit(`! ${model.notice}`, usable)),
   );
 
   return out.map((line) => fit(line, usable));
+}
+
+/** The Inventory list grid: section and entry panes above a full-width detail pane. */
+function renderPaneRows(
+  grid: PaneGrid,
+  style: TuiPaint,
+  focus: TuiBrowseState["model"]["focus"],
+  entries: TuiPaneView<unknown>,
+  detail: TuiPaneView<unknown>,
+  sectionRow: (row: number) => string,
+  entryRow: (row: number) => string,
+  detailRow: (row: number) => string,
+): readonly string[] {
+  const left = "─".repeat(grid.leftWidth);
+  const right = "─".repeat(Math.max(0, grid.usable - grid.leftWidth - 1));
+  return [
+    ...(grid.hideTopRule ? [] : [style.border(left + "┬" + right)]),
+    ...Array.from(
+      { length: grid.paneRows },
+      (_, row) =>
+        sectionRow(row) +
+        style.border("│") +
+        entryRow(row) +
+        scrollMark(entries, row, style),
+    ),
+    ...(grid.hideDetailRule
+      ? []
+      : [
+          (focus === "detail" ? style.title : style.border)(left + "┴" + right),
+        ]),
+    ...Array.from(
+      { length: grid.detailRows },
+      (_, row) =>
+        fit(detailRow(row), Math.max(0, grid.usable - 1)) +
+        scrollMark(detail, row, style),
+    ),
+  ];
 }
 
 interface KeyHint {
@@ -2870,14 +3021,13 @@ function fit(value: string, width: number): string {
 }
 
 function renderPlan(state: TuiPlanState, style: TuiPaint): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactPlan(state, style);
   const body = planBodyLines(state, style);
   const footer = planFooterLines(state, style);
-  const metrics = planScrollMetricsFor(state, body.length, footer.length);
+  const metrics = scrollMetricsFor(
+    state.browse.model.viewport,
+    body.length,
+    footer.length,
+  );
   const offset = Math.min(
     Math.max(0, state.scrollOffset),
     metrics.maximumOffset,
@@ -2896,19 +3046,6 @@ function renderPlan(state: TuiPlanState, style: TuiPaint): string {
   const width = Math.max(0, state.browse.model.viewport.columns - 1);
   return `${[...visibleBody, ...range, ...footer]
     .slice(0, Math.max(0, state.browse.model.viewport.rows - 1))
-    .map((line) => fit(line, width))
-    .join("\n")}\n`;
-}
-
-function renderCompactPlan(state: TuiPlanState, style: TuiPaint): string {
-  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const width = Math.max(0, state.browse.model.viewport.columns - 1);
-  return `${[
-    style.title("Lampwright"),
-    style.warning("Resize the terminal"),
-    style.muted("q quit"),
-  ]
-    .slice(0, rows)
     .map((line) => fit(line, width))
     .join("\n")}\n`;
 }
@@ -2983,9 +3120,13 @@ function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
   return lines;
 }
 
-function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
+function planFooterLines(
+  state: TuiPlanState,
+  style: TuiPaint,
+  columns = state.browse.model.viewport.columns,
+): string[] {
   const removalPlan = state.plan;
-  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const width = Math.max(1, columns - 1);
   const lines: string[] = [];
   if (removalPlan.blocks.length === 0) {
     const hasManagedRemoval = removalPlan.actions.some(
@@ -3007,19 +3148,19 @@ function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
     lines.push(
       style.success("Nothing has changed yet."),
       ...wrapPlanLine(recoveryMessage, width).map(recoveryStyle),
-      ...planControlLines(state, style, "ready"),
+      ...planControlLines(state, style, "ready", columns),
     );
   } else if (removalPlan.blocks.every((block) => block.overridable)) {
     lines.push(
       style.warning("This plan is blocked and cannot execute as shown."),
-      ...planControlLines(state, style, "force"),
+      ...planControlLines(state, style, "force", columns),
     );
   } else {
     lines.push(
       style.error(
         "This plan contains a non-overridable block and cannot execute.",
       ),
-      ...planControlLines(state, style, "blocked"),
+      ...planControlLines(state, style, "blocked", columns),
     );
   }
   return lines;
@@ -3029,6 +3170,7 @@ function planControlLines(
   state: TuiPlanState,
   style: TuiPaint,
   kind: "ready" | "force" | "blocked",
+  columns: number,
 ): readonly string[] {
   const details = state.technicalDetails
     ? "hide technical details"
@@ -3044,7 +3186,7 @@ function planControlLines(
       style.muted(` ${details}   `) +
       style.title("q") +
       style.muted(" quit");
-    return state.browse.model.viewport.columns < 72
+    return columns < 72
       ? [first, second]
       : [first + style.muted("   ") + second];
   }
@@ -3070,34 +3212,14 @@ export function planScrollMetrics(state: TuiPlanState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return planScrollMetricsFor(
-    state,
+  return scrollMetricsFor(
+    state.browse.model.viewport,
     planBodyLines(state, style).length,
     planFooterLines(state, style).length,
   );
-}
-
-function planScrollMetricsFor(
-  state: TuiPlanState,
-  bodyRows: number,
-  footerRows: number,
-): { readonly pageRows: number; readonly maximumOffset: number } {
-  const usableRows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const overflows = bodyRows + footerRows > usableRows;
-  const pageRows = Math.max(
-    0,
-    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
-  );
-  return {
-    pageRows,
-    maximumOffset: Math.max(0, bodyRows - pageRows),
-  };
 }
 
 function technicalPlanLines(
@@ -3137,33 +3259,6 @@ function wrapPlanLines(
   width: number,
 ): readonly string[] {
   return lines.flatMap((line) => wrapPlanLine(line, width));
-}
-
-function wrapPlanLine(value: string, width: number): readonly string[] {
-  if (width <= 0 || [...value].length <= width) return [value];
-  const indentation = value.match(/^\s*/u)?.[0] ?? "";
-  const result: string[] = [];
-  let remaining = value;
-
-  while ([...remaining].length > width) {
-    const characters = [...remaining];
-    const candidate = characters.slice(0, width).join("");
-    const lastSpace = candidate.search(/\s+\S*$/u);
-    const lastPathSeparator = Math.max(
-      candidate.lastIndexOf("/") + 1,
-      candidate.lastIndexOf("\\") + 1,
-    );
-    const minimumUsefulBreak = Math.max(
-      indentation.length + 1,
-      Math.floor(width / 2),
-    );
-    const preferredBreak = Math.max(lastSpace, lastPathSeparator);
-    const cut = preferredBreak >= minimumUsefulBreak ? preferredBreak : width;
-    result.push(characters.slice(0, cut).join("").trimEnd());
-    remaining = `${indentation}${characters.slice(cut).join("").trimStart()}`;
-  }
-  result.push(remaining);
-  return result;
 }
 
 function plainActionGroups(
@@ -3454,14 +3549,13 @@ function targetLabel(state: TuiPlanState, target: RemovalTarget): string {
 }
 
 function renderReport(state: TuiReportState, style: TuiPaint): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactReport(state, style);
   const body = reportBodyLines(state, style);
   const footer = reportFooterLines(state, style);
-  const metrics = reportScrollMetricsFor(state, body.length, footer.length);
+  const metrics = scrollMetricsFor(
+    state.browse.model.viewport,
+    body.length,
+    footer.length,
+  );
   const offset = Math.min(
     Math.max(0, state.scrollOffset),
     metrics.maximumOffset,
@@ -3489,31 +3583,14 @@ export function reportScrollMetrics(state: TuiReportState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return reportScrollMetricsFor(
-    state,
+  return scrollMetricsFor(
+    state.browse.model.viewport,
     reportBodyLines(state, style).length,
     reportFooterLines(state, style).length,
   );
-}
-
-function reportScrollMetricsFor(
-  state: TuiReportState,
-  bodyRows: number,
-  footerRows: number,
-): { readonly pageRows: number; readonly maximumOffset: number } {
-  const usableRows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const overflows = bodyRows + footerRows > usableRows;
-  const pageRows = Math.max(
-    0,
-    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
-  );
-  return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
 }
 
 function reportBodyLines(state: TuiReportState, style: TuiPaint): string[] {
@@ -3659,19 +3736,6 @@ function condenseTargetConcerns(
       ? `• ${names[0]}: ${reason}`
       : `• ${String(names.length)} capabilities: ${reason}`,
   );
-}
-
-function renderCompactReport(state: TuiReportState, style: TuiPaint): string {
-  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const width = Math.max(0, state.browse.model.viewport.columns - 1);
-  return `${[
-    style.title("Lampwright"),
-    style.warning("Resize the terminal"),
-    style.muted("q quit"),
-  ]
-    .slice(0, rows)
-    .map((line) => fit(line, width))
-    .join("\n")}\n`;
 }
 
 function targetResultReason(

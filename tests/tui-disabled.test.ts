@@ -1189,6 +1189,69 @@ describe("Disabled TUI projection", () => {
     );
   });
 
+  it("retains a Disable plan without forcing it or granting confirmation behind the resize prompt", async () => {
+    const { inventory, enabled } = fixture();
+    const entry = disabledEntry(enabled, "hidden-disable");
+    const prepared = availabilityPlan(inventory.id, "disable", entry);
+    const target = prepared.targets[0]!;
+    if (target.kind !== "installation")
+      throw new Error("Expected an Installation");
+    const blocked: AvailabilityPlan = {
+      ...prepared,
+      blocks: [
+        {
+          kind: "hard-dependency",
+          target,
+          overridable: true,
+          dependency: {
+            kind: "hard",
+            dependentInstallationId: enabled.id,
+            target,
+            source: { kind: "adapter", adapterId: "fixture" },
+            reason: "Fixture depends on this Skill",
+          },
+        },
+      ],
+    };
+    const planner = vi.fn(
+      (
+        _inventory: typeof inventory,
+        _entries: readonly DisabledEntry[],
+        intent: AvailabilityPlan["intent"],
+      ) => (intent.force ? prepared : blocked),
+    );
+    const executeAvailability = vi.fn(async () => availabilityReport(prepared));
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan,
+      execute: vi.fn(),
+      planAvailability: planner,
+      executeAvailability,
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "disable-review" });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 5, columns: 35 },
+    });
+    expect(controller.state.screen).toBe("availability-plan");
+    const hidden = controller.state;
+    await controller.dispatch({ kind: "force" });
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAvailabilityExecution();
+    expect(controller.state).toBe(hidden);
+    expect(planner).toHaveBeenCalledTimes(1);
+    expect(executeAvailability).not.toHaveBeenCalled();
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 20, columns: 80 },
+    });
+    await controller.dispatch({ kind: "force" });
+    expect(planner).toHaveBeenCalledTimes(2);
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAvailabilityExecution();
+    expect(executeAvailability).toHaveBeenCalledTimes(1);
+  });
   it("keeps long Availability review/report content reachable and clamps compact resize", async () => {
     const { inventory, enabled } = fixture();
     const entry = disabledEntry(enabled, "stored-long");

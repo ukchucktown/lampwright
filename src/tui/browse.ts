@@ -22,7 +22,7 @@ import type {
  * scrolls it by one on the final newline, which reads as the panes drifting.
  */
 const HEADER_ROWS = 2;
-const CHROME_ROWS = 6;
+const FRAME_ROWS = 4;
 const MIN_PANE_ROWS = 3;
 const MIN_DETAIL_ROWS = 3;
 const SCROLL_MARGIN = 1;
@@ -48,10 +48,13 @@ export function createBrowseModel(
   });
 }
 
-export function layout(model: TuiBrowseModel): TuiLayout {
+export function layout(
+  model: Pick<TuiBrowseModel, "viewport" | "detailRows" | "leftPercent">,
+  headerRows = HEADER_ROWS,
+): TuiLayout {
   const rows = dimension(model.viewport.rows);
   const columns = dimension(model.viewport.columns);
-  const availableRows = Math.max(0, rows - CHROME_ROWS);
+  const availableRows = Math.max(0, rows - headerRows - FRAME_ROWS);
   const reservedPaneRows = Math.min(MIN_PANE_ROWS, availableRows);
   const detailRows = Math.min(
     Math.max(MIN_DETAIL_ROWS, model.detailRows),
@@ -70,7 +73,7 @@ export function layout(model: TuiBrowseModel): TuiLayout {
   return {
     rows,
     columns,
-    headerRows: HEADER_ROWS,
+    headerRows,
     usable,
     paneRows,
     entryRows: Math.max(1, paneRows - 1),
@@ -78,6 +81,30 @@ export function layout(model: TuiBrowseModel): TuiLayout {
     leftWidth,
     rightWidth: Math.max(0, usable - leftWidth - 2),
   };
+}
+
+/** Inventory draws both rules; compact Help can spend those rows on content. */
+export interface PaneGrid extends TuiLayout {
+  readonly hideTopRule?: boolean;
+  readonly hideDetailRule?: boolean;
+}
+
+/** One-based terminal coordinates shared by list clicks, wheel input and divider dragging. */
+export function paneBounds(grid: PaneGrid) {
+  const firstListRow = grid.headerRows + (grid.hideTopRule ? 0 : 1) + 1;
+  const afterLists = firstListRow + grid.paneRows;
+  return {
+    firstListRow,
+    afterLists,
+    firstDetailRow: afterLists + (grid.hideDetailRule ? 0 : 1),
+  };
+}
+
+type Pane = TuiBrowseModel["focus"];
+
+export function nextPane(focus: Pane, reverse = false): Pane {
+  const panes = ["sections", "entries", "detail"] as const;
+  return panes[(panes.indexOf(focus) + (reverse ? 2 : 1)) % panes.length]!;
 }
 
 function dimension(value: number): number {
@@ -465,7 +492,7 @@ function settle(model: TuiBrowseModel): TuiBrowseModel {
 }
 
 /** Keeps the cursor inside its viewport without recentring on every step. */
-function scrollFor(
+export function scrollFor(
   offset: number,
   index: number,
   height: number,
@@ -491,14 +518,18 @@ function subsequence(needle: string, haystack: string): boolean {
   return false;
 }
 
-function clampPercent(percent: number): number {
+export function clampPercent(percent: number): number {
   return Math.min(55, Math.max(18, percent));
 }
 
-function clampDetailRows(model: TuiBrowseModel, rows: number): number {
+export function clampDetailRows(
+  model: Pick<TuiBrowseModel, "viewport">,
+  rows: number,
+  headerRows = HEADER_ROWS,
+): number {
   const availableRows = Math.max(
     0,
-    dimension(model.viewport.rows) - CHROME_ROWS,
+    dimension(model.viewport.rows) - headerRows - FRAME_ROWS,
   );
   const maximum = Math.max(MIN_DETAIL_ROWS, availableRows - MIN_PANE_ROWS);
   return Math.min(maximum, Math.max(MIN_DETAIL_ROWS, rows));

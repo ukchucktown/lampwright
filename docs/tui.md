@@ -177,11 +177,12 @@ usable.
 
 ### Modal frames
 
-Help, Theme, and Add agents use `overlayPanel` to draw a muted title and footer
-hint against the left and right content edges, two spaces inside each side
-border. The frame adds a blank row above and below the body when both rows fit
-below the Inventory header and key hints. For a new modal, use `modalFrame`
-to locate the content for pointer input.
+Theme and Add agents review use `modalSurface` to choose a frame or a
+full pane with space reserved for the title and footer. On a frame,
+`overlayPanel` places the muted title and footer hint two spaces inside the
+side borders. It adds a blank row above and below the body when both rows
+fit below the Inventory header and key hints.
+Use `modalFrame` to locate framed content for pointer input.
 
 ### Theme picker
 
@@ -254,25 +255,42 @@ all other conditions. No hint is below the detail pane, so the scroll mark of
 the detail pane ends at an empty line. A selection or a cleared selection gives no notice, because the
 checkboxes and the header status show the result.
 
-`?` in a browse view opens the key reference. It is a panel with a border that
-the terminal UI draws over the middle of the browse view. The browse view stays
-visible behind the panel in a dim style. The panel starts below the header and
-the key hints when the terminal has the rows.
+### Help
 
-The panel title is `Help`. Its first section lists the commands for the current
-view under `Inventory`, `Disabled`, or `Trash`. The other sections are
-`Move and select` and `App`. Each section starts with a muted heading and a
-horizontal rule. When space permits, a blank row separates the sections.
+Press `?` in Inventory, Disabled, or Trash to open Help for that view.
+The left pane lists the current view, `Move and select`, and `App`.
+Highlight a section to see its name at the top of the right pane. The
+summary includes the key count when it fits. Each list entry pairs a key or
+chord with its action. Actions align in a column when space permits.
+On narrow screens the action wraps below the key. Keys use the terminal’s
+normal text color, and actions use the muted theme style. Only the focused
+list highlights its current row. A shortcut’s highlight covers its wrapped action. The bottom
+pane shows the key, its action, a short explanation and any mouse gesture
+that has the same effect.
 
-The panel has one row per key, with columns for the key, its effect, and the
-equivalent mouse action. The keys use the title style. Effects and mouse
-actions use plain text, except that `remove` and `purge` use the warning style.
-The `esc` row describes Escape in the current view. The footer says `esc close`.
+Use Up and Down to select a section or shortcut, or to scroll a detail line.
+Page Up and Page Down move one page. Tab cycles through the sections, keys and detail. Shift+Tab
+cycles in reverse. A click on a key or its action selects the same shortcut.
+The wheel navigates the pane under the pointer. The dividers start in the
+same positions as in Inventory. Drag a divider or use Shift with the arrow keys to resize the Help
+panes.
 
-A short terminal drops the blank separators first, then the later section rules.
-The full-screen fallback keeps the `Help` title, the current view heading, and
-the close hint. Press `?`, `q`, Escape, or Enter to return to the same browse
-position.
+In a wide, short terminal, Help uses the top border row for content when
+it needs the space. A single detail row shows the explanation and mouse
+gesture together when they fit. Otherwise the explanation comes first.
+Scroll the detail pane to read the remaining lines. The close hint stays visible. If one more row is
+needed, Help also omits the horizontal divider.
+
+In a narrow terminal, the lists stay side by side above the detail pane.
+Section names use shorter labels when necessary. When an action is taller
+than the key pane, Page Down and Page Up show its remaining lines. Enter or
+Right moves focus from sections to keys, or from keys to detail. Left moves focus back.
+At the minimum height the section summary carries the Escape hint. If the
+terminal cannot show a section label, a complete chord and a detail row,
+Help asks you to resize. Escape still closes Help.
+
+Help is read-only. Press Escape, `?`, or `q` to return to the same
+browse view with its focus and checked rows.
 
 Escape is the first byte of each arrow key and each function key, so the
 terminal waits for the rest of a key sequence before it reports a lone Escape.
@@ -332,7 +350,8 @@ Skill at a time. If its row contains several eligible Installations, choose
 one by Scope and path. The agent picker opens directly for a single eligible
 Installation.
 
-The picker lists agents that can receive the Skill. It omits agents whose
+Agent selection uses the same full-pane search surface as global Skill search.
+The result list shows agents that can receive the Skill. It omits agents whose
 current destination contains the canonical Skill, a link to it, or a verified
 Manager-owned copy. As in global search, the `> ` prompt uses the title role,
 the empty hint uses the muted role, and typed text uses the active role.
@@ -341,8 +360,10 @@ The focused row keeps its focus style. Type an agent name to filter the list.
 For Antigravity CLI, type `agy`. If it already has the Skill, the picker explains why the
 search has no selectable row. When a search matches both kinds of agent, the
 counts distinguish agents to add from agents that already have the Skill.
-Use the arrows or Page Up and Page Down to move through the results. Press
-Space or click a result to select or clear that agent. A selection stays
+Use the arrows or Page Up and Page Down to move through the results. A click
+on an agent name focuses its row and shows its destination in the preview.
+Space, a double-click on the name, or a click on the checkbox toggles selection.
+Narrow panes give the result list the full width. A selection stays
 checked when another search hides it. Ctrl+U clears the search and keeps the
 checked agents. If all supported agents have the Skill, the picker shows that
 result and offers Esc to return.
@@ -444,6 +465,13 @@ under the cursor and does nothing on an informational row.
 regex input; Ctrl+C remains an alternate exit everywhere. In the inventory,
 `esc` unwinds pane focus and then selection before leaving, so a stray keypress
 cannot discard a selection.
+
+If a review cannot show a body row, Lampwright displays a resize prompt and
+retains the plan. Enlarge the terminal and confirm the visible review to
+execute it. This applies to removal, Disable, Enable, Update, Add agents, and
+Trash. The same rule keeps a hidden picker from changing a selection or
+saving a theme. Escape goes back and `q` quits. Input received while the
+controls are hidden cannot confirm the operation after a resize.
 
 ## Plans, fallback, and reports
 
@@ -581,8 +609,9 @@ screens accept the same commands, but `force` has no effect. Report screens
 accept `up`, `down`, `pageup`, `pagedown`, `details`, `back`, and `quit`. The
 `back` command reads the Inventory again and then returns to the Inventory
 view. Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
-`up`, `down`, `select`, `back`, and `quit`. Any command except `quit` closes the
-key reference. End-of-input cancels safely.
+`up`, `down`, `select`, `back`, and `quit`. In Help, `up`, `down`, `pageup`, and
+`pagedown` navigate the focused pane. Use `in` or Enter to focus a section’s keys
+or a key’s detail. Use `out` to focus the previous list. The `back` command closes Help and `quit` exits Lampwright. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 
