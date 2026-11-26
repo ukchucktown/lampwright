@@ -547,6 +547,32 @@ describe("theme picker", () => {
       model: { viewport: { rows: 8, columns: 22 } },
     });
   });
+  it("ignores navigation and save when the terminal cannot show a choice", async () => {
+    const { controller, selectSpy } = controllerWith();
+    await controller.start();
+    await controller.dispatch({ kind: "open-theme-picker" });
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 2, columns: 20 },
+    });
+    expect(
+      renderTui(
+        controller.state,
+        createTuiTheme(terminalThemeDefinition, "none"),
+      ),
+    ).toContain("Resize");
+    await controller.dispatch({ kind: "move", delta: 1 });
+    await controller.dispatch({ kind: "select" });
+    expect(selectSpy).not.toHaveBeenCalled();
+    expect(controller.state).toMatchObject({ screen: "theme", index: 1 });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 20, columns: 80 },
+    });
+    await controller.dispatch({ kind: "select" });
+    expect(selectSpy).toHaveBeenCalledExactlyOnceWith("nightfall");
+  });
   it("saves only a confirmed theme and opens the picker on it next time", async () => {
     const { controller, selectSpy } = controllerWith();
     await controller.start();

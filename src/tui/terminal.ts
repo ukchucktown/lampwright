@@ -5,7 +5,12 @@ import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { searchLayout } from "./search.js";
-import { browseTabHitboxes, renderTui, helpScrollMetrics } from "./render.js";
+import {
+  browseTabHitboxes,
+  renderTui,
+  helpScrollMetrics,
+  resizeOnlyViewport,
+} from "./render.js";
 import {
   createTuiTheme,
   terminalThemeDefinition,
@@ -131,6 +136,7 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
+  if (resizeOnlyViewport(state)) return { kind: "noop" };
   if (state.screen === "help") {
     if ((report.button & 64) === 0) return { kind: "noop" };
     const { maximumOffset, pageRows } = helpScrollMetrics(state);
@@ -355,6 +361,14 @@ export function createNodeTuiTerminal(
 
 export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   const value = line.trim();
+  if (resizeOnlyViewport(state)) {
+    if (value === "quit" || value === "q") return { kind: "quit" };
+    if (["back", "cancel", "no", "n"].includes(value))
+      return { kind: "cancel" };
+    if (state.screen === "browse" && (value === "help" || value === "?"))
+      return { kind: "open-help" };
+    return { kind: "noop" };
+  }
   if (state.screen === "browse") {
     if (value === "") return { kind: "select" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -522,18 +536,46 @@ class RawTuiTerminal implements TuiTerminal {
   private lastClick = { target: "", at: 0 };
   private readonly mouse: MouseReport[] = [];
   private readonly mouseFramer = new MouseReportFramer();
-  private readonly pending: { readonly text: string; readonly key: Key }[] = [];
+  private pending: {
+    readonly text: string;
+    readonly key: Key;
+    readonly safeAction?: TuiAction;
+  }[] = [];
+  private lastDrawn: TuiState | null = null;
+  private awaitingVisibleFrame = false;
   private resized: TuiViewport | null = null;
   private waiter: (() => void) | null = null;
   private readonly onKeypress = (text: string, key: Key): void => {
     if (this.ignoringKeys) return;
-    this.pending.push({ text, key });
+    const safeAction =
+      this.awaitingVisibleFrame && this.lastDrawn
+        ? hiddenKey(this.lastDrawn, text, key)
+        : undefined;
+    if (safeAction?.kind === "noop") return;
+    this.pending.push(safeAction ? { text, key, safeAction } : { text, key });
     this.wake();
   };
   private readonly onResize = (): void => {
     this.resized = viewportOf(this.output);
+    if (this.lastDrawn && resizeOnlyViewport(this.lastDrawn, this.resized)) {
+      this.hideInput(this.lastDrawn);
+    }
     this.wake();
   };
+
+  private hideInput(state: TuiState): void {
+    // Resizes can coalesce before readAction runs. An older confirmation
+    // must never replay against the next visible frame.
+    this.awaitingVisibleFrame = true;
+    this.pending = this.pending.flatMap((input) => {
+      const safeAction =
+        input.safeAction ?? hiddenKey(state, input.text, input.key);
+      return safeAction.kind === "noop" ? [] : [{ ...input, safeAction }];
+    });
+    this.mouse.length = 0;
+    this.dragging = false;
+    this.lastClick = { target: "", at: 0 };
+  }
 
   private wake(): void {
     const waiter = this.waiter;
@@ -578,7 +620,8 @@ class RawTuiTerminal implements TuiTerminal {
     queueMicrotask(() => {
       if (!this.mouseFramer.pending) this.ignoringKeys = false;
     });
-    for (const report of reports) this.mouse.push(report);
+    if (!this.awaitingVisibleFrame)
+      for (const report of reports) this.mouse.push(report);
     this.wake();
   };
 
@@ -588,6 +631,13 @@ class RawTuiTerminal implements TuiTerminal {
   }
 
   render(state: TuiState): void {
+    this.lastDrawn = state;
+    if (
+      resizeOnlyViewport(state) ||
+      (this.resized && resizeOnlyViewport(state, this.resized))
+    )
+      this.hideInput(state);
+    else this.awaitingVisibleFrame = false;
     this.output.write(`\u001B[2J\u001B[H${renderTui(state, this.theme)}`);
   }
 
@@ -620,7 +670,7 @@ class RawTuiTerminal implements TuiTerminal {
       const next = this.pending.shift();
       if (next !== undefined) {
         this.dragging = false;
-        return parseRawTuiAction(state, next.text, next.key);
+        return next.safeAction ?? parseRawTuiAction(state, next.text, next.key);
       }
 
       await new Promise<void>((resolve) => {
@@ -695,12 +745,20 @@ class LineTuiTerminal implements TuiTerminal {
   }
 }
 
+function hiddenKey(state: TuiState, text: string, key: Key): TuiAction {
+  if ((key.ctrl && key.name === "c") || text === "q") return { kind: "quit" };
+  if (key.name === "escape" || text === "n") return { kind: "cancel" };
+  if (state.screen === "browse" && text === "?") return { kind: "open-help" };
+  return { kind: "noop" };
+}
+
 /** Maps a decoded raw-terminal key into a semantic action. */
 export function parseRawTuiAction(
   state: TuiState,
   text: string,
   key: Key,
 ): TuiAction {
+  if (resizeOnlyViewport(state)) return hiddenKey(state, text, key);
   if (key.ctrl && key.name === "c") return { kind: "quit" };
   if (state.screen === "help") {
     if (key.name === "up" || key.name === "down")

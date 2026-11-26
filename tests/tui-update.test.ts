@@ -1129,6 +1129,21 @@ describe("Update TUI", () => {
     });
     await controller.start();
     await controller.dispatch({ kind: "update-review" });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 5, columns: 35 },
+    });
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForUpdateExecution();
+    expect(executeUpdate).not.toHaveBeenCalled();
+    expect(controller.state).toMatchObject({
+      screen: "update-plan",
+      plan: planValue,
+    });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 22, columns: 90 },
+    });
     await controller.dispatch({ kind: "confirm" });
     expect(controller.state.screen).toBe("update-executing");
     expect(executeUpdate).not.toHaveBeenCalled();

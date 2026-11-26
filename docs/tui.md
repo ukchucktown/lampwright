@@ -452,6 +452,13 @@ regex input; Ctrl+C remains an alternate exit everywhere. In the inventory,
 `esc` unwinds pane focus and then selection before leaving, so a stray keypress
 cannot discard a selection.
 
+If a review cannot show a body row, Lampwright displays a resize prompt and
+retains the plan. Enlarge the terminal and confirm the visible review to
+execute it. This applies to removal, Disable, Enable, Update, Add agents, and
+Trash. The same rule keeps a hidden picker from changing a selection or
+saving a theme. Escape goes back and `q` quits. Input received while the
+controls are hidden cannot confirm the operation after a resize.
+
 ## Plans, fallback, and reports
 
 The review screen leads with the decision a person must make: what is selected,

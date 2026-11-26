@@ -679,6 +679,55 @@ describe("Add agent", () => {
     },
   );
 
+  it("requires a new visible confirmation after resizing the agent review", async () => {
+    const f = await fixture();
+    const executeBatch = vi.fn(f.addAgent.executeBatch);
+    const controller = controllerFor({
+      ...f,
+      addAgent: { ...f.addAgent, executeBatch },
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "add-agent" });
+    await controller.dispatch({ kind: "append-query", value: "agy" });
+    await controller.dispatch({ kind: "toggle-select" });
+    await controller.dispatch({ kind: "select" });
+    const review = controller.state;
+    if (review.screen !== "add-agent" || review.stage !== "review")
+      throw new Error("Expected agent review");
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 7, columns: 40 },
+    });
+    await controller.dispatch(
+      parseRawTuiAction(controller.state, "y", {
+        name: "y",
+        ctrl: false,
+        meta: false,
+        shift: false,
+      }),
+    );
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAddAgentExecution();
+    expect(executeBatch).not.toHaveBeenCalled();
+    expect(controller.state).toMatchObject({
+      stage: "review",
+      plan: review.plan,
+    });
+    await expect(lstat(f.destination)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 20, columns: 80 },
+    });
+    await controller.waitForAddAgentExecution();
+    expect(executeBatch).not.toHaveBeenCalled();
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForAddAgentExecution();
+    expect(executeBatch).toHaveBeenCalledTimes(1);
+    expect(await realpath(f.destination)).toBe(f.source);
+  });
+
   it("ignores pointer input at the resize prompt and accepts a click after the picker appears", async () => {
     const f = await fixture();
     const controller = controllerFor(f);
@@ -702,6 +751,15 @@ describe("Add agent", () => {
           ),
         ).toEqual({ kind: "noop" });
     }
+    const hidden = controller.state;
+    for (const action of [
+      { kind: "append-query", value: "agy" },
+      { kind: "toggle-select" },
+      { kind: "point-agent", index: 1 },
+      { kind: "select" },
+    ] as const)
+      await controller.dispatch(action);
+    expect(controller.state).toBe(hidden);
     await controller.dispatch({
       kind: "viewport",
       viewport: { rows: 8, columns: 80 },

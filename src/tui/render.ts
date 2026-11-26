@@ -61,11 +61,101 @@ import type {
   TuiUpdateReportState,
 } from "./types.js";
 
+type Viewport = TuiBrowseState["model"]["viewport"];
+
+function compactReview(viewport: Viewport): boolean {
+  return viewport.rows < 7 || viewport.columns < 20;
+}
+
+/** A scrollable review reserves one terminal row, its footer, and an overflow indicator. */
+function bodyRowBudget(viewport: Viewport, footerRows: number) {
+  return Math.max(0, viewport.rows - 1 - footerRows);
+}
+
+function reviewBodyFits(viewport: Viewport, footerRows: number) {
+  return bodyRowBudget(viewport, footerRows) > 1;
+}
+
+function compactBrowse(grid: ReturnType<typeof layout>) {
+  return grid.paneRows < 2 || grid.columns < 9;
+}
+
+/** The same decision guards drawing, terminal input and direct controller actions. */
+export function resizeOnlyViewport(
+  state: TuiState,
+  override?: Viewport,
+): Viewport | null {
+  if (state.screen === "browse") {
+    const viewport = override ?? state.model.viewport;
+    return compactBrowse(
+      layout(override ? { ...state.model, viewport } : state.model),
+    )
+      ? viewport
+      : null;
+  }
+  if (state.screen === "search") {
+    const viewport = override ?? state.model.viewport;
+    return searchLayout(viewport).compact ? viewport : null;
+  }
+  if (!("browse" in state)) return null;
+  const viewport = override ?? state.browse.model.viewport;
+  switch (state.screen) {
+    case "add-agent":
+      return state.stage !== "execution" && searchLayout(viewport).compact
+        ? viewport
+        : null;
+    case "add-agent-installation":
+      return viewport.rows < 6 || viewport.columns < 18 ? viewport : null;
+    case "theme": {
+      const { width, bodyRows } = fullPaneSize(viewport);
+      return bodyRows < 1 || width < "enter use · esc".length ? viewport : null;
+    }
+    case "trash-review": {
+      const footer = trashReviewFooterLines(state, createPaint(plainTuiTheme));
+      return viewport.columns < 20 || !reviewBodyFits(viewport, footer.length)
+        ? viewport
+        : null;
+    }
+    case "trash-report": {
+      const footer = trashReportFooterLines(state, createPaint(plainTuiTheme));
+      return viewport.columns < 20 || !reviewBodyFits(viewport, footer.length)
+        ? viewport
+        : null;
+    }
+    case "availability-plan":
+    case "update-plan":
+    case "availability-report":
+    case "update-report":
+      return compactReview(viewport) ? viewport : null;
+    case "plan": {
+      if (compactReview(viewport)) return viewport;
+      const footer = planFooterLines(
+        state,
+        createPaint(plainTuiTheme),
+        viewport.columns,
+      );
+      return reviewBodyFits(viewport, footer.length) ? null : viewport;
+    }
+    case "report":
+      if (compactReview(viewport)) return viewport;
+      return reviewBodyFits(
+        viewport,
+        reportFooterLines(state, createPaint(plainTuiTheme)).length,
+      )
+        ? null
+        : viewport;
+    default:
+      return null;
+  }
+}
+
 export function renderTui(
   state: TuiState,
   theme: TuiTheme = terminalTheme,
 ): string {
   const style = createPaint(theme);
+  const hidden = resizeOnlyViewport(state);
+  if (hidden) return renderResizeNotice(hidden, style);
   if (state.screen === "loading")
     return `${style.title("Lampwright")}\n\n${style.info("Scanning known skill roots…")}\n`;
   if (state.screen === "error")
@@ -497,7 +587,7 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
   if (state.stage === "selection") return renderAgentSearch(state, style);
-  if (searchLayout(viewport).compact)
+  if (state.stage === "execution" && searchLayout(viewport).compact)
     return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
   let surface: ReturnType<typeof modalSurface>;
   let body: readonly string[];
@@ -554,9 +644,6 @@ function renderAddAgentInstallation(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const { rows, columns } = viewport;
-  if (rows < 6 || columns < 18)
-    return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
   const options = (width: number) =>
     state.installations.map((item, index) => {
       const focused = index === state.index;
@@ -734,7 +821,7 @@ function renderTrashScrollable(
   rangeLabel = "review",
 ): string {
   const width = Math.max(1, viewport.columns - 1);
-  const metrics = trashScrollMetricsFor(viewport, body.length, footer.length);
+  const metrics = scrollMetricsFor(viewport, body.length, footer.length);
   const clamped = Math.min(Math.max(0, offset), metrics.maximumOffset);
   const visible = body.slice(clamped, clamped + metrics.pageRows);
   const range =
@@ -910,7 +997,7 @@ function trashReportFooterLines(
 export function trashReviewScrollMetrics(
   state: Extract<TuiState, { screen: "trash-review" }>,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     trashReviewBodyLines(state, createPaint(plainTuiTheme)).length,
     trashReviewFooterLines(state, createPaint(plainTuiTheme)).length,
@@ -920,24 +1007,21 @@ export function trashReviewScrollMetrics(
 export function trashReportScrollMetrics(
   state: Extract<TuiState, { screen: "trash-report" }>,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     trashReportBodyLines(state, createPaint(plainTuiTheme)).length,
     trashReportFooterLines(state, createPaint(plainTuiTheme)).length,
   );
 }
 
-function trashScrollMetricsFor(
+function scrollMetricsFor(
   viewport: TuiBrowseState["model"]["viewport"],
   bodyRows: number,
   footerRows: number,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
-  const usableRows = Math.max(0, viewport.rows - 1);
-  const overflows = bodyRows + footerRows > usableRows;
-  const pageRows = Math.max(
-    0,
-    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
-  );
+  const available = bodyRowBudget(viewport, footerRows);
+  const pageRows =
+    bodyRows > available ? Math.max(0, available - 1) : available;
   return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
 }
 
@@ -945,11 +1029,6 @@ function renderAvailabilityPlan(
   state: TuiAvailabilityPlanState,
   style: TuiPaint,
 ): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     availabilityPlanBodyLines(state, style),
     availabilityPlanFooterLines(state, style),
@@ -1215,12 +1294,9 @@ export function availabilityPlanScrollMetrics(
   state: TuiAvailabilityPlanState,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
   const style = createPaint(plainTuiTheme);
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     availabilityPlanBodyLines(state, style).length,
     availabilityPlanFooterLines(state, style).length,
@@ -1240,11 +1316,6 @@ function renderAvailabilityReport(
   state: TuiAvailabilityReportState,
   style: TuiPaint,
 ): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     availabilityReportBodyLines(state, style),
     [
@@ -1380,12 +1451,9 @@ export function availabilityReportScrollMetrics(
   state: TuiAvailabilityReportState,
 ): { readonly pageRows: number; readonly maximumOffset: number } {
   const style = createPaint(plainTuiTheme);
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     availabilityReportBodyLines(state, style).length,
     1,
@@ -1393,11 +1461,6 @@ export function availabilityReportScrollMetrics(
 }
 
 function renderUpdatePlan(state: TuiUpdatePlanState, style: TuiPaint): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     updatePlanBodyLines(state, style),
     updatePlanFooterLines(state, style),
@@ -1983,13 +2046,10 @@ export function updatePlanScrollMetrics(state: TuiUpdatePlanState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     updatePlanBodyLines(state, style).length,
     updatePlanFooterLines(state, style).length,
@@ -2007,11 +2067,6 @@ function renderUpdateReport(
   state: TuiUpdateReportState,
   style: TuiPaint,
 ): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactAvailability(state.browse.model.viewport, style);
   return renderTrashScrollable(
     updateReportBodyLines(state, style),
     updateReportFooterLines(state, style),
@@ -2138,13 +2193,10 @@ export function updateReportScrollMetrics(state: TuiUpdateReportState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return trashScrollMetricsFor(
+  return scrollMetricsFor(
     state.browse.model.viewport,
     updateReportBodyLines(state, style).length,
     updateReportFooterLines(state, style).length,
@@ -2244,19 +2296,20 @@ function describeUpdateTarget(target: UpdateTarget): string {
   return `Plugin ${target.pluginBoundaryId}`;
 }
 
-function renderCompactAvailability(
-  viewport: TuiBrowseState["model"]["viewport"],
-  style: TuiPaint,
-): string {
+function renderResizeNotice(viewport: Viewport, style: TuiPaint): string {
+  const rows = Math.max(0, viewport.rows - 1);
   const width = Math.max(0, viewport.columns - 1);
-  return `${[
-    style.title("Lampwright"),
+  const lines = [
+    ...(rows >= 3 ? [style.title("Lampwright")] : []),
     style.warning("Resize the terminal"),
-    style.muted("q quit"),
-  ]
-    .slice(0, Math.max(0, viewport.rows - 1))
-    .map((line) => fit(line, width))
-    .join("\n")}\n`;
+    style.muted("Esc back · q quit"),
+  ];
+  return (
+    lines
+      .slice(0, rows)
+      .map((line) => fit(line, width))
+      .join("\n") + "\n"
+  );
 }
 
 function renderExecuting(state: TuiExecutingState, style: TuiPaint): string {
@@ -2331,13 +2384,6 @@ function renderSearchSurface(
   style: TuiPaint,
 ): string {
   const { usable, leftWidth: left, rightWidth: right } = grid;
-  if (grid.compact)
-    return [
-      style.title(fit(surface.title, usable)),
-      style.warning(fit("Resize the terminal", usable)),
-    ]
-      .slice(0, Math.max(0, grid.rows - 1))
-      .join("\n");
   const out = [
     fitStyledSegments(
       [
@@ -2612,10 +2658,8 @@ export function renderBrowseLines(
   const style = createPaint(theme);
   const model = state.model;
   const grid = layout(model);
-  const { rows, columns, usable, paneRows, detailRows, leftWidth, rightWidth } =
-    grid;
-  if (rows < grid.headerRows + 4 || columns < 9)
-    return renderCompactBrowse(rows, usable, style);
+  const { rows, usable, paneRows, detailRows, leftWidth, rightWidth } = grid;
+  if (compactBrowse(grid)) return renderCompactBrowse(rows, usable, style);
   const view = panes(model);
   const section = currentSection(model);
   const out: string[] = [];
@@ -3046,14 +3090,13 @@ function fit(value: string, width: number): string {
 }
 
 function renderPlan(state: TuiPlanState, style: TuiPaint): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactPlan(state, style);
   const body = planBodyLines(state, style);
   const footer = planFooterLines(state, style);
-  const metrics = planScrollMetricsFor(state, body.length, footer.length);
+  const metrics = scrollMetricsFor(
+    state.browse.model.viewport,
+    body.length,
+    footer.length,
+  );
   const offset = Math.min(
     Math.max(0, state.scrollOffset),
     metrics.maximumOffset,
@@ -3072,19 +3115,6 @@ function renderPlan(state: TuiPlanState, style: TuiPaint): string {
   const width = Math.max(0, state.browse.model.viewport.columns - 1);
   return `${[...visibleBody, ...range, ...footer]
     .slice(0, Math.max(0, state.browse.model.viewport.rows - 1))
-    .map((line) => fit(line, width))
-    .join("\n")}\n`;
-}
-
-function renderCompactPlan(state: TuiPlanState, style: TuiPaint): string {
-  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const width = Math.max(0, state.browse.model.viewport.columns - 1);
-  return `${[
-    style.title("Lampwright"),
-    style.warning("Resize the terminal"),
-    style.muted("q quit"),
-  ]
-    .slice(0, rows)
     .map((line) => fit(line, width))
     .join("\n")}\n`;
 }
@@ -3159,9 +3189,13 @@ function planBodyLines(state: TuiPlanState, style: TuiPaint): string[] {
   return lines;
 }
 
-function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
+function planFooterLines(
+  state: TuiPlanState,
+  style: TuiPaint,
+  columns = state.browse.model.viewport.columns,
+): string[] {
   const removalPlan = state.plan;
-  const width = Math.max(1, state.browse.model.viewport.columns - 1);
+  const width = Math.max(1, columns - 1);
   const lines: string[] = [];
   if (removalPlan.blocks.length === 0) {
     const hasManagedRemoval = removalPlan.actions.some(
@@ -3183,19 +3217,19 @@ function planFooterLines(state: TuiPlanState, style: TuiPaint): string[] {
     lines.push(
       style.success("Nothing has changed yet."),
       ...wrapPlanLine(recoveryMessage, width).map(recoveryStyle),
-      ...planControlLines(state, style, "ready"),
+      ...planControlLines(state, style, "ready", columns),
     );
   } else if (removalPlan.blocks.every((block) => block.overridable)) {
     lines.push(
       style.warning("This plan is blocked and cannot execute as shown."),
-      ...planControlLines(state, style, "force"),
+      ...planControlLines(state, style, "force", columns),
     );
   } else {
     lines.push(
       style.error(
         "This plan contains a non-overridable block and cannot execute.",
       ),
-      ...planControlLines(state, style, "blocked"),
+      ...planControlLines(state, style, "blocked", columns),
     );
   }
   return lines;
@@ -3205,6 +3239,7 @@ function planControlLines(
   state: TuiPlanState,
   style: TuiPaint,
   kind: "ready" | "force" | "blocked",
+  columns: number,
 ): readonly string[] {
   const details = state.technicalDetails
     ? "hide technical details"
@@ -3220,7 +3255,7 @@ function planControlLines(
       style.muted(` ${details}   `) +
       style.title("q") +
       style.muted(" quit");
-    return state.browse.model.viewport.columns < 72
+    return columns < 72
       ? [first, second]
       : [first + style.muted("   ") + second];
   }
@@ -3246,34 +3281,14 @@ export function planScrollMetrics(state: TuiPlanState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return planScrollMetricsFor(
-    state,
+  return scrollMetricsFor(
+    state.browse.model.viewport,
     planBodyLines(state, style).length,
     planFooterLines(state, style).length,
   );
-}
-
-function planScrollMetricsFor(
-  state: TuiPlanState,
-  bodyRows: number,
-  footerRows: number,
-): { readonly pageRows: number; readonly maximumOffset: number } {
-  const usableRows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const overflows = bodyRows + footerRows > usableRows;
-  const pageRows = Math.max(
-    0,
-    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
-  );
-  return {
-    pageRows,
-    maximumOffset: Math.max(0, bodyRows - pageRows),
-  };
 }
 
 function technicalPlanLines(
@@ -3630,14 +3645,13 @@ function targetLabel(state: TuiPlanState, target: RemovalTarget): string {
 }
 
 function renderReport(state: TuiReportState, style: TuiPaint): string {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
-    return renderCompactReport(state, style);
   const body = reportBodyLines(state, style);
   const footer = reportFooterLines(state, style);
-  const metrics = reportScrollMetricsFor(state, body.length, footer.length);
+  const metrics = scrollMetricsFor(
+    state.browse.model.viewport,
+    body.length,
+    footer.length,
+  );
   const offset = Math.min(
     Math.max(0, state.scrollOffset),
     metrics.maximumOffset,
@@ -3665,31 +3679,14 @@ export function reportScrollMetrics(state: TuiReportState): {
   readonly pageRows: number;
   readonly maximumOffset: number;
 } {
-  if (
-    state.browse.model.viewport.rows < 7 ||
-    state.browse.model.viewport.columns < 20
-  )
+  if (compactReview(state.browse.model.viewport))
     return { pageRows: 0, maximumOffset: 0 };
   const style = createPaint(plainTuiTheme);
-  return reportScrollMetricsFor(
-    state,
+  return scrollMetricsFor(
+    state.browse.model.viewport,
     reportBodyLines(state, style).length,
     reportFooterLines(state, style).length,
   );
-}
-
-function reportScrollMetricsFor(
-  state: TuiReportState,
-  bodyRows: number,
-  footerRows: number,
-): { readonly pageRows: number; readonly maximumOffset: number } {
-  const usableRows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const overflows = bodyRows + footerRows > usableRows;
-  const pageRows = Math.max(
-    0,
-    usableRows - Math.min(footerRows, usableRows) - (overflows ? 1 : 0),
-  );
-  return { pageRows, maximumOffset: Math.max(0, bodyRows - pageRows) };
 }
 
 function reportBodyLines(state: TuiReportState, style: TuiPaint): string[] {
@@ -3835,19 +3832,6 @@ function condenseTargetConcerns(
       ? `• ${names[0]}: ${reason}`
       : `• ${String(names.length)} capabilities: ${reason}`,
   );
-}
-
-function renderCompactReport(state: TuiReportState, style: TuiPaint): string {
-  const rows = Math.max(0, state.browse.model.viewport.rows - 1);
-  const width = Math.max(0, state.browse.model.viewport.columns - 1);
-  return `${[
-    style.title("Lampwright"),
-    style.warning("Resize the terminal"),
-    style.muted("q quit"),
-  ]
-    .slice(0, rows)
-    .map((line) => fit(line, width))
-    .join("\n")}\n`;
 }
 
 function targetResultReason(
