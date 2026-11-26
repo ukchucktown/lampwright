@@ -5,6 +5,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = process.cwd();
@@ -15,9 +16,9 @@ describe("release readiness", () => {
       // @ts-expect-error The exercised release helper is intentionally executable ESM.
       await import("../scripts/npm-pack-result.mjs");
     const pack = {
-      id: "lampwright@0.4.2",
+      id: "lampwright@0.5.0",
       name: "lampwright",
-      version: "0.4.2",
+      version: "0.5.0",
     };
 
     expect(normalizeNpmPackResult([pack], "lampwright")).toBe(pack);
@@ -43,11 +44,11 @@ describe("release readiness", () => {
     const command = join(repositoryRoot, "scripts", "verify-release.mjs");
     const authority = {
       ...process.env,
-      GITHUB_REF_NAME: "v0.4.2",
+      GITHUB_REF_NAME: "v0.5.0",
       GITHUB_REF_TYPE: "tag",
       GITHUB_REPOSITORY: "ukchucktown/lampwright",
-      RELEASE_CONFIRMATION: "lampwright@0.4.2",
-      GITHUB_RELEASE_CONFIRMATION: "v0.4.2",
+      RELEASE_CONFIRMATION: "lampwright@0.5.0",
+      GITHUB_RELEASE_CONFIRMATION: "v0.5.0",
       REPOSITORY_PRIVATE: "false",
     };
 
@@ -57,7 +58,7 @@ describe("release readiness", () => {
     if (supportsTrustedPublishingRuntime())
       await expect(exactAuthority).resolves.toMatchObject({
         stdout: expect.stringContaining(
-          "Release authority verified for lampwright@0.4.2",
+          "Release authority verified for lampwright@0.5.0",
         ),
       });
     else
@@ -125,6 +126,33 @@ describe("release readiness", () => {
     expect(publish).toContain("npm install --global npm@11.15.0");
     expect(publish).toContain("npm publish --provenance --access public");
     expect(publish).toContain("node scripts/verify-release.mjs");
+    const config = parse(publish) as {
+      permissions: Record<string, string>;
+      jobs: Record<
+        string,
+        {
+          permissions?: Record<string, string>;
+          environment?: string;
+          needs?: string;
+          strategy?: object;
+          steps: object[];
+        }
+      >;
+    };
+    const smoke = config.jobs["verify-published"]!;
+    expect(smoke.needs).toBe("publish");
+    expect(smoke.permissions ?? config.permissions).toEqual({
+      contents: "read",
+    });
+    expect(smoke.environment).toBeUndefined();
+    expect(smoke.strategy).toMatchObject({
+      matrix: { os: ["ubuntu-latest", "macos-latest", "windows-latest"] },
+    });
+    expect(smoke.steps).toContainEqual({
+      name: expect.any(String),
+      run: "npm run verify:published",
+    });
+    expect(JSON.stringify(smoke)).not.toContain("secrets.");
   });
 
   it("contains no runtime network client or telemetry implementation", async () => {
@@ -228,7 +256,7 @@ describe("release readiness", () => {
     expect(metadata.description).toContain("enable");
   });
 
-  it("keeps Update types, documents, and schemas in the public package", async () => {
+  it("keeps Update and Add agent types, documents, and schemas in the public package", async () => {
     const [metadataText, sourceIndex, verifier, cliSchemaText] =
       await Promise.all([
         readFile(join(repositoryRoot, "package.json"), "utf8"),
@@ -247,6 +275,10 @@ describe("release readiness", () => {
     expect(metadata.exports).toHaveProperty("./adapter-v2.schema.json");
     expect(metadata.exports).toHaveProperty("./cli-v1.schema.json");
     expect(verifier).toContain('"dist/update/index.d.ts"');
+    for (const area of ["planning", "execution"]) {
+      expect(sourceIndex).toContain(`export * from "./${area}/add-agent.js"`);
+      expect(verifier).toContain(`"dist/${area}/add-agent.d.ts"`);
+    }
     expect(verifier).toContain('"docs/update.md"');
     for (const definition of [
       "updatePlan",
@@ -254,6 +286,11 @@ describe("release readiness", () => {
       "updatePlanEnvelope",
       "updateReportEnvelope",
       "updateConfirmationEnvelope",
+      "addAgentPlan",
+      "addAgentReport",
+      "addAgentPlanEnvelope",
+      "addAgentReportEnvelope",
+      "addAgentConfirmationEnvelope",
     ]) {
       expect(schema.$defs).toHaveProperty(definition);
       expect(verifier).toContain(`"${definition}"`);
@@ -267,13 +304,14 @@ describe("release readiness", () => {
           "README.md",
           "SECURITY.md",
           "docs/spec.md",
-          "docs/releases/0.4.2.md",
+          "docs/releases/0.5.0.md",
           "scripts/verify-package.mjs",
         ].map((path) => readFile(join(repositoryRoot, path), "utf8")),
       );
 
-    expect(readme).toContain("npx lampwright@0.4.2");
+    expect(readme).toContain("npx lampwright@0.5.0");
     expect(readme).not.toContain("No npm version has been published yet");
+    expect(security).toContain("`0.5.x`");
     expect(security).toContain("`0.4.x`");
     expect(security).toContain("`0.3.x`");
     expect(security).toContain("`0.2.x`");
@@ -281,16 +319,17 @@ describe("release readiness", () => {
     expect(security).toContain("security/advisories/new");
     expect(specification).toContain("npx lampwright@0.1.0");
     expect(specification).not.toContain("Future published invocation");
-    expect(verifier).toContain('"docs/releases/0.4.2.md"');
+    expect(verifier).toContain('"docs/releases/0.5.0.md"');
     for (const requiredTopic of [
-      "Suspended Disable",
-      "Disabled Storage",
-      "previewEnable",
-      "availabilityEnableEntries",
-      "Eve subagent",
+      "add-agent",
+      "add-agent-installation",
+      "--dry-run",
+      "agentDestinations",
+      "createAddAgentModule",
+      "TuiAddAgentState",
       "Git-protected",
       "System Skills",
-      "GitHub `v0.4.2` release",
+      "GitHub `v0.5.0` release",
     ])
       expect(releaseNotes).toContain(requiredTopic);
   });

@@ -63,11 +63,15 @@ for (const required of [
   "dist/availability/types.d.ts",
   "dist/disabled-storage/types.d.ts",
   "dist/update/index.d.ts",
+  "dist/planning/add-agent.d.ts",
+  "dist/planning/add-agent.js",
+  "dist/execution/add-agent.d.ts",
+  "dist/execution/add-agent.js",
   "dist/tui/types.d.ts",
   "dist/testing/index.d.ts",
   "dist/testing/index.js",
   "docs/release.md",
-  "docs/releases/0.4.2.md",
+  "docs/releases/0.5.0.md",
   "docs/availability.md",
   "docs/availability-controls.md",
   "docs/disabled-storage.md",
@@ -97,6 +101,11 @@ for (const definition of [
   "updatePlanEnvelope",
   "updateReportEnvelope",
   "updateConfirmationEnvelope",
+  "addAgentPlan",
+  "addAgentReport",
+  "addAgentPlanEnvelope",
+  "addAgentReportEnvelope",
+  "addAgentConfirmationEnvelope",
 ]) {
   if (
     cliSchema.$defs === null ||

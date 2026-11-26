@@ -1,6 +1,6 @@
 {
   "name": "lampwright",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Discover, update, reversibly disable, enable, and safely remove AI agent skills.",
   "keywords": [
     "ai-agent",
@@ -53,6 +53,7 @@
     "pack:check": "npm run build && node scripts/verify-package.mjs",
     "prepack": "npm run build",
     "release:candidate": "npm run pack:check && node scripts/create-release-candidate.mjs",
+    "verify:published": "node scripts/verify-published-package.mjs",
     "test": "npm run build && vitest run",
     "typecheck": "tsc --project tsconfig.json",
     "test:linux": "node scripts/test-linux.mjs"
@@ -77,7 +78,7 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.38.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
