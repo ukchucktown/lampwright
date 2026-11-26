@@ -1,3 +1,5 @@
+import { helpLayout } from "./help.js";
+import { wrapTerminalLine as wrapPlanLine } from "./text.js";
 import {
   modalContentWidth,
   modalFrame,
@@ -310,129 +312,6 @@ function browseFrame(
   );
 }
 
-const helpTitle = "Help";
-const closeHint = "esc close";
-
-interface HelpGroup {
-  readonly label: string;
-  /** Key, effect, and the mouse action with the same effect, if any. */
-  readonly rows: readonly (readonly [string, string, string?])[];
-}
-
-/**
- * Every key, one to a line, in three aligned columns: the key, its effect, and
- * the mouse action that has the same effect. The current view starts the
- * list. Each section heading uses the same labelled rule.
- */
-function helpBody(
-  browse: Pick<TuiBrowseState, "view" | "inventory">,
-  style: TuiPaint,
-  spacing: "open" | "ruled" = "open",
-  widthLimit = Infinity,
-): readonly string[] {
-  const view = browse.view;
-  const addAgent = browse.inventory.installations.some(
-    (item) => item.agentDestinations?.length,
-  );
-  const groups: readonly HelpGroup[] = [
-    view === "trash"
-      ? {
-          label: "Trash",
-          rows: [
-            ["enter", "restore"],
-            ["p", "purge"],
-          ],
-        }
-      : view === "disabled"
-        ? {
-            label: "Disabled",
-            rows: [
-              ["e", "enable"],
-              ["u", "update"],
-            ],
-          }
-        : {
-            label: "Inventory",
-            rows: [
-              ["enter", "remove"],
-              ...(addAgent ? [["+", "add agent"] as const] : []),
-              ["u", "update"],
-              ["d", "disable"],
-            ],
-          },
-    {
-      label: "Move and select",
-      rows: [
-        ["↑↓", "move", "wheel"],
-        ["PgUp PgDn", "page"],
-        ["tab", "next pane", "click"],
-        ["space", "select", "dbl-click"],
-        ["ctrl+u", "clear selection"],
-        ["/", "search, or just type"],
-        ["ctrl+t", "next view"],
-      ],
-    },
-    {
-      label: "App",
-      rows: [
-        ["ctrl+p", "theme"],
-        ["shift+←→", "pane width"],
-        ["shift+↑↓", "detail height"],
-        [
-          "esc",
-          view === "disabled" || view === "trash" ? "Inventory" : "step back",
-        ],
-        ["q", "quit"],
-      ],
-    },
-  ];
-  const rows = groups.flatMap((group) => group.rows);
-  const width = (column: 0 | 1 | 2): number =>
-    Math.max(...rows.map((row) => [...(row[column] ?? "")].length));
-  const keyWidth = width(0) + 2;
-  const effectWidth = width(1) + 2;
-  const mouseWidth = Math.max(width(2), "mouse".length);
-  const inner = keyWidth + effectWidth + mouseWidth;
-  const dashes = (count: number): string =>
-    style.border("─".repeat(Math.max(0, count)));
-  const rule = (group: HelpGroup): string => {
-    const label = `${group.label} `;
-    // The mouse column gets its heading on the rule of the group that uses it.
-    if (!group.rows.some((row) => row[2] !== undefined))
-      return `${style.muted(label)}${dashes(inner - label.length)}`;
-    const lead = keyWidth + effectWidth - label.length - 1;
-    return `${style.muted(label)}${dashes(lead)} ${style.muted("mouse")}${
-      mouseWidth > "mouse".length
-        ? ` ${dashes(mouseWidth - "mouse".length - 1)}`
-        : ""
-    }`;
-  };
-  const narrow = widthLimit < inner;
-  return groups.flatMap((group, index) => [
-    ...(spacing === "open" && index > 0 ? [""] : []),
-    ...(narrow
-      ? wrapPlanLine(group.label, widthLimit).map(style.muted)
-      : [rule(group)]),
-    ...group.rows.flatMap(([key, effect, mouse]) => {
-      const paintEffect =
-        effect === "remove" || effect === "purge" ? style.warning : plain;
-      if (!narrow)
-        return [
-          style.title(fit(key, keyWidth)) +
-            paintEffect(fit(effect, effectWidth)) +
-            fit(mouse ?? "", mouseWidth),
-        ];
-      const description = mouse ? `${effect} (${mouse})` : effect;
-      if ([...key].length + 2 + [...description].length <= widthLimit)
-        return [style.title(key) + "  " + paintEffect(description)];
-      return [
-        ...wrapPlanLine(key, widthLimit).map(style.title),
-        ...wrapPlanLine(description, widthLimit).map(paintEffect),
-      ];
-    }),
-  ]);
-}
-
 function fullPaneLines(
   title: string,
   body: readonly string[],
@@ -452,82 +331,85 @@ function fullPaneLines(
   ];
 }
 
-function helpLayout(
-  state: Extract<TuiState, { screen: "help" }>,
-  style: TuiPaint,
-) {
-  const viewport = state.browse.model.viewport;
-  const open = helpBody(state.browse, style, "open");
-  const preferredWidth = Math.max(...open.map(visibleLength));
-  const inner = modalContentWidth(viewport, preferredWidth);
-  // At small widths, wrap the key and effect together rather than cutting off a column.
-  const openBody =
-    inner < preferredWidth
-      ? helpBody(state.browse, style, "open", inner)
-      : open;
-  let layout = modalSurface(viewport, preferredWidth, openBody.length);
-  let body = openBody;
-  if (layout.kind === "pane") {
-    body = helpBody(state.browse, style, "ruled", inner);
-    layout = modalSurface(viewport, preferredWidth, body.length);
-    if (layout.kind === "pane" && layout.width !== inner)
-      body = helpBody(state.browse, style, "ruled", layout.width);
-  }
-  const maximumOffset = Math.max(0, body.length - layout.bodyRows);
-  return { layout, body, maximumOffset };
-}
-
-export function helpScrollMetrics(
-  state: Extract<TuiState, { screen: "help" }>,
-) {
-  const { layout, maximumOffset } = helpLayout(
-    state,
-    createPaint(plainTuiTheme),
-  );
-  return { pageRows: layout.bodyRows, maximumOffset };
-}
-
 function renderHelp(
   state: Extract<TuiState, { screen: "help" }>,
   theme: TuiTheme,
 ): string {
+  const grid = helpLayout(state);
   const style = createPaint(theme);
-  const viewport = state.browse.model.viewport;
-  const { layout, body, maximumOffset } = helpLayout(state, style);
-  if (layout.kind === "overlay") {
-    const backdrop = dimFrame(browseFrame(state.browse, theme), theme);
-    return (
-      overlayPanel(
-        backdrop,
-        viewport,
-        helpTitle,
-        body,
-        closeHint,
-        layout.width,
-        style,
-      )!.join("\n") + "\n"
+  const sectionFocus = grid.focus === "sections";
+  const title = style.title("Help");
+  const heading = (sectionFocus ? style.active : style.title)(
+    grid.current.label,
+  );
+  const header = grid.split
+    ? fit(title, grid.leftWidth) + style.border("│") + heading
+    : sectionFocus
+      ? title
+      : "Help · ".length + grid.current.label.length <= grid.width
+        ? title + " · " + heading
+        : heading;
+  const out = [fit(header, grid.width)];
+  if (grid.firstBodyRow === 3)
+    out.push(
+      style.border(
+        grid.split
+          ? "─".repeat(grid.leftWidth) +
+              "┼" +
+              "─".repeat(grid.width - grid.leftWidth - 1)
+          : "─".repeat(grid.width),
+      ),
+    );
+  for (let row = 0; row < grid.pageRows; row++) {
+    const index = grid.sectionOffset + row;
+    const section = grid.sections[index];
+    const label = section
+      ? (grid.index === index ? "› " : "  ") + section.label
+      : "";
+    const left = fit(label, grid.split ? grid.leftWidth : grid.width);
+    const sectionCell =
+      grid.index === index
+        ? (sectionFocus ? style.focus : style.selected)(left)
+        : left;
+    const control = grid.controls[grid.offset + row];
+    const right = control
+      ? (control.key ? style.title(control.key) : "") +
+        (control.role ? style[control.role] : plain)(control.text)
+      : "";
+    out.push(
+      fit(
+        grid.split
+          ? sectionCell + style.border("│") + right
+          : sectionFocus
+            ? sectionCell
+            : right,
+        grid.width,
+      ),
     );
   }
-  const offset = Math.min(Math.max(0, state.scrollOffset ?? 0), maximumOffset);
-  const range = `${offset + 1}–${Math.min(body.length, offset + layout.bodyRows)} of ${body.length}`;
-  const hints = [
-    `${range} · ↑↓ scroll · PgUp/PgDn page · esc close`,
-    "↑↓ scroll · PgUp/PgDn page · esc close",
-    "↑↓ scroll · esc close",
-    "↑↓ · esc close",
-    closeHint,
-  ];
-  const hint = maximumOffset
-    ? (hints.find((text) => text.length <= layout.width) ?? closeHint)
-    : closeHint;
-  const rows = fullPaneLines(
-    helpTitle,
-    body.slice(offset, offset + layout.bodyRows),
-    hint,
-    viewport,
-    style,
-  );
-  return rows.join("\n") + "\n";
+  const range =
+    grid.maximumOffset > 0 && (grid.split || !sectionFocus)
+      ? `${grid.offset + 1}–${grid.offset + grid.pageRows} of ${grid.controls.length} · `
+      : "";
+  const direction = sectionFocus ? "→ controls" : "← sections";
+  const hint =
+    [
+      `${range}↑↓ ${sectionFocus ? "section" : "scroll"} · PgUp/PgDn page · tab switch pane · ${direction} · esc close`,
+      ...(sectionFocus
+        ? [
+            "Enter/→ controls · esc close",
+            "Enter/→ read · esc",
+            "→ controls  esc",
+          ]
+        : []),
+      `${direction} · esc close`,
+      `${direction}  esc`,
+      "esc close",
+    ].find((text) => text.length <= grid.width) ?? "esc";
+  if (grid.rows <= 1)
+    return grid.rows ? style.muted(fit(hint, grid.width)) + "\n" : "";
+  out.push(style.muted(fit(hint, grid.width)));
+  return out.join("\n") + "\n";
 }
 
 export function agentReviewLayout(
@@ -3328,33 +3210,6 @@ function wrapPlanLines(
   width: number,
 ): readonly string[] {
   return lines.flatMap((line) => wrapPlanLine(line, width));
-}
-
-function wrapPlanLine(value: string, width: number): readonly string[] {
-  if (width <= 0 || [...value].length <= width) return [value];
-  const indentation = value.match(/^\s*/u)?.[0] ?? "";
-  const result: string[] = [];
-  let remaining = value;
-
-  while ([...remaining].length > width) {
-    const characters = [...remaining];
-    const candidate = characters.slice(0, width).join("");
-    const lastSpace = candidate.search(/\s+\S*$/u);
-    const lastPathSeparator = Math.max(
-      candidate.lastIndexOf("/") + 1,
-      candidate.lastIndexOf("\\") + 1,
-    );
-    const minimumUsefulBreak = Math.max(
-      indentation.length + 1,
-      Math.floor(width / 2),
-    );
-    const preferredBreak = Math.max(lastSpace, lastPathSeparator);
-    const cut = preferredBreak >= minimumUsefulBreak ? preferredBreak : width;
-    result.push(characters.slice(0, cut).join("").trimEnd());
-    remaining = `${indentation}${characters.slice(cut).join("").trimStart()}`;
-  }
-  result.push(remaining);
-  return result;
 }
 
 function plainActionGroups(

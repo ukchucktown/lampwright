@@ -1,3 +1,4 @@
+import { helpLayout } from "./help.js";
 import { agentPickerLayout } from "./agent-picker.js";
 import { emitKeypressEvents } from "node:readline";
 import type { Interface as ReadlineInterface, Key } from "node:readline";
@@ -5,12 +6,7 @@ import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { searchLayout } from "./search.js";
-import {
-  browseTabHitboxes,
-  renderTui,
-  helpScrollMetrics,
-  resizeOnlyViewport,
-} from "./render.js";
+import { browseTabHitboxes, renderTui, resizeOnlyViewport } from "./render.js";
 import {
   createTuiTheme,
   terminalThemeDefinition,
@@ -138,15 +134,32 @@ export function mouseAction(
 ): TuiAction {
   if (resizeOnlyViewport(state)) return { kind: "noop" };
   if (state.screen === "help") {
-    if ((report.button & 64) === 0) return { kind: "noop" };
-    const { maximumOffset, pageRows } = helpScrollMetrics(state);
-    const { columns } = state.browse.model.viewport;
-    return maximumOffset > 0 &&
-      report.row >= 2 &&
-      report.row < 2 + pageRows &&
-      report.column >= 1 &&
-      report.column < columns
-      ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
+    const grid = helpLayout(state);
+    const row = report.row - grid.firstBodyRow;
+    if (
+      row < 0 ||
+      row >= grid.pageRows ||
+      report.column < 1 ||
+      report.column > grid.width ||
+      (grid.split && report.column === grid.leftWidth + 1)
+    )
+      return { kind: "noop" };
+    const pane = grid.split
+      ? report.column <= grid.leftWidth
+        ? "sections"
+        : "entries"
+      : grid.focus;
+    if ((report.button & 64) !== 0)
+      return {
+        kind: "move-pane",
+        pane,
+        delta: (report.button & 1) === 0 ? -1 : 1,
+      };
+    if (!report.pressed || (report.button & 35) !== 0) return { kind: "noop" };
+    if (pane === "entries") return { kind: "focus", pane };
+    const index = grid.sectionOffset + row;
+    return index < grid.sections.length
+      ? { kind: "point-section", index }
       : { kind: "noop" };
   }
   if (
@@ -419,7 +432,21 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "move", delta: value === "up" ? -1 : 1 };
     if (value === "pageup" || value === "pagedown")
       return { kind: "page", delta: value === "pageup" ? -1 : 1 };
-    return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
+    if (value === "in" || value === "right")
+      return { kind: "focus", pane: "entries" };
+    if (value === "out" || value === "left")
+      return { kind: "focus", pane: "sections" };
+    if (value === "tab")
+      return {
+        kind: "focus",
+        pane: state.focus === "entries" ? "sections" : "entries",
+      };
+    if (value === "quit") return { kind: "quit" };
+    if (value === "" || value === "enter" || value === "select")
+      return { kind: "select" };
+    return ["back", "cancel", "esc", "?", "q"].includes(value)
+      ? { kind: "cancel" }
+      : { kind: "noop" };
   }
   if (state.screen === "add-agent" && state.stage === "selection") {
     if (value === "" || value === "review" || value === "enter")
@@ -765,11 +792,16 @@ export function parseRawTuiAction(
       return { kind: "move", delta: key.name === "up" ? -1 : 1 };
     if (key.name === "pageup" || key.name === "pagedown")
       return { kind: "page", delta: key.name === "pageup" ? -1 : 1 };
-    return key.name === "escape" ||
-      key.name === "return" ||
-      key.name === "enter" ||
-      text === "?" ||
-      text === "q"
+    if (key.name === "left") return { kind: "focus", pane: "sections" };
+    if (key.name === "right") return { kind: "focus", pane: "entries" };
+    if (key.name === "tab")
+      return {
+        kind: "focus",
+        pane: state.focus === "entries" ? "sections" : "entries",
+      };
+    if (key.name === "return" || key.name === "enter")
+      return { kind: "select" };
+    return key.name === "escape" || text === "?" || text === "q"
       ? { kind: "cancel" }
       : { kind: "noop" };
   }

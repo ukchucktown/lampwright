@@ -177,7 +177,7 @@ usable.
 
 ### Modal frames
 
-Help, Theme, and Add agents review use `modalSurface` to choose a frame or a
+Theme and Add agents review use `modalSurface` to choose a frame or a
 full pane with space reserved for the title and footer. On a frame,
 `overlayPanel` places the muted title and footer hint two spaces inside the
 side borders. It adds a blank row above and below the body when both rows
@@ -255,28 +255,23 @@ all other conditions. No hint is below the detail pane, so the scroll mark of
 the detail pane ends at an empty line. A selection or a cleared selection gives no notice, because the
 checkboxes and the header status show the result.
 
-`?` in a browse view opens the key reference. It is a panel with a border that
-the terminal UI draws over the middle of the browse view. The browse view stays
-visible behind the panel in a dim style. The panel starts below the header and
-the key hints when the terminal has the rows.
+### Help
 
-The title is `Help`. Its first section lists the commands for the current
-view under `Inventory`, `Disabled`, or `Trash`. The other sections are
-`Move and select` and `App`. Each section starts with a muted heading and a
-horizontal rule when the shortcut columns fit. When space permits, a blank row separates the sections.
+Press `?` in Inventory, Disabled, or Trash to open Help for that view.
+The left pane lists the current view, `Move and select`, and `App`. Use the
+up and down arrows, the mouse wheel, or a click to choose a section. The
+right pane immediately shows its shortcuts. Each shortcut lists the key and
+action, followed by a short explanation. A separate line gives the mouse
+gesture when one applies.
 
-The panel has one row per key, with columns for the key, its effect, and the
-equivalent mouse action. The keys use the title style. Effects and mouse
-actions use plain text, except that `remove` and `purge` use the warning style.
-The `esc` row describes Escape in the current view. The footer says `esc close`.
+Press Enter or Right to focus the controls. The arrows scroll one line and Page Up
+and Page Down scroll one page. The wheel scrolls the pane under the pointer.
+Press Left to return to the sections, or use Tab to switch panes. When the
+panes cannot fit side by side, Help shows the focused pane at full width
+and wraps the descriptions. A click on a section opens its controls.
 
-If all shortcuts fit below the browse header, Help stays in its frame.
-It can omit the blank separators to fit a shorter pane. When the sections
-need more space, Help uses the full pane and keeps its title and close hint
-visible. Use the arrows or mouse wheel to scroll one row, or Page Up and
-Page Down to move by a page. A wide footer shows the visible row range.
-Narrow panes wrap the shortcut descriptions. Press `?`, `q`, Escape, or
-Enter to return to the same browse position.
+Help is read-only. Press Escape, `?`, or `q` to return to the same
+browse view with its focus and checked rows.
 
 Escape is the first byte of each arrow key and each function key, so the
 terminal waits for the rest of a key sequence before it reports a lone Escape.
@@ -596,7 +591,8 @@ accept `up`, `down`, `pageup`, `pagedown`, `details`, `back`, and `quit`. The
 `back` command reads the Inventory again and then returns to the Inventory
 view. Removal reports add `previous`, `next`, and `fallback`. The theme picker accepts
 `up`, `down`, `select`, `back`, and `quit`. In Help, `up`, `down`, `pageup`, and
-`pagedown` scroll the shortcuts. Enter closes Help and `quit` exits Lampwright. End-of-input cancels safely.
+`pagedown` navigate the focused pane. Use `in` to read the controls and `out`
+to return to the sections. The `back` command closes Help and `quit` exits Lampwright. End-of-input cancels safely.
 After `yes`, the line-oriented interface also renders the non-interactive
 execution screen until the final report or error is ready.
 
