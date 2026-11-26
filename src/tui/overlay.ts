@@ -57,3 +57,24 @@ export function modalFrame(
     contentTop: top + border + verticalInset,
   };
 }
+
+export function fullPaneSize(viewport: TuiViewport) {
+  const rows = Math.max(0, viewport.rows - 1);
+  return {
+    width: Math.max(0, viewport.columns - 1),
+    rows,
+    bodyRows: Math.max(0, rows - 2),
+  };
+}
+
+/** Prefer a frame that leaves the browse header visible. A full pane reserves a title and a footer. */
+export function modalSurface(
+  viewport: TuiViewport,
+  preferredWidth: number,
+  bodyRows: number,
+) {
+  const inner = modalContentWidth(viewport, preferredWidth);
+  if (modalFrame(viewport, inner, bodyRows)?.clearsHeader)
+    return { kind: "overlay" as const, width: inner, bodyRows };
+  return { kind: "pane" as const, ...fullPaneSize(viewport) };
+}

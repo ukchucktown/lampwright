@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 
 import { layout, panes } from "./browse.js";
 import { searchLayout } from "./search.js";
-import { browseTabHitboxes, renderTui } from "./render.js";
+import { browseTabHitboxes, renderTui, helpScrollMetrics } from "./render.js";
 import {
   createTuiTheme,
   terminalThemeDefinition,
@@ -131,26 +131,35 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
-  if (state.screen === "add-agent" && state.stage === "selection") {
-    const layout = agentPickerLayout(state);
-    const { firstRow, firstColumn } = layout;
-    if (
-      firstRow === null ||
-      firstColumn === null ||
-      report.column < firstColumn ||
-      report.column >= firstColumn + layout.width ||
-      report.row < firstRow ||
-      report.row >= firstRow + layout.listRows
-    )
-      return { kind: "noop" };
+  if (state.screen === "help") {
+    if ((report.button & 64) === 0) return { kind: "noop" };
+    const { maximumOffset, pageRows } = helpScrollMetrics(state);
+    const { columns } = state.browse.model.viewport;
+    return maximumOffset > 0 &&
+      report.row >= 2 &&
+      report.row < 2 + pageRows &&
+      report.column >= 1 &&
+      report.column < columns
+      ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
+      : { kind: "noop" };
+  }
+  if (
+    state.screen === "search" ||
+    (state.screen === "add-agent" && state.stage === "selection")
+  ) {
+    const hit = searchPointer(state, report);
+    if (!hit) return { kind: "noop" };
     if ((report.button & 64) !== 0)
       return { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 };
-    const index = layout.offset + report.row - firstRow;
-    return report.pressed &&
-      (report.button & 35) === 0 &&
-      index < layout.matches.length
-      ? { kind: "point-agent", index }
-      : { kind: "noop" };
+    if (!report.pressed || (report.button & 35) !== 0 || hit.index === null)
+      return { kind: "noop" };
+    if (state.screen === "add-agent") {
+      if (hit.checkbox && context.doubleClick) return { kind: "noop" };
+      if (hit.checkbox || context.doubleClick)
+        return { kind: "point-agent", index: hit.index };
+    } else if (context.doubleClick)
+      return { kind: "point-toggle", pane: "entries", index: hit.index };
+    return { kind: "point-search-result", index: hit.index };
   }
   if (
     state.screen === "plan" ||
@@ -174,28 +183,6 @@ export function mouseAction(
     return (report.button & 64) !== 0
       ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
       : { kind: "noop" };
-  if (state.screen === "search") {
-    const grid = searchLayout(state.model.viewport);
-    if (grid.compact) return { kind: "noop" };
-    if ((report.button & 64) !== 0)
-      return report.column >= 2 && report.column <= grid.leftWidth + 1
-        ? { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 }
-        : { kind: "noop" };
-    const row = report.row - grid.resultStartRow;
-    if (
-      !report.pressed ||
-      report.column < 2 ||
-      report.column > grid.leftWidth + 1 ||
-      row < 0 ||
-      row >= grid.resultRows
-    )
-      return { kind: "noop" };
-    const index = state.model.scroll + row;
-    if (index >= state.model.results.length) return { kind: "noop" };
-    if (context.doubleClick)
-      return { kind: "point-toggle", pane: "entries", index };
-    return { kind: "point-search-result", index };
-  }
   if (state.screen !== "browse") return { kind: "noop" };
   if (report.pressed && report.row === 1 && (report.button & 3) === 0) {
     const tabs = browseTabHitboxes(state);
@@ -257,6 +244,36 @@ export function mouseAction(
   return target.pane === "sections"
     ? { kind: "point-section", index: target.index }
     : { kind: "point-entry", index: target.index };
+}
+
+function searchPointer(
+  state:
+    | Extract<TuiState, { screen: "search" }>
+    | Extract<TuiState, { screen: "add-agent"; stage: "selection" }>,
+  report: MouseReport,
+) {
+  const grid = searchLayout(
+    state.screen === "search"
+      ? state.model.viewport
+      : state.browse.model.viewport,
+  );
+  const row = report.row - grid.resultStartRow;
+  if (
+    grid.compact ||
+    report.column < 2 ||
+    report.column > grid.leftWidth + 1 ||
+    row < 0 ||
+    row >= grid.resultRows
+  )
+    return null;
+  const data =
+    state.screen === "search" ? state.model : agentPickerLayout(state);
+  const count = "results" in data ? data.results.length : data.matches.length;
+  const scroll = data.scroll;
+  return {
+    index: scroll + row >= count ? null : scroll + row,
+    checkbox: report.column <= 4,
+  };
 }
 
 function inColumns(column: number, range: readonly [number, number]): boolean {
@@ -383,8 +400,13 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
       return { kind: "append-query", value: value.slice(1) };
     return { kind: "append-query", value };
   }
-  if (state.screen === "help")
+  if (state.screen === "help") {
+    if (value === "up" || value === "down")
+      return { kind: "move", delta: value === "up" ? -1 : 1 };
+    if (value === "pageup" || value === "pagedown")
+      return { kind: "page", delta: value === "pageup" ? -1 : 1 };
     return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
+  }
   if (state.screen === "add-agent" && state.stage === "selection") {
     if (value === "" || value === "review" || value === "enter")
       return { kind: "select" };
@@ -615,28 +637,19 @@ class RawTuiTerminal implements TuiTerminal {
       (report.button & 3) !== 0
     )
       return false;
-    if (state.screen === "search" && searchLayout(state.model.viewport).compact)
-      return false;
+    const selection =
+      state.screen === "search" ||
+      (state.screen === "add-agent" && state.stage === "selection")
+        ? searchPointer(state, report)
+        : null;
     const pointed = pointedRow(state, report);
-    const searchRow =
-      state.screen === "search" &&
-      report.column >= 2 &&
-      report.column <= searchLayout(state.model.viewport).leftWidth + 1
-        ? report.row -
-          searchLayout(state.model.viewport).resultStartRow +
-          state.model.scroll
-        : -1;
-    if (
-      pointed === null &&
-      (searchRow < 0 ||
-        state.screen !== "search" ||
-        searchRow >= state.model.results.length)
-    )
-      return false;
     const target =
-      pointed === null
-        ? `search:${String(searchRow)}`
-        : `${pointed.pane}:${String(pointed.index)}`;
+      selection?.index != null
+        ? `${state.screen}:${selection.index}${state.screen === "add-agent" && selection.checkbox ? ":box" : ""}`
+        : pointed
+          ? `${pointed.pane}:${pointed.index}`
+          : null;
+    if (target === null) return false;
     const now = Date.now();
     const repeat =
       target === this.lastClick.target &&
@@ -689,7 +702,11 @@ export function parseRawTuiAction(
   key: Key,
 ): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
-  if (state.screen === "help")
+  if (state.screen === "help") {
+    if (key.name === "up" || key.name === "down")
+      return { kind: "move", delta: key.name === "up" ? -1 : 1 };
+    if (key.name === "pageup" || key.name === "pagedown")
+      return { kind: "page", delta: key.name === "pageup" ? -1 : 1 };
     return key.name === "escape" ||
       key.name === "return" ||
       key.name === "enter" ||
@@ -697,6 +714,7 @@ export function parseRawTuiAction(
       text === "q"
       ? { kind: "cancel" }
       : { kind: "noop" };
+  }
   if (
     state.screen !== "search" &&
     !(state.screen === "add-agent" && state.stage === "selection") &&

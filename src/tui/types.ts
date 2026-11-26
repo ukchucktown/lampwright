@@ -327,6 +327,7 @@ export interface TuiAddAgentInstallationState {
 }
 
 export interface TuiAddAgentPickerModel {
+  readonly scroll?: number;
   readonly previous: TuiAddAgentInstallationState | null;
   readonly agents: readonly string[];
   readonly installedAgents: readonly string[];
@@ -366,6 +367,8 @@ export interface TuiThemeState {
 
 /** The key reference, drawn over the browse view it was opened from. */
 export interface TuiHelpState {
+  /** First visible shortcut row in full-pane Help. Defaults to zero for embedding hosts. */
+  readonly scrollOffset?: number;
   readonly screen: "help";
   readonly browse: TuiBrowseSnapshot;
 }

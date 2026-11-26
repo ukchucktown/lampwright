@@ -9,7 +9,7 @@ import type {
 const SCROLL_MARGIN = 1;
 /** Header, top border, prompt, split rule, a result, bottom border, and status. */
 const SEARCH_RESULT_START_ROW = 6;
-const MINIMUM_SEARCH_ROWS = SEARCH_RESULT_START_ROW + 3;
+const MINIMUM_SEARCH_ROWS = 8;
 
 export interface TuiSearchLayout {
   readonly rows: number;
@@ -125,7 +125,7 @@ export function reduceSearch(
         index: step(next.index, next.results.length, command.delta),
       });
     case "focus":
-      return settle({ ...next, index: command.index });
+      return settle({ ...next, index: command.index }, 0);
     case "page":
       return settle({
         ...next,
@@ -166,7 +166,12 @@ export function searchLayout(viewport: TuiViewport): TuiSearchLayout {
   // The search grid is enclosed on both sides and divided in the middle.
   // Keep the cell widths independent from those three structural columns so
   // rendering, paging, and pointer hit-testing use the same geometry.
-  const paneWidth = Math.max(0, usable - 3);
+  const singleColumn = columns < 40;
+  const paneWidth = Math.max(0, usable - (singleColumn ? 2 : 3));
+  const resultStartRow =
+    rows === MINIMUM_SEARCH_ROWS
+      ? SEARCH_RESULT_START_ROW - 1
+      : SEARCH_RESULT_START_ROW;
   const leftWidth = Math.min(
     paneWidth,
     Math.max(0, Math.floor(paneWidth * 0.45)),
@@ -175,13 +180,13 @@ export function searchLayout(viewport: TuiViewport): TuiSearchLayout {
     rows,
     columns,
     usable,
-    leftWidth,
-    rightWidth: Math.max(0, paneWidth - leftWidth),
-    resultStartRow: SEARCH_RESULT_START_ROW,
+    leftWidth: singleColumn ? paneWidth : leftWidth,
+    rightWidth: singleColumn ? 0 : Math.max(0, paneWidth - leftWidth),
+    resultStartRow,
     compact: rows < MINIMUM_SEARCH_ROWS || columns < 20,
     // The header, prompt frame, and footer surround the matching rows. Keep
     // this shared with paging and pointer hit-testing.
-    resultRows: Math.max(1, rows - (SEARCH_RESULT_START_ROW + 2)),
+    resultRows: Math.max(1, rows - (resultStartRow + 2)),
   };
 }
 
@@ -223,19 +228,34 @@ function toggle(model: TuiSearchModel, index: number): TuiSearchModel {
   return { ...model, staged };
 }
 
-function settle(model: TuiSearchModel): TuiSearchModel {
-  const index = Math.min(
-    Math.max(0, model.index),
-    Math.max(0, model.results.length - 1),
-  );
-  const rows = searchRows(model.viewport);
-  const maximum = Math.max(0, model.results.length - rows);
-  let scroll = Math.min(Math.max(0, model.scroll), maximum);
-  if (index < scroll + SCROLL_MARGIN)
-    scroll = Math.max(0, index - SCROLL_MARGIN);
-  if (index >= scroll + rows - SCROLL_MARGIN)
-    scroll = Math.min(maximum, index - rows + SCROLL_MARGIN + 1);
-  return { ...model, index, scroll };
+function settle(model: TuiSearchModel, margin = SCROLL_MARGIN): TuiSearchModel {
+  return {
+    ...model,
+    ...searchPosition(
+      model.index,
+      model.scroll,
+      model.results.length,
+      searchRows(model.viewport),
+      margin,
+    ),
+  };
+}
+
+export function searchPosition(
+  focus: number,
+  first: number,
+  count: number,
+  rows: number,
+  preferredMargin = SCROLL_MARGIN,
+) {
+  const index = step(0, count, focus);
+  const maximum = Math.max(0, count - rows);
+  const margin = Math.min(preferredMargin, Math.floor((rows - 1) / 2));
+  let scroll = Math.min(Math.max(0, first), maximum);
+  if (index < scroll + margin) scroll = Math.max(0, index - margin);
+  if (index >= scroll + rows - margin)
+    scroll = Math.min(maximum, index - rows + margin + 1);
+  return { index, scroll };
 }
 
 function step(index: number, length: number, delta: number): number {

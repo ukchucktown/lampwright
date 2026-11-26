@@ -1,7 +1,12 @@
-import { modalContentWidth, modalFrame, modalInset } from "./overlay.js";
+import {
+  modalContentWidth,
+  modalFrame,
+  modalInset,
+  modalSurface,
+  fullPaneSize,
+} from "./overlay.js";
 import {
   agentLabel,
-  agentModalSize,
   agentPickerLayout,
   addAgentEntry,
 } from "./agent-picker.js";
@@ -30,7 +35,7 @@ import {
   panes,
   sharedPathCount,
 } from "./browse.js";
-import { searchLayout } from "./search.js";
+import { searchLayout, type TuiSearchLayout } from "./search.js";
 import {
   terminalTheme,
   plainTuiTheme,
@@ -232,7 +237,8 @@ interface HelpGroup {
 function helpBody(
   browse: Pick<TuiBrowseState, "view" | "inventory">,
   style: TuiPaint,
-  spacing: "open" | "ruled" | "bare" = "open",
+  spacing: "open" | "ruled" = "open",
+  widthLimit = Infinity,
 ): readonly string[] {
   const view = browse.view;
   const addAgent = browse.inventory.installations.some(
@@ -311,14 +317,84 @@ function helpBody(
         : ""
     }`;
   };
+  const narrow = widthLimit < inner;
   return groups.flatMap((group, index) => [
     ...(spacing === "open" && index > 0 ? [""] : []),
-    ...(spacing !== "bare" || index === 0 ? [rule(group)] : []),
-    ...group.rows.map(
-      ([key, effect, mouse]) =>
-        `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
-    ),
+    ...(narrow
+      ? wrapPlanLine(group.label, widthLimit).map(style.muted)
+      : [rule(group)]),
+    ...group.rows.flatMap(([key, effect, mouse]) => {
+      const paintEffect =
+        effect === "remove" || effect === "purge" ? style.warning : plain;
+      if (!narrow)
+        return [
+          style.title(fit(key, keyWidth)) +
+            paintEffect(fit(effect, effectWidth)) +
+            fit(mouse ?? "", mouseWidth),
+        ];
+      const description = mouse ? `${effect} (${mouse})` : effect;
+      if ([...key].length + 2 + [...description].length <= widthLimit)
+        return [style.title(key) + "  " + paintEffect(description)];
+      return [
+        ...wrapPlanLine(key, widthLimit).map(style.title),
+        ...wrapPlanLine(description, widthLimit).map(paintEffect),
+      ];
+    }),
   ]);
+}
+
+function fullPaneLines(
+  title: string,
+  body: readonly string[],
+  hint: string,
+  viewport: TuiBrowseState["model"]["viewport"],
+  style: TuiPaint,
+): readonly string[] {
+  const { rows: height, width, bodyRows } = fullPaneSize(viewport);
+  if (height < 2) return height ? [style.muted(fit(hint, width))] : [];
+  const rows = Array.from({ length: bodyRows }, (_, index) =>
+    fit(body[index] ?? "", width),
+  );
+  return [
+    style.title(fit(title, width)),
+    ...rows,
+    style.muted(fit(hint, width)),
+  ];
+}
+
+function helpLayout(
+  state: Extract<TuiState, { screen: "help" }>,
+  style: TuiPaint,
+) {
+  const viewport = state.browse.model.viewport;
+  const open = helpBody(state.browse, style, "open");
+  const preferredWidth = Math.max(...open.map(visibleLength));
+  const inner = modalContentWidth(viewport, preferredWidth);
+  // At small widths, wrap the key and effect together rather than cutting off a column.
+  const openBody =
+    inner < preferredWidth
+      ? helpBody(state.browse, style, "open", inner)
+      : open;
+  let layout = modalSurface(viewport, preferredWidth, openBody.length);
+  let body = openBody;
+  if (layout.kind === "pane") {
+    body = helpBody(state.browse, style, "ruled", inner);
+    layout = modalSurface(viewport, preferredWidth, body.length);
+    if (layout.kind === "pane" && layout.width !== inner)
+      body = helpBody(state.browse, style, "ruled", layout.width);
+  }
+  const maximumOffset = Math.max(0, body.length - layout.bodyRows);
+  return { layout, body, maximumOffset };
+}
+
+export function helpScrollMetrics(
+  state: Extract<TuiState, { screen: "help" }>,
+) {
+  const { layout, maximumOffset } = helpLayout(
+    state,
+    createPaint(plainTuiTheme),
+  );
+  return { pageRows: layout.bodyRows, maximumOffset };
 }
 
 function renderHelp(
@@ -327,109 +403,124 @@ function renderHelp(
 ): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const frame = dimFrame(browseFrame(state.browse, theme), theme);
-  const panel = (spacing: "open" | "ruled" | "bare") => {
-    const body = helpBody(state.browse, style, spacing);
-    const inner = modalContentWidth(
-      viewport,
-      Math.max(...body.map(visibleLength)),
+  const { layout, body, maximumOffset } = helpLayout(state, style);
+  if (layout.kind === "overlay") {
+    const backdrop = dimFrame(browseFrame(state.browse, theme), theme);
+    return (
+      overlayPanel(
+        backdrop,
+        viewport,
+        helpTitle,
+        body,
+        closeHint,
+        layout.width,
+        style,
+      )!.join("\n") + "\n"
     );
-    // Use tighter section spacing before the frame covers a browse header row.
-    if (
-      spacing !== "bare" &&
-      !modalFrame(viewport, inner, body.length)?.clearsHeader
-    )
-      return null;
-    return overlayPanel(
-      frame,
-      viewport,
-      helpTitle,
-      body,
-      closeHint,
-      inner,
-      style,
-    );
-  };
-  // A short terminal gives up the empty rows between the groups first, then
-  // the group rules.
-  const lines =
-    panel("open") ??
-    panel("ruled") ??
-    panel("bare") ??
-    // Too small for a panel: the keys take the whole screen.
-    [
-      style.title(helpTitle),
-      ...helpBody(state.browse, style, "bare").slice(
-        0,
-        Math.max(0, viewport.rows - 3),
-      ),
-      style.muted(closeHint),
-    ]
-      .slice(0, Math.max(1, viewport.rows - 1))
-      .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
-  return `${lines.join("\n")}\n`;
+  }
+  const offset = Math.min(Math.max(0, state.scrollOffset ?? 0), maximumOffset);
+  const range = `${offset + 1}–${Math.min(body.length, offset + layout.bodyRows)} of ${body.length}`;
+  const hints = [
+    `${range} · ↑↓ scroll · PgUp/PgDn page · esc close`,
+    "↑↓ scroll · PgUp/PgDn page · esc close",
+    "↑↓ scroll · esc close",
+    "↑↓ · esc close",
+    closeHint,
+  ];
+  const hint = maximumOffset
+    ? (hints.find((text) => text.length <= layout.width) ?? closeHint)
+    : closeHint;
+  const rows = fullPaneLines(
+    helpTitle,
+    body.slice(offset, offset + layout.bodyRows),
+    hint,
+    viewport,
+    style,
+  );
+  return rows.join("\n") + "\n";
 }
 
-export function addAgentReviewLines(
+export function agentReviewLayout(
   state: Extract<TuiAddAgentState, { stage: "result" | "review" }>,
-): readonly string[] {
-  const { width } = agentModalSize(state);
-  if (state.stage === "result")
-    return wrapPlanLines(
-      [
-        state.report.message,
-        ...state.report.results.flatMap((result) => [
-          "",
-          `${result.status} · ${result.agents.join(", ")}`,
-          result.destination ?? "",
-          result.message,
-        ]),
-      ],
-      width,
-    );
-  const plan = state.plan;
+) {
+  const viewport = state.browse.model.viewport;
   const scope = state.installation.scope;
-  return wrapPlanLines(
-    [
-      `Selected: ${plan.selectedAgents.join(", ")}`,
-      `Scope: ${scope.kind === "workspace" ? scope.workspacePath : scope.kind}`,
-      `Source: ${state.installation.location.path}`,
-      ...(plan.block ? [`Blocked: ${plan.block}`] : []),
-      ...plan.destinations.flatMap((item) => [
-        "",
-        `${item.action === "link" ? "Create link" : item.action} · ${item.agents.join(", ") || item.agent}`,
-        item.destination ?? "Destination unavailable",
-        ...item.directories.map((path) => `Create directory: ${path}`),
-        ...(item.reason ? [item.reason] : []),
-      ]),
-    ],
-    width,
+  const paragraphs =
+    state.stage === "result"
+      ? [
+          state.report.message,
+          ...state.report.results.flatMap((result) => [
+            "",
+            `${result.status} · ${result.agents.join(", ")}`,
+            result.destination ?? "",
+            result.message,
+          ]),
+        ]
+      : [
+          `Selected: ${state.plan.selectedAgents.join(", ")}`,
+          `Scope: ${scope.kind === "workspace" ? scope.workspacePath : scope.kind}`,
+          `Source: ${state.installation.location.path}`,
+          ...(state.plan.block ? [`Blocked: ${state.plan.block}`] : []),
+          ...state.plan.destinations.flatMap((item) => [
+            "",
+            `${item.action === "link" ? "Create link" : item.action} · ${item.agents.join(", ") || item.agent}`,
+            item.destination ?? "Destination unavailable",
+            ...item.directories.map((path) => `Create directory: ${path}`),
+            ...(item.reason ? [item.reason] : []),
+          ]),
+        ];
+  const inner = modalContentWidth(viewport, 70);
+  const preferred = wrapPlanLines(paragraphs, inner);
+  // Size the frame for the content before comparing it to the available rows.
+  const surface = modalSurface(
+    viewport,
+    70,
+    Math.min(18, preferred.length) + (preferred.length > 18 ? 1 : 0),
   );
+  const lines =
+    surface.kind === "pane"
+      ? wrapPlanLines(paragraphs, surface.width)
+      : preferred;
+  const pageRows =
+    lines.length > surface.bodyRows
+      ? Math.max(1, surface.bodyRows - 1)
+      : surface.bodyRows;
+  return {
+    surface,
+    lines,
+    pageRows,
+    maximumOffset: Math.max(0, lines.length - pageRows),
+  };
 }
 
 function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const { compact, width, reviewRows } = agentModalSize(state);
-  if (compact)
+  if (state.stage === "selection") return renderAgentSearch(state, style);
+  if (searchLayout(viewport).compact)
     return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
+  let surface: ReturnType<typeof modalSurface>;
   let body: readonly string[];
   let hint: string;
   if (state.stage === "execution") {
-    body = [style.info("Applying and verifying agent links…")];
-    hint = "";
-  } else if (state.stage === "review" || state.stage === "result") {
-    const lines = addAgentReviewLines(state);
-    const offset = Math.min(
-      state.scrollOffset,
-      Math.max(0, lines.length - reviewRows),
+    const message = "Applying and verifying agent links…";
+    surface = modalSurface(
+      viewport,
+      70,
+      wrapPlanLine(message, modalContentWidth(viewport, 70)).length,
     );
-    body = lines.slice(offset, offset + reviewRows);
-    if (lines.length > reviewRows)
+    body = wrapPlanLine(message, surface.width).map(style.info);
+    hint = "";
+  } else {
+    const layout = agentReviewLayout(state);
+    surface = layout.surface;
+    const offset = Math.min(state.scrollOffset, layout.maximumOffset);
+    body = layout.lines.slice(offset, offset + layout.pageRows);
+    if (layout.maximumOffset > 0)
       body = [
         ...body,
         style.muted(
-          `${offset + 1}–${offset + body.length} of ${lines.length} · ↑↓ scroll`,
+          `${offset + 1}–${offset + body.length} of ${layout.lines.length} · ↑↓ scroll`,
         ),
       ];
     hint =
@@ -437,105 +528,24 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
         ? "esc inventory"
         : state.plan.block
           ? "esc back"
-          : "y confirm · esc back";
-  } else {
-    const picker = state.picker;
-    const {
-      matches,
-      installedMatches,
-      emptyMessage,
-      offset,
-      listRows,
-      hint: pickerHint,
-      shortcuts,
-    } = agentPickerLayout(state);
-    const options = matches
-      .slice(offset, offset + listRows)
-      .map((agent, index) => {
-        const focused = picker.index === offset + index;
-        const selected = picker.selectedAgents.has(agent);
-        const mark = selected ? "[x]" : "[ ]";
-        const line = fit(
-          `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}`,
-          width,
-        );
-        return focused
-          ? style.focus(line)
-          : selected
-            ? style.selected(line)
-            : line;
-      });
-    if (!matches.length) {
-      const explanation = wrapPlanLine(emptyMessage, width);
-      if (explanation.length <= listRows)
-        options.push(...explanation.map(style.muted));
-      else {
-        const compact = installedMatches.length
-          ? "Already installed"
-          : !picker.agents.length && !picker.query.trim()
-            ? width >= 20
-              ? "All agents installed"
-              : "All installed"
-            : "No matches";
-        options.push(
-          style.muted(compact.length <= width ? compact : "Installed"),
-        );
-      }
-    }
-    while (options.length < listRows) options.push("");
-    const installedCount =
-      !picker.agents.length && !picker.query.trim()
-        ? picker.installedAgents.length
-        : installedMatches.length &&
-            !matches.length &&
-            !picker.selectedAgents.size
-          ? installedMatches.length
-          : null;
-    const matchCount = installedMatches.length
-      ? `${matches.length} to add · ${installedMatches.length} installed`
-      : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
-    const count =
-      installedCount !== null
-        ? style.muted(fit(`${installedCount} installed`, width))
-        : fitStyledSegments(
-            [
-              {
-                text: `${picker.selectedAgents.size} selected`,
-                paint: picker.selectedAgents.size
-                  ? style.selected
-                  : style.muted,
-              },
-              { text: ` · ${matchCount}`, paint: style.muted },
-            ],
-            width,
-            style.muted,
-          );
-    body = [
-      searchPrompt(picker.query, "type an agent name", width, style),
-      count,
-      ...options,
-      ...shortcuts.map((line) => style.muted(fit(line, width))),
-    ];
-    hint = pickerHint;
+          : surface.width >= 20
+            ? "y confirm · esc back"
+            : "y yes · esc back";
   }
-  const title = `${state.stage === "result" ? "Add agent results" : state.stage === "selection" ? "Add agents" : "Review agents"} · ${state.installation.skill.name}`;
-  const frame = overlayPanel(
-    dimFrame(browseFrame(state.browse, theme), theme),
-    viewport,
-    title,
-    body,
-    hint,
-    width,
-    style,
-  );
-  if (frame) return frame.join("\n") + "\n";
-  return (
-    [
-      fit(title, viewport.columns - 1),
-      ...body.slice(0, viewport.rows - 3),
-      fit(hint, viewport.columns - 1),
-    ].join("\n") + "\n"
-  );
+  const title = `${state.stage === "result" ? "Add agent results" : "Review agents"} · ${state.installation.skill.name}`;
+  const lines =
+    surface.kind === "pane"
+      ? fullPaneLines(title, body, hint, viewport, style)
+      : overlayPanel(
+          dimFrame(browseFrame(state.browse, theme), theme),
+          viewport,
+          title,
+          body,
+          hint,
+          surface.width,
+          style,
+        )!;
+  return lines.join("\n") + "\n";
 }
 
 function renderAddAgentInstallation(
@@ -545,19 +555,25 @@ function renderAddAgentInstallation(
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
   const { rows, columns } = viewport;
-  const inner = modalContentWidth(viewport, 70);
   if (rows < 6 || columns < 18)
     return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
-  const height = Math.max(1, rows - 5);
-  const blocks = state.installations.map((item, index) => {
-    const focused = index === state.index;
-    return wrapPlanLine(
-      `${focused ? "›" : " "} ${item.scope.kind}  ${item.location.path}`,
-      inner,
-    ).map((line) =>
-      focused ? style.focus(fit(line, inner)) : fit(line, inner),
-    );
-  });
+  const options = (width: number) =>
+    state.installations.map((item, index) => {
+      const focused = index === state.index;
+      return wrapPlanLine(
+        `${focused ? "›" : " "} ${item.scope.kind}  ${item.location.path}`,
+        width,
+      ).map((line) =>
+        focused ? style.focus(fit(line, width)) : fit(line, width),
+      );
+    });
+  const initialWidth = modalContentWidth(viewport, 70);
+  const preferred = options(initialWidth);
+  const count = preferred.reduce((n, block) => n + block.length, 0);
+  const surface = modalSurface(viewport, 70, Math.min(18, count));
+  const inner = surface.width;
+  const height = Math.max(1, surface.bodyRows);
+  const blocks = surface.kind === "pane" ? options(inner) : preferred;
   const lines = blocks.flat();
   const focusedLine = blocks
     .slice(0, state.index)
@@ -574,22 +590,27 @@ function renderAddAgentInstallation(
     ),
   );
   const title = `Choose an Installation — ${state.installations[state.index]!.skill.name}`;
-  const hint = "↑↓ choose Installation · enter choose agent · esc cancel";
+  const hint =
+    [
+      "↑↓ choose Installation · enter choose agent · esc cancel",
+      "enter choose agent · esc cancel",
+      "enter use · esc back",
+      "enter · esc",
+    ].find((label) => label.length <= inner) ?? "esc";
   const body = lines.slice(offset, offset + height);
-  const overlay = overlayPanel(
-    dimFrame(browseFrame(state.browse, theme), theme),
-    viewport,
-    title,
-    body,
-    hint,
-    inner,
-    style,
-  );
-  return (
-    (
-      overlay ?? [fit(title, columns - 1), ...body, fit(hint, columns - 1)]
-    ).join("\n") + "\n"
-  );
+  const frame =
+    surface.kind === "overlay"
+      ? overlayPanel(
+          dimFrame(browseFrame(state.browse, theme), theme),
+          viewport,
+          title,
+          body,
+          hint,
+          inner,
+          style,
+        )!
+      : fullPaneLines(title, body, hint, viewport, style);
+  return frame.join("\n") + "\n";
 }
 
 /**
@@ -606,18 +627,18 @@ function renderThemePicker(
   const choice = state.choices[state.index];
   const label = (item: (typeof state.choices)[number]): string =>
     `${item.name}${item.source === "custom" ? "  custom" : ""}${item.problem === null ? "" : "  not usable"}`;
-  const inner = modalContentWidth(
-    viewport,
-    Math.max(
-      48,
-      ...state.choices.map((item) => [...label(item)].length + 2),
-      [...(state.notice ?? choice?.problem ?? "")].length,
-    ),
+  const preferredWidth = Math.max(
+    48,
+    ...state.choices.map((item) => [...label(item)].length + 2),
+    [...(state.notice ?? choice?.problem ?? "")].length,
   );
-  const listRows = Math.max(
-    1,
-    Math.min(state.choices.length, viewport.rows - 10),
-  );
+  const preferredListRows = Math.max(1, Math.min(18, state.choices.length));
+  const surface = modalSurface(viewport, preferredWidth, preferredListRows + 2);
+  const inner = surface.width;
+  const listRows =
+    surface.kind === "overlay"
+      ? preferredListRows
+      : Math.max(1, Math.min(state.choices.length, surface.bodyRows - 1));
   const offset = Math.min(
     Math.max(0, state.index - Math.floor(listRows / 2)),
     Math.max(0, state.choices.length - listRows),
@@ -653,23 +674,30 @@ function renderThemePicker(
             );
   const body = [
     ...rows,
-    ...(message ? [...(rows.length ? [""] : []), message] : []),
+    ...(message
+      ? [...(surface.kind === "overlay" && rows.length ? [""] : []), message]
+      : []),
   ];
   if (!body.length) body.push(style.muted("No themes available."));
-  const hint = "↑↓ preview · enter use and save · esc cancel";
+  const hint =
+    [
+      "↑↓ preview · enter use and save · esc cancel",
+      "enter use · esc cancel",
+      "enter use · esc",
+      "esc cancel",
+    ].find((text) => text.length <= inner) ?? "esc";
   const lines =
-    overlayPanel(
-      browseFrame(state.browse, theme),
-      viewport,
-      "Theme",
-      body,
-      hint.length <= inner ? hint : "enter use · esc cancel",
-      inner,
-      style,
-    ) ??
-    [style.title("Lampwright — Theme"), ...body, style.muted(hint)]
-      .slice(0, Math.max(1, viewport.rows - 1))
-      .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
+    surface.kind === "overlay"
+      ? overlayPanel(
+          browseFrame(state.browse, theme),
+          viewport,
+          "Theme",
+          body,
+          hint,
+          inner,
+          style,
+        )!
+      : fullPaneLines("Theme", body, hint, viewport, style);
   return `${lines.join("\n")}\n`;
 }
 
@@ -2278,121 +2306,269 @@ function searchPrompt(
   );
 }
 
-function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
-  const style = createPaint(theme);
-  const { model } = state;
-  const grid = searchLayout(model.viewport);
-  const { usable, resultRows: rows, leftWidth: left, rightWidth: right } = grid;
+interface SearchSurface {
+  readonly title: string;
+  readonly context: string;
+  readonly selectedCount: number;
+  readonly selectionLabel: string;
+  readonly hints: readonly (readonly [string, string])[];
+  readonly query: string;
+  readonly placeholder: string;
+  readonly index: number;
+  readonly scroll: number;
+  readonly result: (
+    index: number,
+  ) => { label: string; marker: string; selected: boolean } | undefined;
+  readonly previewTitle: string | undefined;
+  readonly preview: readonly string[];
+  readonly status: string;
+  readonly warning?: boolean;
+}
+
+function renderSearchSurface(
+  grid: TuiSearchLayout,
+  surface: SearchSurface,
+  style: TuiPaint,
+): string {
+  const { usable, leftWidth: left, rightWidth: right } = grid;
   if (grid.compact)
     return [
-      style.title(fit("Lampwright", usable)),
+      style.title(fit(surface.title, usable)),
       style.warning(fit("Resize the terminal", usable)),
     ]
-      .slice(0, Math.max(0, model.viewport.rows - 1))
+      .slice(0, Math.max(0, grid.rows - 1))
       .join("\n");
-  const focused = model.results[model.index];
-  const preview =
-    focused === undefined
-      ? []
-      : [
-          `Owner: ${focused.entry.owner}`,
-          `Category: ${focused.category}`,
-          `Exposure: ${focused.entry.exposedTo.join(", ") || "none"}`,
-          "",
-          ...wrapPlanLine(
-            focused.entry.description ?? "No description.",
-            right,
-          ),
-          "",
-          ...focused.entry.paths.flatMap((path) =>
-            wrapPlanLine(`Path: ${path}`, right),
-          ),
-        ];
   const out = [
     fitStyledSegments(
       [
-        { text: "Lampwright", paint: style.title },
-        { text: " search  ", paint: style.muted },
+        { text: surface.title, paint: style.title },
+        { text: surface.context, paint: style.muted },
         {
-          text:
-            model.staged.size === 0
-              ? "nothing staged"
-              : `${String(model.staged.size)} staged`,
-          paint: model.staged.size === 0 ? style.muted : style.selected,
+          text: surface.selectionLabel,
+          paint: surface.selectedCount ? style.selected : style.muted,
         },
       ],
       usable,
       style.muted,
     ),
     fitStyledSegments(
-      [
-        { text: "↑↓", paint: style.title },
-        { text: " move · ", paint: style.muted },
-        { text: "space", paint: style.title },
-        { text: " stage · ", paint: style.muted },
-        { text: "ctrl+a", paint: style.title },
-        { text: " all · ", paint: style.muted },
-        { text: "enter", paint: style.title },
-        { text: " done · ", paint: style.muted },
-        { text: "esc", paint: style.title },
-        { text: " cancel · ", paint: style.muted },
-        { text: "ctrl+u", paint: style.title },
-        { text: " clear · ", paint: style.muted },
-        { text: "ctrl+c", paint: style.title },
-        { text: " quit", paint: style.muted },
-      ],
+      surface.hints.flatMap(([key, label], index) => [
+        { text: key, paint: style.title },
+        {
+          text:
+            (label ? " " + label : "") +
+            (index + 1 < surface.hints.length ? " · " : ""),
+          paint: style.muted,
+        },
+      ]),
       usable,
       style.muted,
     ),
-    style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`),
-    `${style.border("│")}${searchPrompt(model.query, "type a name regex", Math.max(0, usable - 2), style)}${style.border("│")}`,
-    style.border(`├${"─".repeat(left)}┬${"─".repeat(right)}┤`),
+    ...(grid.resultStartRow === 6
+      ? [style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`)]
+      : []),
+    `${style.border("│")}${searchPrompt(surface.query, surface.placeholder, usable - 2, style)}${style.border("│")}`,
+    style.border(
+      `├${"─".repeat(left)}${right ? "┬" + "─".repeat(right) : ""}┤`,
+    ),
   ];
-  for (let row = 0; row < rows; row += 1) {
-    const index = model.scroll + row;
-    const result = model.results[index];
-    const marker =
-      result === undefined
-        ? "   "
-        : !result.selectable
-          ? " - "
-          : result.existing
-            ? "[x]"
-            : model.staged.has(result.entry.key)
-              ? "[+]"
-              : "[ ]";
-    const text = result === undefined ? "" : `${marker} ${result.entry.name}`;
-    const leftCell =
-      index === model.index
-        ? style.focus(fit(text, left))
-        : result !== undefined && model.staged.has(result.entry.key)
-          ? style.selected(fit(text, left))
-          : fit(text, left);
-    const rightCell =
-      row === 0 && focused !== undefined
-        ? style.active(fit(focused.entry.name, right))
-        : row > 0 && preview[row - 1] !== undefined
-          ? style.muted(fit(preview[row - 1]!, right))
+  for (let row = 0; row < grid.resultRows; row++) {
+    const index = surface.scroll + row;
+    const result = surface.result(index);
+    const text = fit(result ? `${result.marker} ${result.label}` : "", left);
+    const cell =
+      result && index === surface.index
+        ? style.focus(text)
+        : result?.selected
+          ? style.selected(text)
+          : text;
+    const details =
+      row === 0 && surface.previewTitle !== undefined
+        ? style.active(fit(surface.previewTitle, right))
+        : row > 0 && surface.preview[row - 1] !== undefined
+          ? style.muted(fit(surface.preview[row - 1]!, right))
           : fit("", right);
     out.push(
-      `${style.border("│")}${leftCell}${style.border("│")}${rightCell}${style.border("│")}`,
+      style.border("│") +
+        cell +
+        (right ? style.border("│") + details : "") +
+        style.border("│"),
     );
   }
-  out.push(style.border(`└${"─".repeat(left)}┴${"─".repeat(right)}┘`));
   out.push(
-    model.matchError === null
-      ? style.muted(
-          fit(
-            model.notice ??
-              `matching ${String(model.results.length)} ${
-                model.results.length === 1 ? "Skill" : "Skills"
-              }${model.query === "" ? " · all Skills" : ""} · result=${String(model.results.length === 0 ? 0 : model.index + 1)}/${String(model.results.length)}`,
-            usable,
-          ),
-        )
-      : style.warning(fit(model.matchError, usable)),
+    style.border(
+      `└${"─".repeat(left)}${right ? "┴" + "─".repeat(right) : ""}┘`,
+    ),
+    (surface.warning ? style.warning : style.muted)(
+      fit(surface.status, usable),
+    ),
   );
   return out.join("\n");
+}
+
+function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
+  const { model } = state;
+  const grid = searchLayout(model.viewport);
+  const focused = model.results[model.index];
+  return renderSearchSurface(
+    grid,
+    {
+      title: "Lampwright",
+      context: " search  ",
+      selectedCount: model.staged.size,
+      selectionLabel: model.staged.size
+        ? `${model.staged.size} staged`
+        : "nothing staged",
+      hints: [
+        ["↑↓", "move"],
+        ["space", "stage"],
+        ["ctrl+a", "all"],
+        ["enter", "done"],
+        ["esc", "cancel"],
+        ["ctrl+u", "clear"],
+        ["ctrl+c", "quit"],
+      ],
+      query: model.query,
+      placeholder: "type a name regex",
+      index: model.index,
+      scroll: model.scroll,
+      result(index) {
+        const result = model.results[index];
+        if (!result) return undefined;
+        const selected = model.staged.has(result.entry.key);
+        return {
+          label: result.entry.name,
+          selected,
+          marker: !result.selectable
+            ? " - "
+            : result.existing
+              ? "[x]"
+              : selected
+                ? "[+]"
+                : "[ ]",
+        };
+      },
+      previewTitle: focused?.entry.name,
+      preview: focused
+        ? [
+            `Owner: ${focused.entry.owner}`,
+            `Category: ${focused.category}`,
+            `Exposure: ${focused.entry.exposedTo.join(", ") || "none"}`,
+            "",
+            ...wrapPlanLine(
+              focused.entry.description ?? "No description.",
+              grid.rightWidth,
+            ),
+            "",
+            ...focused.entry.paths.flatMap((path) =>
+              wrapPlanLine(`Path: ${path}`, grid.rightWidth),
+            ),
+          ]
+        : [],
+      status:
+        model.matchError ??
+        model.notice ??
+        `matching ${model.results.length} ${model.results.length === 1 ? "Skill" : "Skills"}${model.query === "" ? " · all Skills" : ""} · result=${model.results.length === 0 ? 0 : model.index + 1}/${model.results.length}`,
+      warning: model.matchError !== null,
+    },
+    createPaint(theme),
+  );
+}
+
+function renderAgentSearch(
+  state: Extract<TuiAddAgentState, { stage: "selection" }>,
+  style: TuiPaint,
+): string {
+  const { picker, installation } = state;
+  const { matches, installedMatches, emptyMessage, grid, index, scroll } =
+    agentPickerLayout(state);
+  const focused = matches[index];
+  const destination = installation.agentDestinations?.find(
+    (item) => focused && item.agents.includes(focused),
+  );
+  const noAgents = !picker.agents.length && !picker.query.trim();
+  const count = installedMatches.length
+    ? `${matches.length} to add · ${installedMatches.length} installed`
+    : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+  const compactEmpty = installedMatches.length
+    ? "Already installed"
+    : noAgents
+      ? "All agents installed"
+      : "No matches";
+  const status = matches.length
+    ? count
+    : emptyMessage.length <= grid.usable
+      ? emptyMessage
+      : compactEmpty;
+  const selectionLabel = `${picker.selectedAgents.size} ${grid.usable >= 21 ? "selected" : "sel"}`;
+  const context = ` · ${installation.skill.name}  `;
+  return renderSearchSurface(
+    grid,
+    {
+      title: "Add agents",
+      context:
+        "Add agents".length + [...context].length + selectionLabel.length <=
+        grid.usable
+          ? context
+          : " ",
+      selectedCount: picker.selectedAgents.size,
+      selectionLabel,
+      hints: picker.agents.length
+        ? grid.usable >= 68
+          ? [
+              ["↑↓", "move"],
+              ["space", "select"],
+              ["enter", "review"],
+              ["esc", "back"],
+              ["ctrl+u", "clear"],
+            ]
+          : grid.usable >= 38
+            ? [
+                ["space", "select"],
+                ["enter", "review"],
+                ["esc", "back"],
+              ]
+            : [
+                ["space", ""],
+                ["enter", ""],
+                ["esc", ""],
+              ]
+        : [["esc", "back"]],
+      query: picker.query,
+      placeholder: "type an agent name",
+      index,
+      scroll,
+      result(row) {
+        const agent = matches[row];
+        if (!agent) return undefined;
+        const selected = picker.selectedAgents.has(agent);
+        return {
+          label:
+            agentLabel(agent).length + 4 <= grid.leftWidth
+              ? agentLabel(agent)
+              : agent,
+          selected,
+          marker: selected ? "[x]" : "[ ]",
+        };
+      },
+      previewTitle: focused ? agentLabel(focused) : undefined,
+      preview: destination
+        ? [
+            `Skill: ${installation.skill.name}`,
+            ...wrapPlanLine(
+              `Destination: ${destination.path}`,
+              grid.rightWidth,
+            ),
+            ...wrapPlanLine(
+              `Agents: ${destination.agents.join(", ")}`,
+              grid.rightWidth,
+            ),
+          ]
+        : [],
+      status,
+    },
+    style,
+  );
 }
 
 /**

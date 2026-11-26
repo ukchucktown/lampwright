@@ -1,7 +1,7 @@
 import { installedAgentIds } from "../planning/add-agent.js";
 import {
   filteredAgents,
-  agentModalSize,
+  agentPickerLayout,
   addAgentEntry,
 } from "./agent-picker.js";
 import { stringifyModel } from "../model/json.js";
@@ -30,7 +30,8 @@ import {
   type TuiBrowseCommand,
 } from "./browse.js";
 import {
-  addAgentReviewLines,
+  agentReviewLayout,
+  helpScrollMetrics,
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
   planScrollMetrics,
@@ -50,7 +51,7 @@ import {
   selectionTargets,
 } from "./sections.js";
 import { createTrashSections, type TrashRestoreReadiness } from "./trash.js";
-import { createSearchModel, reduceSearch } from "./search.js";
+import { createSearchModel, reduceSearch, searchPosition } from "./search.js";
 import type { TuiThemeDefinition } from "./theme.js";
 import type {
   TuiAction,
@@ -174,7 +175,22 @@ export class TuiController {
           ...state,
           browse: resizeBrowse(state.browse, action.viewport),
         };
-        if (resized.screen === "trash-review") {
+        if (resized.screen === "add-agent" && resized.stage === "selection") {
+          const { index, scroll } = agentPickerLayout(resized);
+          this.stateValue = {
+            ...resized,
+            picker: { ...resized.picker, index, scroll },
+          };
+        } else if (
+          resized.screen === "add-agent" &&
+          (resized.stage === "review" || resized.stage === "result")
+        ) {
+          const max = agentReviewLayout(resized).maximumOffset;
+          this.stateValue = {
+            ...resized,
+            scrollOffset: Math.min(resized.scrollOffset, max),
+          };
+        } else if (resized.screen === "trash-review") {
           this.stateValue = {
             ...resized,
             scrollOffset: Math.min(
@@ -221,6 +237,18 @@ export class TuiController {
           this.stateValue = { screen: "browse", ...state.browse };
         else if (action.kind === "quit")
           this.stateValue = { screen: "done", report: null };
+        else if (action.kind === "move" || action.kind === "page") {
+          const { maximumOffset, pageRows } = helpScrollMetrics(state);
+          const delta =
+            action.delta * (action.kind === "page" ? Math.max(1, pageRows) : 1);
+          this.stateValue = {
+            ...state,
+            scrollOffset: Math.min(
+              maximumOffset,
+              Math.max(0, (state.scrollOffset ?? 0) + delta),
+            ),
+          };
+        }
       } else if (state.screen === "plan") await this.planAction(state, action);
       else if (state.screen === "availability-plan")
         await this.availabilityPlanAction(state, action);
@@ -530,7 +558,11 @@ export class TuiController {
     }
 
     if (action.kind === "open-help") {
-      this.stateValue = { screen: "help", browse: browseSnapshot(state) };
+      this.stateValue = {
+        screen: "help",
+        browse: browseSnapshot(state),
+        scrollOffset: 0,
+      };
       return;
     }
     if (action.kind === "open-theme-picker") {
@@ -709,16 +741,18 @@ export class TuiController {
           ? { ...picker.previous, browse: state.browse }
           : { screen: "browse", ...state.browse };
       } else if (action.kind === "move" || action.kind === "page") {
+        const { grid, matches, index, scroll } = agentPickerLayout(state);
         const delta =
-          action.delta *
-          (action.kind === "page" ? agentModalSize(state).listRows : 1);
+          action.delta * (action.kind === "page" ? grid.resultRows : 1);
         this.stateValue = {
           ...state,
           picker: {
             ...picker,
-            index: Math.max(
-              0,
-              Math.min(filteredAgents(picker).length - 1, picker.index + delta),
+            ...searchPosition(
+              index + delta,
+              scroll,
+              matches.length,
+              grid.resultRows,
             ),
           },
         };
@@ -733,14 +767,17 @@ export class TuiController {
             : action.kind === "clear-query"
               ? ""
               : [...picker.query].slice(0, -1).join("");
-        this.stateValue = { ...state, picker: { ...picker, query, index: 0 } };
+        this.stateValue = {
+          ...state,
+          picker: { ...picker, query, index: 0, scroll: 0 },
+        };
       } else if (
         action.kind === "toggle-select" ||
         action.kind === "point-agent" ||
+        action.kind === "point-search-result" ||
         action.kind === "select"
       ) {
-        const index =
-          action.kind === "point-agent" ? action.index : picker.index;
+        const index = "index" in action ? action.index : picker.index;
         const focused = filteredAgents(picker)[index];
         if (action.kind === "select") {
           const agents = picker.selectedAgents.size
@@ -761,6 +798,8 @@ export class TuiController {
             plan,
             scrollOffset: 0,
           };
+        } else if (focused && action.kind === "point-search-result") {
+          this.stateValue = { ...state, picker: { ...picker, index } };
         } else if (focused) {
           const checked = new Set(picker.selectedAgents);
           if (checked.has(focused)) checked.delete(focused);
@@ -774,16 +813,13 @@ export class TuiController {
       return;
     }
     if (action.kind === "move" || action.kind === "page") {
-      const rows = agentModalSize(state).reviewRows;
+      const { pageRows: rows, maximumOffset } = agentReviewLayout(state);
       const delta = action.delta * (action.kind === "page" ? rows : 1);
       this.stateValue = {
         ...state,
         scrollOffset: Math.max(
           0,
-          Math.min(
-            Math.max(0, addAgentReviewLines(state).length - rows),
-            state.scrollOffset + delta,
-          ),
+          Math.min(maximumOffset, state.scrollOffset + delta),
         ),
       };
     } else if (state.stage === "result") {
@@ -1752,8 +1788,18 @@ function resizeState(
   | import("./types.js").TuiUpdateExecutingState {
   if (state.screen === "browse")
     return { screen: "browse", ...resizeBrowse(state, viewport) };
-  if (state.screen === "theme" || state.screen === "help")
+  if (state.screen === "theme")
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
+  if (state.screen === "help") {
+    const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
+    return {
+      ...resized,
+      scrollOffset: Math.min(
+        state.scrollOffset ?? 0,
+        helpScrollMetrics(resized).maximumOffset,
+      ),
+    };
+  }
   if (state.screen === "search")
     return {
       ...state,

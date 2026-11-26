@@ -1216,6 +1216,75 @@ describe("terminal theme", () => {
     expect(controller.state).toEqual(before);
   });
 
+  it.each([
+    { columns: 118, rows: 15 },
+    { columns: 95, rows: 12 },
+  ])(
+    "scrolls the complete Help contents at $columns by $rows",
+    async (viewport) => {
+      const inventory = groupedInventory(["alpha", "beta"]);
+      const controller = new TuiController(
+        {
+          scan: async () => inventory,
+          plan,
+          execute: async () => buildExecutionReport(),
+        },
+        viewport,
+      );
+      await controller.start();
+      await controller.dispatch({ kind: "focus", pane: "entries" });
+      await controller.dispatch({ kind: "move", delta: 1 });
+      await controller.dispatch({ kind: "toggle-select" });
+      const before = controller.state;
+      await controller.dispatch({ kind: "open-help" });
+      const frame = () =>
+        renderTui(controller.state, plainTuiTheme).trimEnd().split("\n");
+      const first = frame();
+      expect(first[0]!.trim()).toBe("Help");
+      expect(first.at(-1)).toContain("esc close");
+      expect(first.at(-1)).toContain("↑↓");
+      expect(first.join("\n")).not.toContain("┌");
+      const key = async (name: string) =>
+        controller.dispatch(
+          parseRawTuiAction(controller.state, "", {
+            name,
+            ctrl: false,
+            meta: false,
+            shift: false,
+          }),
+        );
+      await key("down");
+      expect(frame()[1]).not.toBe(first[1]);
+      await key("up");
+      expect(frame()).toEqual(first);
+      const wheel = mouseAction(
+        controller.state,
+        { button: 65, row: 3, column: 5, pressed: true },
+        { dragging: false, doubleClick: false },
+      );
+      expect(wheel).toEqual({ kind: "move", delta: 1 });
+      await controller.dispatch(wheel);
+      await key("pagedown");
+      const last = frame();
+      expect(last.join("\n")).toContain("App");
+      expect(last.join("\n")).toContain("ctrl+p");
+      expect(last.join("\n")).toMatch(/q +quit/u);
+      expect(last[0]).toBe(first[0]);
+      expect(last.at(-1)).toMatch(/ of \d+ · .*esc close$/u);
+      expect(last.at(-1)).not.toBe(first.at(-1));
+      await key("pagedown");
+      expect(frame()).toEqual(last);
+      await controller.dispatch({
+        kind: "viewport",
+        viewport: { columns: 118, rows: 32 },
+      });
+      expect(frame().join("\n")).toContain("┌  Help");
+      await controller.dispatch({ kind: "viewport", viewport });
+      expect(frame()).toEqual(first);
+      await key("escape");
+      expect(controller.state).toEqual(before);
+    },
+  );
   it.each(["inventory", "disabled", "trash"] as const)(
     "keeps the Help title, %s group and escape hint in a small terminal",
     async (view) => {
@@ -1239,7 +1308,7 @@ describe("terminal theme", () => {
       const lines = renderTui(state, plainTuiTheme).trimEnd().split("\n");
       expect(lines[0]!.trim()).toBe("Help");
       expect(lines[1]!.trimStart()).toMatch(new RegExp("^" + view, "i"));
-      expect(lines.at(-1)!.trim()).toBe("esc close");
+      expect(lines.at(-1)!.trim()).toMatch(/esc close$/u);
       await controller.dispatch(
         parseRawTuiAction(state, "", {
           name: "escape",
@@ -1310,8 +1379,6 @@ describe("terminal theme", () => {
           installations: [installation],
           index: 0,
         },
-        picker,
-        { ...picker, picker: { ...picker.picker, query: "no match" } },
         {
           ...modal,
           stage: "review",
@@ -1337,6 +1404,10 @@ describe("terminal theme", () => {
         const lines = colored.replace(ansi, "").split("\n");
         const top = lines.findIndex((line) => line.includes("┌"));
         const bottom = lines.findIndex((line) => line.includes("└"));
+        if (state.screen === "help" && top < 0) {
+          expect(lines[0]!.trim()).toBe("Help");
+          continue;
+        }
         expect(top, state.screen).toBeGreaterThanOrEqual(0);
         const left = lines[top]!.indexOf("┌"),
           right = lines[top]!.indexOf("┐");
@@ -1411,7 +1482,7 @@ describe("terminal theme", () => {
         if (state.screen === "help" && viewport.rows <= 18) {
           expect(lines[0]!.replace(ansi, "").trim()).toBe("Help");
           expect(drawn).toContain("Inventory");
-          expect(lines.at(-1)!.replace(ansi, "").trim()).toBe("esc close");
+          expect(lines.at(-1)!.replace(ansi, "").trim()).toMatch(/esc close$/u);
         } else if (viewport.columns >= 60) expect(drawn).toContain("┌");
         if (viewport.columns <= 20) expect(drawn).not.toContain("┌");
         // A panel is drawn over the browse view, which stays around it.
@@ -2501,19 +2572,19 @@ describe("global name-regex search", () => {
       expect(color).toContain(styleTui(theme, "title", "> "));
       expect(color).toContain(styleTui(theme, "muted", "type an agent name"));
       expect(color).toContain(styleTui(theme, "selected", "1 selected"));
-      expect(color).toContain(styleTui(theme, "muted", " · 2 matches"));
+      expect(color.split("\n").at(-1)).toContain(
+        styleTui(theme, "muted", "2 matches").slice(0, -4),
+      );
       const unchecked = renderTui(
         { ...picker, picker: { ...picker.picker, selectedAgents: new Set() } },
         theme,
       );
-      expect(unchecked).toContain(
-        styleTui(theme, "muted", "0 selected · 2 matches"),
+      expect(unchecked).toContain(styleTui(theme, "muted", "0 selected"));
+      expect(color).toContain(
+        styleTui(theme, "selected", "[x] antigravity-cli").slice(0, -4),
       );
       expect(color).toContain(
-        styleTui(theme, "selected", "  [x] antigravity-cli").slice(0, -4),
-      );
-      expect(color).toContain(
-        styleTui(theme, "focus", "› [ ] claude-code").slice(0, -4),
+        styleTui(theme, "focus", "[ ] claude-code").slice(0, -4),
       );
       const typed = renderTui(
         { ...picker, picker: { ...picker.picker, query: "agy", index: 0 } },
@@ -2521,7 +2592,7 @@ describe("global name-regex search", () => {
       );
       expect(typed).toContain(styleTui(theme, "active", "agy"));
       expect(typed).toContain(
-        styleTui(theme, "focus", "› [x] antigravity-cli").slice(0, -4),
+        styleTui(theme, "focus", "[x] antigravity-cli").slice(0, -4),
       );
       const clipped = renderTui(
         { ...picker, picker: { ...picker.picker, query: "z".repeat(100) } },
