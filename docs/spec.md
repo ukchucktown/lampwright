@@ -402,6 +402,36 @@ was absent before the operation, Lampwright removes that link after the
 operation. Lampwright does not delete content that the Owner creates at such a
 path. The final verification reports a changed Harness Exposure set.
 
+### Add an agent to an installed Skill
+
+For a Vercel-managed Skill, the user can add a Harness Exposure to an active
+canonical Installation. The canonical Installation is the directory where the
+Manager keeps the Skill content. Add agent uses the current Manager registry
+for the Scope of that Installation. Inventory supplies the supported agents
+and the paths that they share. Planning identifies the requested destination,
+the directories that it must create, and each agent that reads the destination.
+
+After confirmation, Execution creates a directory link to the canonical Skill.
+On Windows, it creates a junction. The link preserves the content and Manager
+record. If the selected agent already reads that directory, Execution verifies
+the current exposure. An occupied destination, linked parent, or Git-protected
+write blocks creation. A fresh Inventory verifies the link and the original
+Installation before Execution reports success.
+
+The terminal picker accepts several agents for one Installation. A single
+confirmation applies to every distinct destination in the reviewed set. Before
+the first write, Execution checks each destination against a fresh plan.
+During execution it checks the remaining destinations and allows the parent
+directories that an earlier action created. The final scan verifies each
+result. If only some links succeed, the report identifies those links and the
+reason for each failure.
+
+The preview uses an advisory write check on the nearest existing destination
+directory. On Windows, that check can miss an ACL denial. If the filesystem
+denies directory or link creation, Execution reports the destination as
+`blocked`. If another process creates the destination after review, only a
+verified link to the selected Installation qualifies as `unchanged`.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal
@@ -507,6 +537,7 @@ The intended minimal command surface is:
 ```console
 lampwright                  # interactive fuzzy-search UI
 lampwright scan             # print inventory
+lampwright add-agent <target> <agent-id> # expose an installed Skill to another agent
 lampwright update <target>  # ask the current Owner to update one target
 lampwright disable <target> # disable selected target(s) without removal
 lampwright enable <target>  # enable native or suspended target(s)

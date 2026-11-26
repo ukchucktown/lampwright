@@ -1,3 +1,10 @@
+import { modalContentWidth, modalFrame, modalInset } from "./overlay.js";
+import {
+  agentLabel,
+  agentModalSize,
+  agentPickerLayout,
+  addAgentEntry,
+} from "./agent-picker.js";
 import type {
   ApprovalRequirement,
   ExecutableCommand,
@@ -33,6 +40,8 @@ import {
 } from "./theme.js";
 import type {
   TuiBrowseState,
+  TuiAddAgentState,
+  TuiAddAgentInstallationState,
   TuiAvailabilityPlanState,
   TuiAvailabilityReportState,
   TuiExecutingState,
@@ -59,6 +68,9 @@ export function renderTui(
   if (state.screen === "done") return "";
   if (state.screen === "browse") return renderBrowse(state, theme);
   if (state.screen === "search") return renderSearch(state, theme);
+  if (state.screen === "add-agent-installation")
+    return renderAddAgentInstallation(state, theme);
+  if (state.screen === "add-agent") return renderAgentModal(state, theme);
   if (state.screen === "theme") return renderThemePicker(state, theme);
   if (state.screen === "help") return renderHelp(state, theme);
   if (state.screen === "plan") return renderPlan(state, style);
@@ -123,70 +135,57 @@ function joinStyledCells(cells: readonly StyledCell[]): string {
   return style === "" ? out : `${out}${escapeCharacter}[0m`;
 }
 
-/**
- * Draws a panel over the middle of a frame. Every panel line has the same
- * visible width. Returns null when the frame cannot hold the panel.
- */
+/** Paint the same frame around each modal's own body and backdrop. */
 function overlayPanel(
-  frame: readonly string[],
-  panel: readonly string[],
-  viewport: { readonly rows: number; readonly columns: number },
-  /** The first row the panel may use when the frame has rows to spare. */
-  firstRow = 1,
-): readonly string[] | null {
-  const width = visibleLength(panel[0] ?? "");
-  const usable = Math.max(0, viewport.columns - 1);
-  const rows = Math.max(0, viewport.rows - 1);
-  if (width + 2 > usable || panel.length > rows) return null;
-  const left = Math.floor((usable - width) / 2);
-  // Centered, but below `firstRow` whenever the frame has rows to spare.
-  const top = Math.min(
-    rows - panel.length,
-    Math.max(firstRow, Math.floor((rows - panel.length) / 2)),
-  );
-  const lines = Array.from({ length: Math.max(rows, frame.length) }, (_, row) =>
-    fit(frame[row] ?? "", usable),
-  );
-  panel.forEach((panelLine, offset) => {
-    const base = styledCells(lines[top + offset] ?? "");
-    lines[top + offset] = joinStyledCells([
-      ...base.slice(0, left),
-      ...styledCells(panelLine),
-      ...base.slice(left + width),
-    ]);
-  });
-  return lines;
-}
-
-/** A bordered panel: a title in the top rule and a hint in the bottom rule. */
-function panelLines(
+  backdrop: readonly string[],
+  viewport: TuiBrowseState["model"]["viewport"],
   title: string,
   body: readonly string[],
   hint: string,
   inner: number,
   style: TuiPaint,
-  /**
-   * A title that is a group heading takes the style of the headings in the
-   * body and starts in their column, directly after the corner.
-   */
-  heading = false,
-): readonly string[] {
-  const titlePaint = heading ? style.muted : style.title;
-  const titleLead = heading ? "" : "─";
-  const rule = (label: string, start: string, end: string, lead: boolean) => {
-    const text = label === "" ? "" : ` ${label} `;
-    const fill = "─".repeat(Math.max(0, inner + 2 - [...text].length - 1));
-    return lead
-      ? `${style.border(`${start}${titleLead}`)}${titlePaint(text)}${style.border(`${"─".repeat(Math.max(0, inner + 2 - [...text].length - titleLead.length))}${end}`)}`
-      : `${style.border(`${start}${fill}`)}${style.muted(text)}${style.border(`─${end}`)}`;
+): readonly string[] | null {
+  const frame = modalFrame(viewport, inner, body.length);
+  if (!frame) return null;
+  const rule = (label: string, top: boolean): string => {
+    const clipped = fit(
+      stripAnsi(label).replace(/\p{Cc}/gu, " "),
+      inner,
+    ).trimEnd();
+    const text = clipped ? modalInset + clipped + modalInset : "";
+    const fill = style.border(
+      "─".repeat(frame.width - 2 - visibleLength(text)),
+    );
+    return top
+      ? style.border("┌") + style.muted(text) + fill + style.border("┐")
+      : style.border("└") + fill + style.muted(text) + style.border("┘");
   };
-  return [
-    rule(title, "┌", "┐", true),
-    ...body.map(
-      (line) => `${style.border("│")} ${fit(line, inner)} ${style.border("│")}`,
+  const paddingRows = Array<string>(frame.verticalInset).fill("");
+  const panel = [
+    rule(title, true),
+    ...[...paddingRows, ...body, ...paddingRows].map(
+      (line) =>
+        style.border("│") +
+        modalInset +
+        fit(line, inner) +
+        modalInset +
+        style.border("│"),
     ),
-    rule(hint, "└", "┘", false),
+    rule(hint, false),
   ];
+  const lines = Array.from({ length: viewport.rows - 1 }, (_, row) =>
+    fit(backdrop[row] ?? "", viewport.columns - 1),
+  );
+  for (const [index, panelLine] of panel.entries()) {
+    const row = frame.top + index;
+    const base = styledCells(lines[row]!);
+    lines[row] = joinStyledCells([
+      ...base.slice(0, frame.left),
+      ...styledCells(panelLine),
+      ...base.slice(frame.left + frame.width),
+    ]);
+  }
+  return lines;
 }
 
 /**
@@ -216,6 +215,7 @@ function browseFrame(
   );
 }
 
+const helpTitle = "Help";
 const closeHint = "esc close";
 
 interface HelpGroup {
@@ -226,15 +226,18 @@ interface HelpGroup {
 
 /**
  * Every key, one to a line, in three aligned columns: the key, its effect, and
- * the mouse action that has the same effect. The first group lists the actions
- * of the current view and gives the panel its title. A labelled rule opens
- * each later group.
+ * the mouse action that has the same effect. The current view starts the
+ * list. Each section heading uses the same labelled rule.
  */
 function helpBody(
-  view: TuiBrowseState["view"],
+  browse: Pick<TuiBrowseState, "view" | "inventory">,
   style: TuiPaint,
   spacing: "open" | "ruled" | "bare" = "open",
-): { readonly title: string; readonly body: readonly string[] } {
+): readonly string[] {
+  const view = browse.view;
+  const addAgent = browse.inventory.installations.some(
+    (item) => item.agentDestinations?.length,
+  );
   const groups: readonly HelpGroup[] = [
     view === "trash"
       ? {
@@ -256,6 +259,7 @@ function helpBody(
             label: "Inventory",
             rows: [
               ["enter", "remove"],
+              ...(addAgent ? [["+", "add agent"] as const] : []),
               ["u", "update"],
               ["d", "disable"],
             ],
@@ -307,20 +311,14 @@ function helpBody(
         : ""
     }`;
   };
-  return {
-    // The top border of the panel names the first group, so that group has
-    // no rule of its own and its keys start directly under the border.
-    title: groups[0]!.label,
-    body: groups.flatMap((group, index) => [
-      // An empty row sets each later group apart from the one above it.
-      ...(spacing === "open" && index > 0 ? [""] : []),
-      ...(spacing === "bare" || index === 0 ? [] : [rule(group)]),
-      ...group.rows.map(
-        ([key, effect, mouse]) =>
-          `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
-      ),
-    ]),
-  };
+  return groups.flatMap((group, index) => [
+    ...(spacing === "open" && index > 0 ? [""] : []),
+    ...(spacing !== "bare" || index === 0 ? [rule(group)] : []),
+    ...group.rows.map(
+      ([key, effect, mouse]) =>
+        `${style.title(fit(key, keyWidth))}${(effect === "remove" || effect === "purge" ? style.warning : plain)(fit(effect, effectWidth))}${fit(mouse ?? "", mouseWidth)}`,
+    ),
+  ]);
 }
 
 function renderHelp(
@@ -331,17 +329,25 @@ function renderHelp(
   const viewport = state.browse.model.viewport;
   const frame = dimFrame(browseFrame(state.browse, theme), theme);
   const panel = (spacing: "open" | "ruled" | "bare") => {
-    const { title, body } = helpBody(state.browse.view, style, spacing);
-    const inner = Math.min(
+    const body = helpBody(state.browse, style, spacing);
+    const inner = modalContentWidth(
+      viewport,
       Math.max(...body.map(visibleLength)),
-      Math.max(0, viewport.columns - 7),
     );
+    // Use tighter section spacing before the frame covers a browse header row.
+    if (
+      spacing !== "bare" &&
+      !modalFrame(viewport, inner, body.length)?.clearsHeader
+    )
+      return null;
     return overlayPanel(
       frame,
-      panelLines(title, body, closeHint, inner, style, true),
       viewport,
-      // Below the header and the key hints when the frame has the rows.
-      2,
+      helpTitle,
+      body,
+      closeHint,
+      inner,
+      style,
     );
   };
   // A short terminal gives up the empty rows between the groups first, then
@@ -352,13 +358,235 @@ function renderHelp(
     panel("bare") ??
     // Too small for a panel: the keys take the whole screen.
     [
-      style.title("Lampwright — Keys"),
-      ...helpBody(state.browse.view, style, "bare").body,
+      style.title(helpTitle),
+      ...helpBody(state.browse, style, "bare").slice(
+        0,
+        Math.max(0, viewport.rows - 3),
+      ),
       style.muted(closeHint),
     ]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
   return `${lines.join("\n")}\n`;
+}
+
+export function addAgentReviewLines(
+  state: TuiAddAgentState,
+): readonly string[] {
+  const { width } = agentModalSize(state);
+  if (state.report)
+    return wrapPlanLines(
+      [
+        state.report.message,
+        ...state.report.results.flatMap((result) => [
+          "",
+          `${result.status} · ${result.agents.join(", ")}`,
+          result.destination ?? "",
+          result.message,
+        ]),
+      ],
+      width,
+    );
+  const plan = state.plan;
+  if (!plan) return [];
+  const scope = state.installation.scope;
+  return wrapPlanLines(
+    [
+      `Selected: ${plan.selectedAgents.join(", ")}`,
+      `Scope: ${scope.kind === "workspace" ? scope.workspacePath : scope.kind}`,
+      `Source: ${state.installation.location.path}`,
+      ...(plan.block ? [`Blocked: ${plan.block}`] : []),
+      ...plan.destinations.flatMap((item) => [
+        "",
+        `${item.action === "link" ? "Create link" : item.action} · ${item.agents.join(", ") || item.agent}`,
+        item.destination ?? "Destination unavailable",
+        ...item.directories.map((path) => `Create directory: ${path}`),
+        ...(item.reason ? [item.reason] : []),
+      ]),
+    ],
+    width,
+  );
+}
+
+function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
+  const style = createPaint(theme);
+  const viewport = state.browse.model.viewport;
+  const { compact, width, reviewRows } = agentModalSize(state);
+  if (compact)
+    return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
+  let body: readonly string[];
+  let hint: string;
+  if (state.executing) {
+    body = [style.info("Applying and verifying agent links…")];
+    hint = "";
+  } else if (state.plan) {
+    const lines = addAgentReviewLines(state);
+    const offset = Math.min(
+      state.scrollOffset,
+      Math.max(0, lines.length - reviewRows),
+    );
+    body = lines.slice(offset, offset + reviewRows);
+    if (lines.length > reviewRows)
+      body = [
+        ...body,
+        style.muted(
+          `${offset + 1}–${offset + body.length} of ${lines.length} · ↑↓ scroll`,
+        ),
+      ];
+    hint = state.report
+      ? "esc inventory"
+      : state.plan.block
+        ? "esc back"
+        : "y confirm · esc back";
+  } else {
+    const {
+      matches,
+      installedMatches,
+      emptyMessage,
+      offset,
+      listRows,
+      hint: pickerHint,
+      shortcuts,
+    } = agentPickerLayout(state);
+    const options = matches
+      .slice(offset, offset + listRows)
+      .map((agent, index) => {
+        const focused = state.index === offset + index;
+        const selected = state.selectedAgents.has(agent);
+        const mark = selected ? "[x]" : "[ ]";
+        const line = fit(
+          `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}`,
+          width,
+        );
+        return focused
+          ? style.focus(line)
+          : selected
+            ? style.selected(line)
+            : line;
+      });
+    if (!matches.length) {
+      const explanation = wrapPlanLine(emptyMessage, width);
+      if (explanation.length <= listRows)
+        options.push(...explanation.map(style.muted));
+      else {
+        const compact = installedMatches.length
+          ? "Already installed"
+          : !state.agents.length && !state.query.trim()
+            ? width >= 20
+              ? "All agents installed"
+              : "All installed"
+            : "No matches";
+        options.push(
+          style.muted(compact.length <= width ? compact : "Installed"),
+        );
+      }
+    }
+    while (options.length < listRows) options.push("");
+    const installedCount =
+      !state.agents.length && !state.query.trim()
+        ? state.installedAgents.length
+        : installedMatches.length &&
+            !matches.length &&
+            !state.selectedAgents.size
+          ? installedMatches.length
+          : null;
+    const matchCount = installedMatches.length
+      ? `${matches.length} to add · ${installedMatches.length} installed`
+      : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+    const count =
+      installedCount !== null
+        ? style.muted(fit(`${installedCount} installed`, width))
+        : fitStyledSegments(
+            [
+              {
+                text: `${state.selectedAgents.size} selected`,
+                paint: state.selectedAgents.size ? style.selected : style.muted,
+              },
+              { text: ` · ${matchCount}`, paint: style.muted },
+            ],
+            width,
+            style.muted,
+          );
+    body = [
+      searchPrompt(state.query, "type an agent name", width, style),
+      count,
+      ...options,
+      ...shortcuts.map((line) => style.muted(fit(line, width))),
+    ];
+    hint = pickerHint;
+  }
+  const title = `${state.report ? "Add agent results" : state.plan ? "Review agents" : "Add agents"} · ${state.installation.skill.name}`;
+  const frame = overlayPanel(
+    dimFrame(browseFrame(state.browse, theme), theme),
+    viewport,
+    title,
+    body,
+    hint,
+    width,
+    style,
+  );
+  if (frame) return frame.join("\n") + "\n";
+  return (
+    [
+      fit(title, viewport.columns - 1),
+      ...body.slice(0, viewport.rows - 3),
+      fit(hint, viewport.columns - 1),
+    ].join("\n") + "\n"
+  );
+}
+
+function renderAddAgentInstallation(
+  state: TuiAddAgentInstallationState,
+  theme: TuiTheme,
+): string {
+  const style = createPaint(theme);
+  const viewport = state.browse.model.viewport;
+  const { rows, columns } = viewport;
+  const inner = modalContentWidth(viewport, 70);
+  if (rows < 6 || columns < 18)
+    return fit("Resize terminal", Math.max(0, columns - 1)) + "\n";
+  const height = Math.max(1, rows - 5);
+  const blocks = state.installations.map((item, index) => {
+    const focused = index === state.index;
+    return wrapPlanLine(
+      `${focused ? "›" : " "} ${item.scope.kind}  ${item.location.path}`,
+      inner,
+    ).map((line) =>
+      focused ? style.focus(fit(line, inner)) : fit(line, inner),
+    );
+  });
+  const lines = blocks.flat();
+  const focusedLine = blocks
+    .slice(0, state.index)
+    .reduce((sum, block) => sum + block.length, 0);
+  const offset = Math.max(
+    0,
+    Math.min(
+      lines.length - height,
+      focusedLine -
+        Math.max(
+          0,
+          Math.floor((height - (blocks[state.index]?.length ?? 1)) / 2),
+        ),
+    ),
+  );
+  const title = `Choose an Installation — ${state.installations[state.index]!.skill.name}`;
+  const hint = "↑↓ choose Installation · enter choose agent · esc cancel";
+  const body = lines.slice(offset, offset + height);
+  const overlay = overlayPanel(
+    dimFrame(browseFrame(state.browse, theme), theme),
+    viewport,
+    title,
+    body,
+    hint,
+    inner,
+    style,
+  );
+  return (
+    (
+      overlay ?? [fit(title, columns - 1), ...body, fit(hint, columns - 1)]
+    ).join("\n") + "\n"
+  );
 }
 
 /**
@@ -375,11 +603,11 @@ function renderThemePicker(
   const choice = state.choices[state.index];
   const label = (item: (typeof state.choices)[number]): string =>
     `${item.name}${item.source === "custom" ? "  custom" : ""}${item.problem === null ? "" : "  not usable"}`;
-  const inner = Math.min(
-    Math.max(0, viewport.columns - 7),
+  const inner = modalContentWidth(
+    viewport,
     Math.max(
       48,
-      ...state.choices.map((item) => [...label(item)].length + 3),
+      ...state.choices.map((item) => [...label(item)].length + 2),
       [...(state.notice ?? choice?.problem ?? "")].length,
     ),
   );
@@ -420,17 +648,22 @@ function renderThemePicker(
                 inner,
               ),
             );
-  const body = ["", ...rows, "", message, ""];
+  const body = [
+    ...rows,
+    ...(message ? [...(rows.length ? [""] : []), message] : []),
+  ];
+  if (!body.length) body.push(style.muted("No themes available."));
   const hint = "↑↓ preview · enter use and save · esc cancel";
-  const panel = panelLines(
-    "Theme",
-    body,
-    [...hint].length + 4 <= inner ? hint : "enter use · esc cancel",
-    inner,
-    style,
-  );
   const lines =
-    overlayPanel(browseFrame(state.browse, theme), panel, viewport) ??
+    overlayPanel(
+      browseFrame(state.browse, theme),
+      viewport,
+      "Theme",
+      body,
+      hint.length <= inner ? hint : "enter use · esc cancel",
+      inner,
+      style,
+    ) ??
     [style.title("Lampwright — Theme"), ...body, style.muted(hint)]
       .slice(0, Math.max(1, viewport.rows - 1))
       .map((line) => fit(line, Math.max(0, viewport.columns - 1)));
@@ -2026,6 +2259,22 @@ function countLabel(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+function searchPrompt(
+  query: string,
+  hint: string,
+  width: number,
+  style: TuiPaint,
+): string {
+  return fitStyledSegments(
+    [
+      { text: "> ", paint: style.title },
+      { text: query || hint, paint: query ? style.active : style.muted },
+    ],
+    width,
+    style.muted,
+  );
+}
+
 function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
   const style = createPaint(theme);
   const { model } = state;
@@ -2093,16 +2342,7 @@ function renderSearch(state: TuiSearchState, theme: TuiTheme): string {
       style.muted,
     ),
     style.border(`┌${"─".repeat(Math.max(0, usable - 2))}┐`),
-    `${style.border("│")}${fitStyledSegments(
-      [
-        { text: "> ", paint: style.title },
-        ...(model.query === ""
-          ? [{ text: "type a name regex", paint: style.muted }]
-          : [{ text: model.query, paint: style.active }]),
-      ],
-      Math.max(0, usable - 2),
-      style.muted,
-    )}${style.border("│")}`,
+    `${style.border("│")}${searchPrompt(model.query, "type a name regex", Math.max(0, usable - 2), style)}${style.border("│")}`,
     style.border(`├${"─".repeat(left)}┬${"─".repeat(right)}┤`),
   ];
   for (let row = 0; row < rows; row += 1) {
@@ -2315,6 +2555,9 @@ export function browseKeyHints(state: TuiBrowseState): readonly KeyHint[] {
           { key: "u", label: "update" },
         ]
       : [
+          ...(addAgentEntry(state)?.addAgentInstallations?.length
+            ? [{ key: "+", label: "add agent" }]
+            : []),
           { key: "enter", label: "remove" },
           { key: "u", label: "update" },
           { key: "d", label: "disable" },

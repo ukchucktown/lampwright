@@ -27,6 +27,11 @@ import {
   type EnablePreview,
   type DisabledStorageModule,
 } from "./disabled-storage/index.js";
+import { addAgentInstallation } from "./planning/add-agent.js";
+import {
+  createAddAgentModule,
+  type AddAgentModule,
+} from "./execution/add-agent.js";
 import { nodeArtifactFileSystem } from "./filesystem/artifact-filesystem.js";
 import { inspectGitProtection } from "./inventory/git-protection.js";
 import {
@@ -81,6 +86,7 @@ interface PackageMetadata {
   readonly version: string;
 }
 export interface CliDependencies {
+  readonly addAgent?: Pick<AddAgentModule, "preview" | "execute">;
   readonly scan?: (adapterPaths: readonly string[]) => Promise<Inventory>;
   readonly execute?: (
     plan: RemovalPlan,
@@ -135,6 +141,7 @@ Usage:
   lampwright scan [--json] [--adapter <path>]
   lampwright disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
   lampwright enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
+  lampwright add-agent <selector> <agent-id> [--dry-run] [--yes] [--json] [--adapter <path>]
   lampwright update <selector> [--dry-run] [--yes] [--json] [--adapter <path>]
   lampwright remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
   lampwright restore <entry-id> [--dry-run] [--yes] [--json]
@@ -143,6 +150,7 @@ Usage:
 Selectors:
   Availability: installation:<installation-id>  logical-skill:<logical-skill-id>
                 group:<group-id>  plugin:<plugin-boundary-id>
+  Add agent:    one installation selector or a logical-skill selector with one Installation
   Update:       exactly one installation, logical-skill, group, or plugin selector
   Enable only:  disabled-entry:<entry-id>
   Removal also: source:<source-id>  plugin:<plugin-boundary-id>
@@ -196,6 +204,8 @@ export async function runCli(
         0,
       );
     if (parsed.command === "remove") return await remove(parsed, dependencies);
+    if (parsed.command === "add-agent")
+      return await addAgent(parsed, dependencies);
     if (parsed.command === "update") return await update(parsed, dependencies);
     if (parsed.command === "disable" || parsed.command === "enable")
       return await availability(parsed, dependencies);
@@ -236,6 +246,7 @@ type Parsed = {
     | "scan"
     | "disable"
     | "enable"
+    | "add-agent"
     | "update"
     | "remove"
     | "restore"
@@ -303,6 +314,7 @@ function parseArguments(argv: readonly string[]): Parsed {
       "scan",
       "disable",
       "enable",
+      "add-agent",
       "update",
       "remove",
       "restore",
@@ -377,6 +389,18 @@ function parseArguments(argv: readonly string[]): Parsed {
     throw new Error(`${command} does not accept removal-only options`);
   if (command === "enable" && force)
     throw new Error("enable does not accept --force");
+  if (
+    command === "add-agent" &&
+    (values.length !== 2 ||
+      all ||
+      includePlugins ||
+      force ||
+      bruteForce ||
+      packageTrusts.length > 0)
+  )
+    throw new Error(
+      "add-agent requires one Skill selector and one agent ID. It accepts --dry-run, --yes, --json, --adapter and --trust-adapter.",
+    );
   if (command === "update" && values.length !== 1)
     throw new Error("update requires exactly one selector");
   if (command === "update" && (all || includePlugins || force || bruteForce))
@@ -396,6 +420,62 @@ function parseArguments(argv: readonly string[]): Parsed {
     packageTrusts,
     values,
   };
+}
+
+function productionAddAgent(
+  scanInventory: () => Promise<Inventory>,
+): AddAgentModule {
+  return createAddAgentModule({
+    scan: scanInventory,
+    fileSystem: nodeArtifactFileSystem,
+    inspectGit: (path, creatingDirectory) =>
+      inspectGitProtection(path, false, systemCommandRunner, creatingDirectory),
+  });
+}
+
+async function addAgent(
+  args: Parsed,
+  dependencies: CliDependencies,
+): Promise<CliResult> {
+  const scanInventory = async () =>
+    (await scanWithContext(args.adapters, args.adapterTrusts, dependencies))
+      .inventory;
+  if (dependencies.scan && !dependencies.addAgent)
+    throw new Error("Inject addAgent with a custom scan.");
+  const module = dependencies.addAgent ?? productionAddAgent(scanInventory);
+  const inventory = await scanInventory();
+  const installation = addAgentInstallation(
+    inventory,
+    resolveUpdateSelector(inventory, args.values[0]!),
+  );
+  const plan = await module.preview(inventory, installation, args.values[1]!);
+  if (args.dryRun || plan.action === "blocked")
+    return result(
+      { schemaVersion: 1, kind: "add-agent-plan", plan },
+      plan.action === "blocked" ? 3 : 0,
+    );
+  if (!args.yes && plan.action !== "unchanged")
+    return result(
+      {
+        schemaVersion: 1,
+        kind: "confirmation-required",
+        operation: "add-agent",
+        plan,
+      },
+      3,
+    );
+  const report = await module.execute(
+    plan,
+    args.yes || plan.action === "unchanged",
+  );
+  return result(
+    { schemaVersion: 1, kind: "add-agent-report", report },
+    report.status === "added" || report.status === "unchanged"
+      ? 0
+      : report.status === "blocked"
+        ? 3
+        : 1,
+  );
 }
 
 async function update(
@@ -1230,6 +1310,7 @@ async function main(): Promise<void> {
             approvals,
             disabledStorage,
           ),
+        addAgent: productionAddAgent(() => scan([], [])),
         planUpdate,
         executeUpdate: (updatePlan, approvals) =>
           productionExecuteUpdate(updatePlan, [], [], [], approvals),
@@ -1280,6 +1361,31 @@ function human(output: unknown): string {
   if (output.kind === "removal-plan") return humanRemovalPlan(output.plan);
   if (output.kind === "availability-plan")
     return humanAvailabilityPlan(output.plan);
+  if (output.kind === "add-agent-report" && isRecord(output.report))
+    return `${String(output.report.status)}: ${String(output.report.message)}\n`;
+  if (
+    output.kind === "add-agent-plan" ||
+    (output.kind === "confirmation-required" &&
+      output.operation === "add-agent")
+  ) {
+    const plan = output.plan;
+    if (!isRecord(plan) || !isRecord(plan.scope)) return "";
+    return [
+      `Add agent ${String(plan.agent)} to ${String(plan.skill)} (${String(plan.scope.workspacePath ?? plan.scope.kind)})`,
+      `Source: ${String(plan.source)}`,
+      `Destination: ${String(plan.destination ?? "unavailable")}`,
+      `Agents at this destination: ${Array.isArray(plan.agents) ? plan.agents.map(String).join(", ") : ""}`,
+      ...(Array.isArray(plan.directories)
+        ? plan.directories.map((path) => `Create directory: ${String(path)}`)
+        : []),
+      `Action: ${String(plan.action)}`,
+      ...(plan.reason ? [String(plan.reason)] : []),
+      ...(output.kind === "confirmation-required"
+        ? ["Re-run with --yes to create the link."]
+        : []),
+      "",
+    ].join("\n");
+  }
   if (output.kind === "update-plan") return humanUpdatePlan(output.plan);
   if (output.kind === "confirmation-required")
     return `${humanPlan(output.plan)}Confirmation required for ${String(output.operation)}. ${output.operation === "remove" || output.operation === "update" ? "Supply every approval flag shown above before executing." : "Re-run with --yes after reviewing this plan."}\n`;

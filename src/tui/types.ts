@@ -33,6 +33,11 @@ import type {
   UpdatePlan,
   UpdateReport,
 } from "../update/types.js";
+import type {
+  AddAgentModule,
+  AddAgentBatchReport,
+} from "../execution/add-agent.js";
+import type { AddAgentBatchPlan } from "../planning/add-agent.js";
 import type { TuiThemeDefinition } from "./theme.js";
 
 /** One row of the theme picker. A choice with a problem cannot be applied. */
@@ -56,6 +61,7 @@ export interface TuiThemeDependencies {
 }
 
 export interface TuiDependencies {
+  readonly addAgent?: AddAgentModule;
   readonly scan: () => Promise<Inventory>;
   readonly plan: (
     inventory: Inventory,
@@ -150,6 +156,8 @@ export interface TuiEntry {
    * The Inventory keeps the copies as separate records; `target` is the first.
    */
   readonly targets?: readonly RemovalTarget[];
+  /** Physical Installations in this row that offer Add agent destinations. */
+  readonly addAgentInstallations?: readonly Installation[];
   /** Targets used only by the Disabled/Availability workflow. */
   readonly availabilityTargets?: readonly AvailabilityTarget[];
   /** Overrides target-based selectability for non-removal projections. */
@@ -311,6 +319,29 @@ export interface TuiSearchState {
   readonly model: TuiSearchModel;
 }
 
+export interface TuiAddAgentInstallationState {
+  readonly screen: "add-agent-installation";
+  readonly browse: TuiBrowseSnapshot;
+  readonly installations: readonly Installation[];
+  readonly index: number;
+}
+
+export interface TuiAddAgentState {
+  readonly previous: TuiAddAgentInstallationState | null;
+  readonly screen: "add-agent";
+  readonly browse: TuiBrowseSnapshot;
+  readonly installation: Installation;
+  readonly agents: readonly string[];
+  readonly installedAgents: readonly string[];
+  readonly index: number;
+  readonly query: string;
+  readonly selectedAgents: ReadonlySet<string>;
+  readonly plan: AddAgentBatchPlan | null;
+  readonly report: AddAgentBatchReport | null;
+  readonly executing: boolean;
+  readonly scrollOffset: number;
+}
+
 export interface TuiThemeState {
   readonly screen: "theme";
   /** The untouched browse position to restore on apply or cancel. */
@@ -418,6 +449,8 @@ export type TuiState =
   | TuiLoadingState
   | TuiBrowseState
   | TuiSearchState
+  | TuiAddAgentInstallationState
+  | TuiAddAgentState
   | TuiThemeState
   | TuiHelpState
   | TuiPlanState
@@ -439,6 +472,7 @@ export type TuiAction =
   | { readonly kind: "noop" }
   | { readonly kind: "append-query"; readonly value: string }
   | { readonly kind: "delete-query" }
+  | { readonly kind: "clear-query" }
   | { readonly kind: "move"; readonly delta: number }
   | {
       readonly kind: "move-pane";
@@ -468,6 +502,8 @@ export type TuiAction =
   | { readonly kind: "open-search"; readonly value?: string }
   | { readonly kind: "stage-all-search" }
   | { readonly kind: "apply-search" }
+  | { readonly kind: "point-agent"; readonly index: number }
+  | { readonly kind: "add-agent" }
   | { readonly kind: "open-theme-picker" }
   | { readonly kind: "open-help" }
   | { readonly kind: "toggle-details" }

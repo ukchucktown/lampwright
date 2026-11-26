@@ -1,3 +1,4 @@
+import { agentPickerLayout } from "./agent-picker.js";
 import { emitKeypressEvents } from "node:readline";
 import type { Interface as ReadlineInterface, Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
@@ -130,9 +131,32 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
+  if (state.screen === "add-agent" && !state.plan) {
+    const layout = agentPickerLayout(state);
+    const { firstRow, firstColumn } = layout;
+    if (
+      firstRow === null ||
+      firstColumn === null ||
+      report.column < firstColumn ||
+      report.column >= firstColumn + layout.width ||
+      report.row < firstRow ||
+      report.row >= firstRow + layout.listRows
+    )
+      return { kind: "noop" };
+    if ((report.button & 64) !== 0)
+      return { kind: "move", delta: (report.button & 1) === 0 ? -1 : 1 };
+    const index = layout.offset + report.row - firstRow;
+    return report.pressed &&
+      (report.button & 35) === 0 &&
+      index < layout.matches.length
+      ? { kind: "point-agent", index }
+      : { kind: "noop" };
+  }
   if (
     state.screen === "plan" ||
     state.screen === "report" ||
+    state.screen === "add-agent-installation" ||
+    state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "availability-report" ||
     state.screen === "update-plan" ||
@@ -342,6 +366,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "backspace") return { kind: "delete-query" };
     if (value === "quit" || value === "q") return { kind: "quit" };
     if (state.view === "trash") return { kind: "noop" };
+    if (value === "add-agent" || value === "+") return { kind: "add-agent" };
     if (value === "update" || value === "u") return { kind: "update-review" };
     if (value === "disable" || value === "d")
       return state.view === "inventory"
@@ -359,7 +384,29 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (state.screen === "help")
     return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
-  if (state.screen === "theme") {
+  if (state.screen === "add-agent" && !state.plan) {
+    if (value === "" || value === "review" || value === "enter")
+      return { kind: "select" };
+    if (value === "up" || value === "down")
+      return { kind: "move", delta: value === "up" ? -1 : 1 };
+    if (value === "pageup" || value === "pagedown")
+      return { kind: "page", delta: value === "pageup" ? -1 : 1 };
+    if (value === "space" || value === "take") return { kind: "toggle-select" };
+    if (value === "clear") return { kind: "clear-query" };
+    if (value === "backspace") return { kind: "delete-query" };
+    if (value === "back" || value === "cancel") return { kind: "cancel" };
+    return {
+      kind: "append-query",
+      value: value.startsWith("search ") ? value.slice(7) : value,
+    };
+  }
+  if (
+    state.screen === "add-agent" &&
+    state.report &&
+    (value === "" || value === "back")
+  )
+    return { kind: "cancel" };
+  if (state.screen === "theme" || state.screen === "add-agent-installation") {
     if (value === "" || value === "select" || value === "use")
       return { kind: "select" };
     if (value === "up" || value === "k") return { kind: "move", delta: -1 };
@@ -381,6 +428,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (
     state.screen === "plan" ||
+    state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "update-plan"
   ) {
@@ -647,7 +695,13 @@ export function parseRawTuiAction(
       text === "q"
       ? { kind: "cancel" }
       : { kind: "noop" };
-  if (state.screen !== "search" && !key.ctrl && !key.meta && text === "q")
+  if (
+    state.screen !== "search" &&
+    !(state.screen === "add-agent" && !state.plan) &&
+    !key.ctrl &&
+    !key.meta &&
+    text === "q"
+  )
     return { kind: "quit" };
   if (key.name === "up" && !key.shift) return { kind: "move", delta: -1 };
   if (key.name === "down" && !key.shift) return { kind: "move", delta: 1 };
@@ -698,6 +752,7 @@ export function parseRawTuiAction(
     if (text === "/") return { kind: "open-search" };
     if (text === "?") return { kind: "open-help" };
     if (state.view === "trash") return { kind: "noop" };
+    if (text === "+") return { kind: "add-agent" };
     if (text === "u") return { kind: "update-review" };
     if (text === "d")
       return state.view === "inventory"
@@ -711,7 +766,26 @@ export function parseRawTuiAction(
       return { kind: "append-query", value: text };
     return { kind: "noop" };
   }
-  if (state.screen === "theme") {
+  if (state.screen === "add-agent" && !state.plan) {
+    if (key.name === "escape") return { kind: "cancel" };
+    if (key.name === "return" || key.name === "enter")
+      return { kind: "select" };
+    if (key.name === "pageup" || key.name === "pagedown")
+      return { kind: "page", delta: key.name === "pageup" ? -1 : 1 };
+    if (key.name === "space" || text === " ") return { kind: "toggle-select" };
+    if (key.name === "backspace") return { kind: "delete-query" };
+    if (key.ctrl && key.name === "u") return { kind: "clear-query" };
+    if (!key.ctrl && !key.meta && text)
+      return { kind: "append-query", value: text };
+    return { kind: "noop" };
+  }
+  if (
+    state.screen === "add-agent" &&
+    state.report &&
+    (key.name === "return" || key.name === "enter")
+  )
+    return { kind: "cancel" };
+  if (state.screen === "theme" || state.screen === "add-agent-installation") {
     if (key.name === "escape") return { kind: "cancel" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
@@ -735,6 +809,7 @@ export function parseRawTuiAction(
   }
   if (
     state.screen === "plan" ||
+    state.screen === "add-agent" ||
     state.screen === "availability-plan" ||
     state.screen === "update-plan"
   ) {

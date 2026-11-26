@@ -486,7 +486,7 @@ function mappedAgentId(agentName: string): string | null {
   return mappings[agentName] ?? null;
 }
 
-function canonicalGlobalAgentIds(): readonly string[] {
+export function canonicalGlobalAgentIds(): readonly string[] {
   return definitions
     .filter(readsCanonicalGlobally)
     .map((definition) => definition.agentId);

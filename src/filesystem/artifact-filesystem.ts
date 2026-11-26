@@ -1,4 +1,6 @@
+import { constants } from "node:fs";
 import {
+  access,
   chmod,
   link,
   lstat,
@@ -57,7 +59,17 @@ export interface ArtifactFileSystem {
   syncFile(path: string): Promise<void>;
   syncDirectory(path: string): Promise<void>;
 }
-export const nodeArtifactFileSystem: ArtifactFileSystem = {
+/** Read-only advisory check. The actual creation can still fail, including under Windows ACLs. */
+export interface DirectoryWriteAccess {
+  checkDirectoryWritable(path: string): Promise<void>;
+}
+
+type WritableArtifactFileSystem = ArtifactFileSystem & DirectoryWriteAccess;
+
+export const nodeArtifactFileSystem: WritableArtifactFileSystem = {
+  checkDirectoryWritable(path) {
+    return access(path, constants.W_OK | constants.X_OK);
+  },
   async lstat(path) {
     const stats = await lstat(path);
     return {

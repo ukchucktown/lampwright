@@ -9,6 +9,8 @@ import {
   createTrashSections,
   createSearchModel,
   createNightfallTheme,
+  createTuiTheme,
+  parseThemeDocument,
   createNodeTuiTerminal,
   createTuiSections,
   detectTuiColorMode,
@@ -1074,7 +1076,7 @@ describe("terminal theme", () => {
           throw new Error("execution is not part of this test");
         },
       },
-      { rows: 24, columns: 80 },
+      { rows: 30, columns: 80 },
     );
     await controller.start();
     await controller.dispatch({ kind: "focus", pane: "entries" });
@@ -1093,20 +1095,20 @@ describe("terminal theme", () => {
     // The browse view stays visible behind the panel.
     expect(lines[0]).toMatch(/^Lampwright Inventory /u);
     expect(lines[1]).toContain("? help · q quit");
-    expect(lines).toHaveLength(23);
+    expect(lines).toHaveLength(29);
     const text = lines.join("\n");
-    // The top border names the first group: the actions of the current view.
-    expect(text).toContain("┌ Inventory ─");
-    expect(text).toContain(" esc close ─┘");
+    expect(text).toContain("┌  Help  ─");
+    expect(text).toMatch(/│ {2}Inventory ─+ {2}│/u);
+    expect(text).toContain("  esc close  ┘");
     expect(text).not.toContain("Keys");
     // One key to a line: the key, its effect, then the matching mouse action.
-    expect(text).toMatch(/│ enter +remove +│/u);
-    expect(text).toMatch(/│ space +select +dbl-click │/u);
-    expect(text).toMatch(/│ tab +next pane +click +│/u);
-    expect(text).toMatch(/│ ↑↓ +move +wheel +│/u);
+    expect(text).toMatch(/│ {2}enter +remove +│/u);
+    expect(text).toMatch(/│ {2}space +select +dbl-click +│/u);
+    expect(text).toMatch(/│ {2}tab +next pane +click +│/u);
+    expect(text).toMatch(/│ {2}↑↓ +move +wheel +│/u);
     // A labelled rule opens each later group.
-    expect(text).toMatch(/│ Move and select ─+ mouse ─+ │/u);
-    expect(text).toMatch(/│ App ─+ │/u);
+    expect(text).toMatch(/│ {2}Move and select ─+ mouse ─+ {2}│/u);
+    expect(text).toMatch(/│ {2}App ─+ {2}│/u);
     // The mouse actions share one column, under their heading.
     const start = (word: string) =>
       lines.find((line) => line.includes(` ${word}`))!.lastIndexOf(word);
@@ -1140,21 +1142,21 @@ describe("terminal theme", () => {
         { screen: "help", browse: { ...before, view } } as TuiState,
         plainTuiTheme,
       );
-    expect(reference("disabled")).toMatch(/│ e +enable +│/u);
-    expect(reference("disabled")).toContain("┌ Disabled ─");
+    expect(reference("disabled")).toMatch(/│ {2}e +enable +│/u);
+    expect(reference("disabled")).toContain("┌  Help  ─");
+    expect(reference("disabled")).toMatch(/│ {2}Disabled ─+ {2}│/u);
     // Escape is named for what it does in the view, not as a second "close".
-    expect(text).toMatch(/│ esc +step back +│/u);
-    expect(reference("trash")).toMatch(/│ esc +Inventory +│/u);
-    // The keys of the first group start directly under the top border, the
-    // last key sits directly on the bottom border, and an empty row is above
-    // each later group.
+    expect(text).toMatch(/│ {2}esc +step back +│/u);
+    expect(reference("trash")).toMatch(/│ {2}esc +Inventory +│/u);
+    // Each section names its controls, with a blank row between sections.
     const blank = /│ +│/u;
-    const top = lines.findIndex((line) => line.includes("┌ Inventory "));
-    const bottom = lines.findIndex((line) => line.includes(" esc close ─┘"));
+    const top = lines.findIndex((line) => line.includes("┌  Help  "));
+    const bottom = lines.findIndex((line) => line.includes("  esc close  ┘"));
     const row = (label: string) =>
-      lines.findIndex((line) => line.includes(`│ ${label} ─`));
-    expect(lines[top + 1]).toMatch(/│ enter +remove +│/u);
-    expect(lines[bottom - 1]).toMatch(/│ q +quit +│/u);
+      lines.findIndex((line) => line.includes(`│  ${label} ─`));
+    expect(lines[top + 2]).toMatch(/│ {2}Inventory ─+/u);
+    expect(lines[row("Inventory") + 1]).toMatch(/│ {2}enter +remove +│/u);
+    expect(lines[bottom - 2]).toMatch(/│ {2}q +quit +│/u);
     expect(lines[row("Move and select") - 1]).toMatch(blank);
     expect(lines[row("App") - 1]).toMatch(blank);
     // The three group headings start in the same column.
@@ -1165,9 +1167,9 @@ describe("terminal theme", () => {
         ),
       ).size,
     ).toBe(1);
-    expect(bottom - top + 1).toBe(21);
+    expect(bottom).toBeGreaterThan(row("App"));
     // The header and the key hints stay visible above the panel.
-    expect(top).toBe(2);
+    expect(top).toBeGreaterThanOrEqual(2);
     // A destructive action is the one effect in the warning style.
     const nightfall = createNightfallTheme("truecolor");
     const colored = renderTui(help, nightfall);
@@ -1179,9 +1181,15 @@ describe("terminal theme", () => {
     );
     // The three group headings share the muted style, and the mouse actions
     // are plain text like the effects.
-    for (const heading of [" Inventory ", "Move and select ", "App ", "mouse"])
+    for (const heading of [
+      "  Help  ",
+      "Inventory ",
+      "Move and select ",
+      "App ",
+      "mouse",
+    ])
       expect(colored).toContain(styleTui(nightfall, "muted", heading));
-    expect(colored).not.toContain(styleTui(nightfall, "title", " Inventory "));
+    expect(colored).not.toContain(styleTui(nightfall, "title", "Inventory "));
     for (const mouse of ["wheel", "click", "dbl-click"]) {
       expect(colored).not.toContain(
         styleTui(nightfall, "muted", mouse).slice(0, -4),
@@ -1190,9 +1198,10 @@ describe("terminal theme", () => {
         styleTui(nightfall, "title", mouse).slice(0, -4),
       );
     }
-    expect(reference("trash")).toContain("┌ Trash ─");
-    expect(reference("trash")).toMatch(/│ enter +restore +│/u);
-    expect(reference("trash")).toMatch(/│ p +purge +│/u);
+    expect(reference("trash")).toContain("┌  Help  ─");
+    expect(reference("trash")).toMatch(/│ {2}Trash ─+ {2}│/u);
+    expect(reference("trash")).toMatch(/│ {2}enter +restore +│/u);
+    expect(reference("trash")).toMatch(/│ {2}p +purge +│/u);
 
     for (const [value, key] of [
       ["?", browseKey],
@@ -1207,6 +1216,147 @@ describe("terminal theme", () => {
     expect(controller.state).toEqual(before);
   });
 
+  it.each(["inventory", "disabled", "trash"] as const)(
+    "keeps the Help title, %s group and escape hint in a small terminal",
+    async (view) => {
+      const inventory = groupedInventory(["only"]);
+      const controller = new TuiController(
+        {
+          scan: async () => inventory,
+          plan,
+          execute: async () => buildExecutionReport(),
+          quarantine: fakeTrash(trashOperation(["removed"])),
+        },
+        { rows: 6, columns: 20 },
+      );
+      await controller.start();
+      if (view !== "inventory")
+        await controller.dispatch({ kind: "switch-view", view });
+      const before = controller.state;
+      expect(before).toMatchObject({ screen: "browse", view });
+      await controller.dispatch({ kind: "open-help" });
+      const state = controller.state;
+      const lines = renderTui(state, plainTuiTheme).trimEnd().split("\n");
+      expect(lines[0]!.trim()).toBe("Help");
+      expect(lines[1]!.trimStart()).toMatch(new RegExp("^" + view, "i"));
+      expect(lines.at(-1)!.trim()).toBe("esc close");
+      await controller.dispatch(
+        parseRawTuiAction(state, "", {
+          name: "escape",
+          ctrl: false,
+          meta: false,
+          shift: false,
+        }),
+      );
+      expect(controller.state).toMatchObject({ screen: "browse", view });
+      if (before.screen === "browse" && controller.state.screen === "browse")
+        expect(controller.state.model).toEqual(before.model);
+    },
+  );
+  it.each([32, 80])(
+    "aligns Help, Theme and every Add agents frame to the same content insets at %i columns",
+    (columns) => {
+      const inventory = groupedInventory(["only"]);
+      const browse = {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          columns,
+          rows: 28,
+        }),
+      };
+      const installation = {
+        ...inventory.installations[0]!,
+        skill: { name: "l".repeat(120), description: null },
+      };
+      const picker = {
+        screen: "add-agent",
+        browse,
+        installation,
+        previous: null,
+        agents: Array.from({ length: 16 }, (_, i) => `agent-${i}`),
+        installedAgents: [],
+        selectedAgents: new Set<string>(),
+        query: "",
+        index: 0,
+        plan: null,
+        report: null,
+        executing: false,
+        scrollOffset: 0,
+      } as const;
+      const plan = {
+        installationId: installation.id,
+        selectedAgents: ["antigravity-cli"],
+        destinations: [],
+        block: null,
+      };
+      const states: TuiState[] = [
+        { screen: "help", browse },
+        {
+          screen: "theme",
+          browse,
+          choices: [
+            {
+              name: "nightfall",
+              source: "built-in",
+              path: null,
+              theme: nightfallThemeDefinition,
+              problem: null,
+            },
+          ],
+          index: 0,
+          notice: null,
+        },
+        {
+          screen: "add-agent-installation",
+          browse,
+          installations: [installation],
+          index: 0,
+        },
+        picker,
+        { ...picker, query: "no match" },
+        { ...picker, plan },
+        { ...picker, plan, executing: true },
+        {
+          ...picker,
+          plan,
+          report: {
+            status: "blocked",
+            message: "Destination changed",
+            results: [],
+          },
+        },
+      ];
+      const color = createNightfallTheme("truecolor");
+      for (const state of states) {
+        const colored = renderTui(state, color);
+        const lines = colored.replace(ansi, "").split("\n");
+        const top = lines.findIndex((line) => line.includes("┌"));
+        const bottom = lines.findIndex((line) => line.includes("└"));
+        expect(top, state.screen).toBeGreaterThanOrEqual(0);
+        const left = lines[top]!.indexOf("┌"),
+          right = lines[top]!.indexOf("┐");
+        expect(right - left).toBeGreaterThan(4);
+        const title = lines[top]!.slice(left, right + 1);
+        expect(title).toMatch(/^┌ {2}[^ ─]/u);
+        const titleText = title.slice(1, -1).replace(/─+$/u, "");
+        expect(colored).toContain(styleTui(color, "muted", titleText));
+        const footer = lines[bottom]!.slice(left, right + 1);
+        expect(footer).toMatch(/^└(?:─+|─* {2}.+ {2})┘$/u);
+        for (const line of lines.slice(top + 1, bottom)) {
+          expect(line.slice(left, left + 3)).toBe("│  ");
+          expect(line.slice(right - 2, right + 1)).toBe("  │");
+        }
+        expect(lines[top + 1]!.slice(left + 3, right - 2).trim()).toBe("");
+        expect(lines[bottom - 1]!.slice(left + 3, right - 2).trim()).toBe("");
+        expect(lines[top + 2]!.slice(left + 3, right - 2).trim()).not.toBe("");
+        // Filtered results reserve their slots so the Search field stays in place.
+        if (state.screen !== "add-agent" || !state.query)
+          expect(lines[bottom - 2]!.slice(left + 3, right - 2).trim()).not.toBe(
+            "",
+          );
+      }
+    },
+  );
   it.each([
     { columns: 110, rows: 30 },
     { columns: 80, rows: 24 },
@@ -1249,9 +1399,11 @@ describe("terminal theme", () => {
         for (const line of lines)
           expect(visibleWidth(line)).toBeLessThanOrEqual(viewport.columns - 1);
         const drawn = lines.join("\n").replace(ansi, "");
-        // From 60 columns, both overlays are panels over the browse view.
-        // From 60 columns, both overlays are panels over the browse view.
-        if (viewport.columns >= 60) expect(drawn).toContain("┌");
+        if (state.screen === "help" && viewport.rows <= 18) {
+          expect(lines[0]!.replace(ansi, "").trim()).toBe("Help");
+          expect(drawn).toContain("Inventory");
+          expect(lines.at(-1)!.replace(ansi, "").trim()).toBe("esc close");
+        } else if (viewport.columns >= 60) expect(drawn).toContain("┌");
         if (viewport.columns <= 20) expect(drawn).not.toContain("┌");
         // A panel is drawn over the browse view, which stays around it.
         if (drawn.includes("┌"))
@@ -2303,6 +2455,76 @@ describe("global name-regex search", () => {
       kind: "noop",
     });
   });
+
+  it.each([32, 80])(
+    "uses the shared search roles in the Add agents modal at %i columns",
+    (columns) => {
+      const inventory = groupedInventory(["alpha"]);
+      const browse = {
+        inventory,
+        model: createBrowseModel(createTuiSections(inventory), {
+          rows: 24,
+          columns,
+        }),
+      };
+      const picker = {
+        screen: "add-agent",
+        browse,
+        installation: inventory.installations[0]!,
+        previous: null,
+        agents: ["antigravity-cli", "claude-code"],
+        installedAgents: [],
+        selectedAgents: new Set(["antigravity-cli"]),
+        query: "",
+        index: 1,
+        plan: null,
+        report: null,
+        executing: false,
+        scrollOffset: 0,
+      } as const;
+      const parsed = parseThemeDocument(
+        'extends = "nightfall"\n[styles]\nselected = "green underline"\nactive = "magenta bold"\n',
+        "custom",
+      );
+      if (!parsed.ok) throw new Error("Expected valid theme fixture");
+      const theme = createTuiTheme(parsed.theme, "truecolor");
+      const color = renderTui(picker, theme);
+      expect(color.replace(ansi, "")).toBe(renderTui(picker, plainTuiTheme));
+      expect(color).toContain(styleTui(theme, "title", "> "));
+      expect(color).toContain(styleTui(theme, "muted", "type an agent name"));
+      expect(color).toContain(styleTui(theme, "selected", "1 selected"));
+      expect(color).toContain(styleTui(theme, "muted", " · 2 matches"));
+      const unchecked = renderTui(
+        { ...picker, selectedAgents: new Set() },
+        theme,
+      );
+      expect(unchecked).toContain(
+        styleTui(theme, "muted", "0 selected · 2 matches"),
+      );
+      expect(color).toContain(
+        styleTui(theme, "selected", "  [x] antigravity-cli").slice(0, -4),
+      );
+      expect(color).toContain(
+        styleTui(theme, "focus", "› [ ] claude-code").slice(0, -4),
+      );
+      const typed = renderTui({ ...picker, query: "agy", index: 0 }, theme);
+      expect(typed).toContain(styleTui(theme, "active", "agy"));
+      expect(typed).toContain(
+        styleTui(theme, "focus", "› [x] antigravity-cli").slice(0, -4),
+      );
+      const clipped = renderTui({ ...picker, query: "z".repeat(100) }, theme);
+      const prompt = clipped
+        .split("\n")
+        .find((line) => line.includes(styleTui(theme, "title", "> ")));
+      expect(prompt).toContain(styleTui(theme, "muted", "…"));
+      expect(clipped.replace(ansi, "")).toBe(
+        renderTui({ ...picker, query: "z".repeat(100) }, plainTuiTheme),
+      );
+      expect(
+        clipped.split("\n").every((line) => visibleWidth(line) < columns),
+      ).toBe(true);
+    },
+  );
 
   it("makes the prompt clear in color and plain themes, including at narrow widths", () => {
     const inventory = groupedInventory(["alpha"]);

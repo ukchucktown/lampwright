@@ -9,7 +9,15 @@ import {
   realpath,
   stat,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 import { parseTree, type ParseError } from "jsonc-parser";
 
@@ -54,7 +62,9 @@ import { inspectGitProtection } from "./git-protection.js";
 import { stableId } from "./identity.js";
 import { readSkillMetadata } from "./metadata.js";
 import {
+  canonicalGlobalAgentIds,
   vercelAgentPaths,
+  type VercelAgentPath,
   vercelCanonicalPath,
   vercelLegacyAgentPaths,
   vercelUpdateCandidatePaths,
@@ -171,7 +181,13 @@ async function materializeLockEntry(input: {
     input.environment,
     sanitizedName,
   );
+  const currentPaths = await vercelAgentPaths(
+    input.lock.format,
+    input.environment,
+    sanitizedName,
+  );
   const artifacts = await locateArtifacts(
+    currentPaths,
     input.lock.format,
     input.environment,
     canonicalPath,
@@ -379,6 +395,13 @@ async function materializeLockEntry(input: {
   const agents = [
     ...new Set([
       ...artifacts.map((artifact) => artifact.agentId),
+      ...currentPaths
+        .filter(
+          ({ path }) =>
+            pathKey(path) !== pathKey(canonicalPath) &&
+            presentPaths.has(pathKey(path)),
+        )
+        .map(({ agentId }) => agentId),
       ...(input.lock.format === "project"
         ? declaredEveSubagents(input.entry)
             .filter((subagent) =>
@@ -447,6 +470,27 @@ async function materializeLockEntry(input: {
       confidence: "declared",
     },
     protection: primaryProtection,
+    ...(metadata?.status === "active" &&
+    canonicalArtifact?.location.artifactType.kind === "directory" &&
+    status === "active" &&
+    input.lock.managerVisible &&
+    managerSupportsLockVersion(
+      input.lock.format,
+      numberField(input.lock.value.version)!,
+    ) &&
+    removalUnsafeReason === null &&
+    contentHash !== null
+      ? {
+          agentDestinations: await agentDestinations(
+            currentPaths,
+            canonicalPath,
+            input.lock.format,
+            artifacts,
+            contentHash,
+            localChanges.kind === "unchanged",
+          ),
+        }
+      : {}),
     update,
     removal: {
       managed,
@@ -984,7 +1028,68 @@ function managedRemoval(input: {
   };
 }
 
+async function agentDestinations(
+  paths: readonly VercelAgentPath[],
+  canonicalPath: string,
+  scope: "global" | "project",
+  artifacts: readonly LocatedArtifact[],
+  canonicalHash: string,
+  verifiedProjectHashes: boolean,
+) {
+  const canonicalAgents = new Set(
+    scope === "global" ? canonicalGlobalAgentIds() : [],
+  );
+  const destinations = new Map<string, { path: string; agents: string[] }>();
+  for (const candidate of paths) {
+    const path = canonicalAgents.has(candidate.agentId)
+      ? canonicalPath
+      : candidate.path;
+    const key = pathKey(path);
+    const destination = destinations.get(key) ?? { path, agents: [] };
+    destination.agents.push(candidate.agentId);
+    destinations.set(key, destination);
+  }
+  const directories = new Map(
+    artifacts
+      .filter(
+        ({ location }) =>
+          location.artifactType.kind === "directory" &&
+          location.canonicalPath !== null &&
+          pathKey(location.canonicalPath) === pathKey(location.path) &&
+          pathKey(location.path) !== pathKey(canonicalPath),
+      )
+      .map(({ location }) => [pathKey(location.path), location] as const),
+  );
+  return Promise.all(
+    [...destinations.values()].map(async ({ path, agents }) => {
+      const directory = directories.get(pathKey(path));
+      let verifiedCopy = false;
+      if (directory) {
+        try {
+          // Only an Owner-declared current path with a real Skill file can represent a copy.
+          if (pathKey(await realpath(path)) === pathKey(path)) {
+            const metadata = await skillMetadata(directory, basename(path));
+            verifiedCopy =
+              metadata?.status === "active" &&
+              (verifiedProjectHashes ||
+                (await hashSkillDirectory(path)) === canonicalHash) &&
+              pathKey(await realpath(path)) === pathKey(path);
+          }
+        } catch {
+          // A failed read leaves this destination unverified. Execution still protects occupied paths.
+        }
+      }
+      return {
+        path,
+        agents: agents.sort(),
+        ...(verifiedCopy ? { verifiedCopy: true as const } : {}),
+      };
+    }),
+  );
+}
+
 async function locateArtifacts(
+  currentPaths: readonly VercelAgentPath[],
   scope: "global" | "project",
   environment: InventoryScanEnvironment,
   canonicalPath: string,
@@ -997,7 +1102,7 @@ async function locateArtifacts(
     agentId: "universal",
   });
   for (const candidate of [
-    ...(await vercelAgentPaths(scope, environment, sanitizedName)),
+    ...currentPaths,
     ...vercelLegacyAgentPaths(scope, environment, sanitizedName),
   ]) {
     if (!paths.has(pathKey(candidate.path))) {

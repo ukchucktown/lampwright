@@ -312,6 +312,12 @@ export type SuspensionEvidence =
     }
   | { readonly kind: "unavailable"; readonly reason: string };
 
+export interface AgentDestinationPreview {
+  readonly directories: readonly string[];
+  readonly state: "absent" | "linked" | "blocked";
+  readonly reason: string | null;
+}
+
 export interface Installation {
   readonly id: InstallationId;
   readonly classification: InstallationClassification;
@@ -347,6 +353,13 @@ export interface Installation {
   readonly modifiedAt: string | null;
   readonly ownership: Ownership;
   readonly protection: ProtectionStatus;
+  /** Current Manager destinations for an active canonical Skill eligible for Add agent. */
+  readonly agentDestinations?: readonly {
+    /** Inventory confirmed a directory copy against this Installation. */
+    readonly verifiedCopy?: true;
+    readonly path: string;
+    readonly agents: readonly string[];
+  }[];
   /** Complete offline evidence for one Owner-controlled Update operation. */
   readonly update: UpdateEvidence;
   readonly removal: RemovalEvidence;

@@ -168,6 +168,16 @@ from presentation state, create a filesystem fallback, or write an Update
 preimage to Quarantine or Disabled Storage. The final Inventory must preserve
 the strong identity, source, ref, Scope, and Owner of each successful target.
 
+### Add agent
+
+For one Installation, `createAddAgentModule().previewBatch` accepts the
+selected agent IDs. Its plan contains the Installation ID, the selected
+agents, one action per destination, and any block. Each action identifies
+the agents that share its destination. `executeBatch` returns the overall
+status, a message, and the status, path, agents, and message for each
+destination it attempted. The overall status is `succeeded`, `partial`,
+`blocked`, or `failed`. The CLI retains its single-agent plan and report.
+
 ## Disabled Storage module
 
 Interface:

@@ -768,6 +768,11 @@ describe("the built lampwright executable", () => {
       "Usage:\n  lampwright [--theme <name>]\n  lampwright scan",
     );
     expect(output).toContain("--theme <name>");
+    expect(
+      output
+        .split("\n")
+        .find((line) => line.trimStart().startsWith("lampwright add-agent ")),
+    ).toContain("[--adapter <path>]");
     expect(output).toContain("--trust-adapter");
     expect(output).toContain("--version");
   });

@@ -52,6 +52,9 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       owner: ownerLabel(members),
       note: entryNote(logical, members),
       target: { kind: "logical-skill", logicalSkillId: logical.id },
+      addAgentInstallations: members.filter(
+        (item) => item.agentDestinations?.length,
+      ),
       availabilityTargets: [
         { kind: "logical-skill", logicalSkillId: logical.id },
       ],
@@ -97,6 +100,7 @@ export function createTuiSections(inventory: Inventory): readonly TuiSection[] {
       owner: item.manager?.id ?? item.ownership.kind,
       note: entryNote(null, [item]),
       target: { kind: "installation", installationId: item.id },
+      addAgentInstallations: item.agentDestinations?.length ? [item] : [],
       availabilityTargets: [{ kind: "installation", installationId: item.id }],
     }));
   const sections: TuiSection[] = [];
@@ -265,6 +269,9 @@ function combineIdenticalCopies(
       owner: [...new Set(ordered.map((row) => row.entry.owner))].join(", "),
       note: entryNote(null, members),
       target: first.target,
+      addAgentInstallations: ordered.flatMap(
+        (row) => row.entry.addAgentInstallations ?? [],
+      ),
       targets: ordered.flatMap((row) =>
         row.entry.target === null ? [] : [row.entry.target],
       ),

@@ -175,6 +175,14 @@ themes have the same name, or a custom theme has the name of a built-in theme,
 the first theme keeps the name and the picker lists the other file as not
 usable.
 
+### Modal frames
+
+Help, Theme, and Add agents use `overlayPanel` to draw a muted title and footer
+hint against the left and right content edges, two spaces inside each side
+border. The frame adds a blank row above and below the body when both rows fit
+below the Inventory header and key hints. For a new modal, use `modalFrame`
+to locate the content for pointer input.
+
 ### Theme picker
 
 `ctrl+p` in a browse view opens the theme picker. The key reference lists this
@@ -221,17 +229,16 @@ The second row shows the key hints that apply in the current context. Each key
 is in the title style and its description is muted. The view, the focused pane,
 and the selection decide the hints:
 
-- Inventory: `space select`, `enter remove`, `u update`, `d disable`,
-  `/ search`, and `ctrl+u clear`.
+- Inventory: `space select`, `+ add agent` for an eligible Skill row,
+  `enter remove`, `u update`, `d disable`, `/ search`, and `ctrl+u clear`.
 - Disabled: `space select`, `e enable`, `u update`, `/ search`, and
   `ctrl+u clear`.
 - Trash: `enter restore`, `p purge`, and `esc inventory`.
 - A focused detail pane: `↑↓ scroll`, `PgUp PgDn page`, and `tab pane`.
 - A focused row that no plan can contain: `/ search` and `tab pane`.
 
-The hints of a view do not change with the selection: the row is the same with
-no rows, one row, or more rows selected, and it does not show the number of
-selected rows, because the header status shows it. `u update` stays in the row
+The header status shows the number of selected rows. Inventory shows the Add
+agent hint when the focused or selected row offers Add agent. `u update` stays in the row
 when two or more rows are selected. Update accepts one target, and the terminal
 UI shows a notice when the user presses `u` with more.
 
@@ -252,21 +259,20 @@ the terminal UI draws over the middle of the browse view. The browse view stays
 visible behind the panel in a dim style. The panel starts below the header and
 the key hints when the terminal has the rows.
 
-The panel has one key on each line in three columns: the key, its effect, and
-the mouse action that has the same effect. The keys are in the title style. The
-effects and the mouse actions are plain text. The three group headings and the
-`mouse` heading are muted. The panel has three groups. The first group lists the actions of the current view. The
-top border of the panel shows the name of that view, and the keys of the group
-start directly under the border. A labelled rule opens each of the other two
-groups: the keys for movement and selection, and the application keys. An empty
-row is above each of those two groups. The last key is directly above the
-bottom border, which ends with `esc close`. An effect that removes content,
-`remove` or `purge`, is in the warning style. The `esc` row names the effect of
-Escape in the current view.
+The panel title is `Help`. Its first section lists the commands for the current
+view under `Inventory`, `Disabled`, or `Trash`. The other sections are
+`Move and select` and `App`. Each section starts with a muted heading and a
+horizontal rule. When space permits, a blank row separates the sections.
 
-`?`, `q`, Escape, or Enter closes the panel and keeps the browse position. The
-complete panel has 21 rows. A shorter terminal drops the empty rows between the
-groups first, then the rules, before the key reference fills the screen.
+The panel has one row per key, with columns for the key, its effect, and the
+equivalent mouse action. The keys use the title style. Effects and mouse
+actions use plain text, except that `remove` and `purge` use the warning style.
+The `esc` row describes Escape in the current view. The footer says `esc close`.
+
+A short terminal drops the blank separators first, then the later section rules.
+The full-screen fallback keeps the `Help` title, the current view heading, and
+the close hint. Press `?`, `q`, Escape, or Enter to return to the same browse
+position.
 
 Escape is the first byte of each arrow key and each function key, so the
 terminal waits for the rest of a key sequence before it reports a lone Escape.
@@ -274,9 +280,7 @@ The wait is 50 ms. The default of Node.js is 500 ms, which made Escape slower
 than each other key.
 
 A key chord uses a plus sign, for example `ctrl+t` and `shift+←→`. Two keys for
-one effect have a space between them, for example `PgUp PgDn`. `?`,
-`q`, Escape, or Enter closes the panel and keeps the browse position. When the
-terminal is too small for the panel, the key reference fills the screen.
+one effect have a space between them, for example `PgUp PgDn`.
 
 Colors are semantic decoration, not state. Checkboxes, focus position, labels,
 and words such as `protected`, `broken`, and `failed` preserve the same meaning
@@ -319,6 +323,39 @@ reports are framed across raw-stream chunk boundaries after the complete SGR
 sentinel (`ESC[<`) identifies mouse input, so split report data remains one
 pointer action and its fragments do not become filter input. Incomplete or
 malformed escape sequences remain ordinary keyboard input.
+
+## Add an agent
+
+In Inventory, press `+` on a Vercel-managed Skill. If you selected a row with
+Space, Add agent uses that row even after you move the cursor. Select one
+Skill at a time. If its row contains several eligible Installations, choose
+one by Scope and path. The agent picker opens directly for a single eligible
+Installation.
+
+The picker lists agents that can receive the Skill. It omits agents whose
+current destination contains the canonical Skill, a link to it, or a verified
+Manager-owned copy. As in global search, the `> ` prompt uses the title role,
+the empty hint uses the muted role, and typed text uses the active role.
+The selected role marks the checked count and checked rows outside the focus.
+The focused row keeps its focus style. Type an agent name to filter the list.
+For Antigravity CLI, type `agy`. If it already has the Skill, the picker explains why the
+search has no selectable row. When a search matches both kinds of agent, the
+counts distinguish agents to add from agents that already have the Skill.
+Use the arrows or Page Up and Page Down to move through the results. Press
+Space or click a result to select or clear that agent. A selection stays
+checked when another search hides it. Ctrl+U clears the search and keeps the
+checked agents. If all supported agents have the Skill, the picker shows that
+result and offers Esc to return.
+
+Press Enter to review the checked agents. If none are checked, Enter reviews
+the highlighted agent. The review shows each distinct destination and every
+agent that shares it. Press `y` to confirm all destinations. Esc returns to
+the picker, where Esc again closes it without a write.
+
+Lampwright checks the complete selection before it creates any link. After
+confirmation, the modal shows progress until verification finishes. If a
+write or verification fails, the report gives each destination and its result.
+Links that succeeded remain in place.
 
 ## Sections
 

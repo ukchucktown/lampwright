@@ -4,6 +4,9 @@
   "title": "Lampwright CLI v1 output",
   "oneOf": [
     { "$ref": "#/$defs/inventory" },
+    { "$ref": "#/$defs/addAgentPlanEnvelope" },
+    { "$ref": "#/$defs/addAgentReportEnvelope" },
+    { "$ref": "#/$defs/addAgentConfirmationEnvelope" },
     { "$ref": "#/$defs/availabilityPlanEnvelope" },
     { "$ref": "#/$defs/availabilityReportEnvelope" },
     { "$ref": "#/$defs/updatePlanEnvelope" },
@@ -19,6 +22,102 @@
     { "$ref": "#/$defs/errorEnvelope" }
   ],
   "$defs": {
+    "addAgentPlan": {
+      "type": "object",
+      "required": [
+        "inventoryId",
+        "installationId",
+        "skill",
+        "scope",
+        "agent",
+        "source",
+        "destination",
+        "agents",
+        "directories",
+        "action",
+        "reason"
+      ],
+      "properties": {
+        "inventoryId": { "type": "string", "minLength": 1 },
+        "installationId": { "type": "string", "minLength": 1 },
+        "skill": { "type": "string", "minLength": 1 },
+        "scope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "const": "user" } },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind", "workspacePath"],
+              "properties": {
+                "kind": { "const": "workspace" },
+                "workspacePath": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "agent": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "destination": { "type": ["string", "null"] },
+        "agents": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "directories": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "action": { "enum": ["link", "unchanged", "blocked"] },
+        "reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "addAgentReport": {
+      "type": "object",
+      "required": ["status", "message"],
+      "properties": {
+        "status": {
+          "enum": ["added", "unchanged", "blocked", "failed", "unresolved"]
+        },
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "addAgentPlanEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "add-agent-plan" },
+        "plan": { "$ref": "#/$defs/addAgentPlan" }
+      },
+      "additionalProperties": false
+    },
+    "addAgentReportEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "report"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "add-agent-report" },
+        "report": { "$ref": "#/$defs/addAgentReport" }
+      },
+      "additionalProperties": false
+    },
+    "addAgentConfirmationEnvelope": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "operation", "plan"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "kind": { "const": "confirmation-required" },
+        "operation": { "const": "add-agent" },
+        "plan": { "$ref": "#/$defs/addAgentPlan" }
+      },
+      "additionalProperties": false
+    },
     "inventory": {
       "type": "object",
       "required": [

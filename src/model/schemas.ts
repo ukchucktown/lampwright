@@ -891,6 +891,15 @@ export const installationSchema = z
     modifiedAt: timestamp.nullable(),
     ownership: ownershipSchema,
     protection: protectionStatusSchema,
+    agentDestinations: z
+      .array(
+        z.strictObject({
+          verifiedCopy: z.literal(true).optional(),
+          path: absoluteFilesystemPath,
+          agents: z.array(nonEmptyString).min(1),
+        }),
+      )
+      .optional(),
     update: updateEvidenceSchema,
     removal: removalEvidenceSchema,
     tags: z.array(nonEmptyString),
