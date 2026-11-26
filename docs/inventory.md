@@ -146,7 +146,9 @@ directory containing a regular `SKILL.md`. Directory copies are hashed from
 sorted relative entry names, types, link targets, and file bytes, without
 including timestamps or platform separators.
 
-Directory links are represented at their physical installation paths. A link
+Inventory compares the full device and file IDs of link entries. Two links
+to the same target keep separate Installation paths. If the filesystem
+returns a zero file ID, Inventory uses the normalized entry path. A link
 is inspected only when it directly represents a Skill; the scanner never uses
 a linked root or nested link to recurse into its target. Direct Skill links are
 resolved to collect metadata and strong canonical identity evidence.
