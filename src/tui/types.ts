@@ -365,9 +365,11 @@ export interface TuiThemeState {
   readonly notice: string | null;
 }
 
-/** The key reference, drawn over the browse view it was opened from. */
+/** Context-sensitive shortcuts for the saved browse view. */
 export interface TuiHelpState {
-  /** First visible shortcut row in full-pane Help. Defaults to zero for embedding hosts. */
+  readonly focus?: "sections" | "entries";
+  readonly sectionIndex?: number;
+  /** First visible line in the selected section’s controls. */
   readonly scrollOffset?: number;
   readonly screen: "help";
   readonly browse: TuiBrowseSnapshot;

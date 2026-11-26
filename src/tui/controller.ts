@@ -1,3 +1,4 @@
+import { helpLayout, navigateHelp } from "./help.js";
 import { installedAgentIds } from "../planning/add-agent.js";
 import {
   filteredAgents,
@@ -31,7 +32,6 @@ import {
 } from "./browse.js";
 import {
   agentReviewLayout,
-  helpScrollMetrics,
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
   planScrollMetrics,
@@ -229,26 +229,13 @@ export class TuiController {
       else if (state.screen === "theme") await this.themeAction(state, action);
       else if (state.screen === "help") {
         // Any closing key returns to the exact browse position.
-        if (
-          action.kind === "cancel" ||
-          action.kind === "open-help" ||
-          action.kind === "select"
-        )
+        if (action.kind === "cancel" || action.kind === "open-help")
           this.stateValue = { screen: "browse", ...state.browse };
         else if (action.kind === "quit")
           this.stateValue = { screen: "done", report: null };
-        else if (action.kind === "move" || action.kind === "page") {
-          const { maximumOffset, pageRows } = helpScrollMetrics(state);
-          const delta =
-            action.delta * (action.kind === "page" ? Math.max(1, pageRows) : 1);
-          this.stateValue = {
-            ...state,
-            scrollOffset: Math.min(
-              maximumOffset,
-              Math.max(0, (state.scrollOffset ?? 0) + delta),
-            ),
-          };
-        }
+        else if (action.kind === "select")
+          this.stateValue = { ...state, focus: "entries" };
+        else this.stateValue = navigateHelp(state, action);
       } else if (state.screen === "plan") await this.planAction(state, action);
       else if (state.screen === "availability-plan")
         await this.availabilityPlanAction(state, action);
@@ -1796,7 +1783,7 @@ function resizeState(
       ...resized,
       scrollOffset: Math.min(
         state.scrollOffset ?? 0,
-        helpScrollMetrics(resized).maximumOffset,
+        helpLayout(resized).maximumOffset,
       ),
     };
   }
