@@ -366,10 +366,19 @@ export interface TuiThemeState {
 }
 
 /** Context-sensitive shortcuts for the saved browse view. */
-export interface TuiHelpState {
-  readonly focus?: "sections" | "entries";
-  readonly sectionIndex?: number;
-  /** First visible line in the selected section’s controls. */
+export interface TuiHelpState extends Partial<
+  Pick<
+    TuiBrowseModel,
+    | "focus"
+    | "sectionIndex"
+    | "entryIndex"
+    | "sectionScroll"
+    | "entryScroll"
+    | "leftPercent"
+    | "detailRows"
+  >
+> {
+  /** First visible detail line for the highlighted shortcut. */
   readonly scrollOffset?: number;
   readonly screen: "help";
   readonly browse: TuiBrowseSnapshot;

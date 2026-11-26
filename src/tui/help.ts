@@ -1,8 +1,7 @@
-import { layout } from "./browse.js";
+import { layout, scrollFor, clampPercent, clampDetailRows } from "./browse.js";
 import { fullPaneSize } from "./overlay.js";
-import { searchPosition } from "./search.js";
 import { wrapTerminalLine } from "./text.js";
-import type { TuiAction, TuiHelpState } from "./types.js";
+import type { TuiAction, TuiHelpState, TuiPaneView } from "./types.js";
 
 interface Shortcut {
   readonly key: string;
@@ -172,83 +171,140 @@ function helpSections({ browse }: TuiHelpState): readonly HelpSection[] {
   ];
 }
 
-interface ControlLine {
-  readonly key?: string;
+interface DetailLine {
   readonly text: string;
-  readonly role?: "muted" | "active" | "warning";
+  readonly role?: "active" | "muted" | "warning";
 }
 
-function shortcutLines(
-  shortcuts: readonly Shortcut[],
-  width: number,
-): ControlLine[] {
+function shortcutDetail(shortcut: Shortcut, width: number): DetailLine[] {
   const indent = width >= 16 ? "  " : "";
-  const wrapBody = (text: string) =>
+  const wrap = (text: string) =>
     wrapTerminalLine(text, Math.max(1, width - indent.length), "words");
-  return shortcuts.flatMap(({ key, label, note, mouse, warning }) => {
-    const headingRole = warning ? "warning" : "active";
-    const prefix = key + "  ";
-    const heading: ControlLine[] =
-      prefix.length + label.length <= width
-        ? [{ key: prefix, text: label, role: headingRole }]
-        : [
-            ...wrapTerminalLine(key, Math.max(1, width)).map((text) => ({
-              key: text,
-              text: "",
-            })),
-            ...wrapTerminalLine(label, Math.max(1, width), "words").map(
-              (text) => ({ text, role: headingRole }) as const,
-            ),
-          ];
-    return [
-      ...heading,
-      ...wrapBody(note).map((text) => ({ text: indent + text })),
-      ...(mouse
-        ? wrapBody("Mouse: " + mouse).map((text) => ({
-            text: indent + text,
-            role: "muted" as const,
-          }))
-        : []),
-    ];
-  });
+  return [
+    ...wrapTerminalLine(
+      shortcut.key + "  " + shortcut.label,
+      Math.max(1, width),
+      "words",
+    ).map((text) => ({
+      text,
+      role: shortcut.warning ? ("warning" as const) : ("active" as const),
+    })),
+    ...wrap(shortcut.note).map((text) => ({ text: indent + text })),
+    ...(shortcut.mouse
+      ? wrap("Mouse: " + shortcut.mouse).map((text) => ({
+          text: indent + text,
+          role: "muted" as const,
+        }))
+      : []),
+  ];
+}
+
+function keyList<T>(
+  items: readonly T[],
+  index: number,
+  first: number,
+  height: number,
+): TuiPaneView<T> {
+  const offset = scrollFor(first, index, height, items.length);
+  return {
+    items: items.slice(offset, offset + height),
+    offset,
+    height,
+    total: items.length,
+  };
 }
 
 export function helpLayout(state: TuiHelpState) {
-  const { width, rows, bodyRows } = fullPaneSize(state.browse.model.viewport);
-  const { leftWidth } = layout(state.browse.model);
-  const split =
-    leftWidth >= "› Move and select".length && width - leftWidth - 1 >= 27;
-  const focus = state.focus ?? "sections";
-  const controlsWidth = split ? width - leftWidth - 1 : width;
-  const sections = helpSections(state);
-  const ruleRows = rows >= 7 ? 1 : 0;
-  const pageRows = Math.max(0, bodyRows - ruleRows);
-  const { index, scroll: sectionOffset } = searchPosition(
-    state.sectionIndex ?? 0,
-    0,
-    sections.length,
-    Math.max(1, pageRows),
+  const { model } = state.browse;
+  const grid = layout(
+    {
+      viewport: model.viewport,
+      leftPercent: state.leftPercent ?? model.leftPercent,
+      detailRows: state.detailRows ?? layout(model).detailRows,
+    },
     0,
   );
-  const current = sections[index]!;
-  const controls = shortcutLines(current.shortcuts, controlsWidth);
-  const maximumOffset = Math.max(0, controls.length - pageRows);
-  const offset = Math.min(maximumOffset, Math.max(0, state.scrollOffset ?? 0));
-  return {
-    width,
-    rows,
-    split,
-    focus,
-    leftWidth,
-    current,
-    sections,
-    index,
-    sectionOffset,
-    controls,
+  const allSections = helpSections(state);
+  const longestSummary = Math.max(
+    ...allSections.map(
+      (section) =>
+        section.label.length +
+        (" · " + section.shortcuts.length + " keys").length,
+    ),
+  );
+  const split =
+    grid.leftWidth >= "› Move and select".length &&
+    grid.rightWidth >= longestSummary &&
+    grid.detailRows > 0;
+  const compact = fullPaneSize(model.viewport);
+  const focus = state.focus ?? "sections";
+  const sectionIndex = Math.min(
+    allSections.length - 1,
+    Math.max(0, state.sectionIndex ?? 0),
+  );
+  const current = allSections[sectionIndex]!;
+  const keyIndex = Math.min(
+    current.shortcuts.length - 1,
+    Math.max(0, state.entryIndex ?? 0),
+  );
+  const shortcut = current.shortcuts[keyIndex]!;
+  const keyCount =
+    current.shortcuts.length +
+    (current.shortcuts.length === 1 ? " key" : " keys");
+  const wrapSummary =
+    !split &&
+    compact.bodyRows >= 2 &&
+    (current.label + " · " + keyCount).length > compact.width;
+  const sections = keyList(
+    allSections,
+    sectionIndex,
+    state.sectionScroll ?? 0,
+    split ? grid.paneRows : compact.bodyRows,
+  );
+  const keys = keyList(
+    current.shortcuts,
+    keyIndex,
+    state.entryScroll ?? 0,
+    split ? grid.entryRows : compact.bodyRows - (wrapSummary ? 1 : 0),
+  );
+  const height = split ? grid.detailRows : compact.bodyRows;
+  const lines = shortcutDetail(
+    shortcut,
+    split ? grid.usable - 1 : compact.width,
+  );
+  const offset = Math.max(
+    0,
+    Math.min(state.scrollOffset ?? 0, lines.length - height),
+  );
+  const detail: TuiPaneView<DetailLine> = {
+    items: lines.slice(offset, offset + height),
     offset,
-    maximumOffset,
-    pageRows,
-    firstBodyRow: 2 + ruleRows,
+    height,
+    total: lines.length,
+  };
+  return {
+    grid,
+    split,
+    compact,
+    keyCount,
+    wrapSummary,
+    focus,
+    sections,
+    current,
+    sectionIndex,
+    keys,
+    keyIndex,
+    detail,
+  };
+}
+
+export function settleHelp(state: TuiHelpState): TuiHelpState {
+  const { sections, keys, detail } = helpLayout(state);
+  return {
+    ...state,
+    sectionScroll: sections.offset,
+    entryScroll: keys.offset,
+    scrollOffset: detail.offset,
   };
 }
 
@@ -256,48 +312,73 @@ export function navigateHelp(
   state: TuiHelpState,
   action: TuiAction,
 ): TuiHelpState {
-  if (action.kind === "focus")
-    return action.pane === "detail" ? state : { ...state, focus: action.pane };
-  if (
-    action.kind !== "point-section" &&
-    action.kind !== "move-pane" &&
-    action.kind !== "move" &&
-    action.kind !== "page"
-  )
-    return state;
-  const grid = helpLayout(state);
-  const pane =
-    action.kind === "point-section"
-      ? "sections"
-      : action.kind === "move-pane"
-        ? action.pane
-        : grid.focus;
-  const delta =
-    action.kind === "point-section"
-      ? 0
-      : action.delta *
-        (action.kind === "page" ? Math.max(1, grid.pageRows) : 1);
-  if (pane === "entries")
-    return {
+  const { grid, split, focus, sections, keys, detail, sectionIndex, keyIndex } =
+    helpLayout(state);
+  if (action.kind === "focus") return { ...state, focus: action.pane };
+  if (action.kind === "select")
+    return { ...state, focus: focus === "sections" ? "entries" : "detail" };
+  if (action.kind === "resize-panes" || action.kind === "set-left-percent") {
+    const percent =
+      action.kind === "set-left-percent"
+        ? action.percent
+        : (state.leftPercent ?? state.browse.model.leftPercent) + action.delta;
+    return settleHelp({ ...state, leftPercent: clampPercent(percent) });
+  }
+  if (action.kind === "resize-detail" || action.kind === "set-detail-rows") {
+    const rows =
+      action.kind === "set-detail-rows"
+        ? action.rows
+        : grid.detailRows + action.delta;
+    return settleHelp({
       ...state,
-      focus: pane,
-      scrollOffset: Math.max(
-        0,
-        Math.min(grid.maximumOffset, grid.offset + delta),
-      ),
-    };
-  if (pane !== "sections") return state;
-  const index = Math.min(
-    grid.sections.length - 1,
-    Math.max(
-      0,
-      action.kind === "point-section" ? action.index : grid.index + delta,
-    ),
-  );
-  return {
-    ...state,
-    focus: action.kind === "point-section" && !grid.split ? "entries" : pane,
-    sectionIndex: index,
-    scrollOffset: index === grid.index ? grid.offset : 0,
-  };
+      detailRows: clampDetailRows(state.browse.model, rows, 0),
+    });
+  }
+  if (
+    action.kind === "point-section" ||
+    action.kind === "point-entry" ||
+    action.kind === "move" ||
+    action.kind === "move-pane" ||
+    action.kind === "page"
+  ) {
+    const pane =
+      action.kind === "point-section"
+        ? "sections"
+        : action.kind === "point-entry"
+          ? "entries"
+          : action.kind === "move-pane"
+            ? action.pane
+            : focus;
+    const view =
+      pane === "sections" ? sections : pane === "entries" ? keys : detail;
+    const index =
+      pane === "sections"
+        ? sectionIndex
+        : pane === "entries"
+          ? keyIndex
+          : detail.offset;
+    const next =
+      "index" in action
+        ? action.index
+        : index + action.delta * (action.kind === "page" ? view.height : 1);
+    if (pane === "detail")
+      return settleHelp({ ...state, focus: pane, scrollOffset: next });
+    const position = Math.min(view.total - 1, Math.max(0, next));
+    if (pane === "sections")
+      return settleHelp({
+        ...state,
+        focus: !split && action.kind === "point-section" ? "entries" : pane,
+        sectionIndex: position,
+        ...(position === sectionIndex
+          ? {}
+          : { entryIndex: 0, entryScroll: 0, scrollOffset: 0 }),
+      });
+    return settleHelp({
+      ...state,
+      focus: !split && action.kind === "point-entry" ? "detail" : pane,
+      entryIndex: position,
+      ...(position === keyIndex ? {} : { scrollOffset: 0 }),
+    });
+  }
+  return state;
 }
