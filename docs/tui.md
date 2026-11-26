@@ -260,16 +260,18 @@ checkboxes and the header status show the result.
 Press `?` in Inventory, Disabled, or Trash to open Help for that view.
 The left pane lists the current view, `Move and select`, and `App`.
 Highlight a section to see its name at the top of the right pane. The
-summary includes the key count when it fits. Each row below the summary
-contains one key or chord. The bottom pane
-shows the highlighted key, its action, a short explanation and any mouse
-gesture that has the same effect.
+summary includes the key count when it fits. Each list entry pairs a key or
+chord with its action. Actions align in a column when space permits.
+On narrow screens the action wraps below the key. The theme highlights the
+selected section and every visible line of the selected shortcut. The bottom
+pane shows the key, its action, a short explanation and any mouse gesture
+that has the same effect.
 
-Use Up and Down to move one row in the focused pane. Page Up and Page Down
-move one page. Tab cycles through the sections, keys and detail. Shift+Tab
-cycles in reverse. A click selects a section or key, and the wheel navigates
-the pane under the pointer. The dividers start in the same positions as in
-Inventory. Drag a divider or use Shift with the arrow keys to resize the Help
+Use Up and Down to select a section or shortcut, or to scroll a detail line.
+Page Up and Page Down move one page. Tab cycles through the sections, keys and detail. Shift+Tab
+cycles in reverse. A click on a key or its action selects the same shortcut.
+The wheel navigates the pane under the pointer. The dividers start in the
+same positions as in Inventory. Drag a divider or use Shift with the arrow keys to resize the Help
 panes.
 
 In a wide, short terminal, Help uses the top border row for content when
@@ -279,10 +281,11 @@ Scroll the detail pane to read the remaining lines. The close hint stays visible
 needed, Help also omits the horizontal divider.
 
 In a narrow terminal, the lists stay side by side above the detail pane.
-Section names use shorter labels when necessary. Enter or Right moves focus
-from sections to keys, or from keys to detail. Left moves focus back.
+Section names use shorter labels when necessary. When an action is taller
+than the key pane, Page Down and Page Up show its remaining lines. Enter or
+Right moves focus from sections to keys, or from keys to detail. Left moves focus back.
 At the minimum height the section summary carries the Escape hint. If the
-terminal cannot show a section marker, a complete chord and a detail row,
+terminal cannot show a section label, a complete chord and a detail row,
 Help asks you to resize. Escape still closes Help.
 
 Help is read-only. Press Escape, `?`, or `q` to return to the same

@@ -106,7 +106,7 @@ function helpSections({ browse }: TuiHelpState): readonly HelpSection[] {
         },
         {
           key: "tab",
-          label: "Next pane",
+          label: "Focus next pane",
           note: "Cycle through sections, entries and details. Shift+Tab goes back.",
           mouse: "Click a pane.",
         },
@@ -137,7 +137,7 @@ function helpSections({ browse }: TuiHelpState): readonly HelpSection[] {
             ]),
         {
           key: "ctrl+t",
-          label: "Next view",
+          label: "Switch views",
           note: "Cycle through Inventory, Disabled and Trash.",
           mouse: "Click a view tab.",
         },
@@ -148,30 +148,30 @@ function helpSections({ browse }: TuiHelpState): readonly HelpSection[] {
       shortcuts: [
         {
           key: "ctrl+p",
-          label: "Theme",
+          label: "Choose a theme",
           note: "Preview a theme. Press Enter in the picker to save it.",
         },
         {
           key: "shift+←→",
-          label: "Pane width",
+          label: "Resize section pane",
           note: "Change the width of the section list.",
           mouse: "Drag the vertical divider.",
         },
         {
           key: "shift+↑↓",
-          label: "Detail height",
+          label: "Resize detail pane",
           note: "Change the height of the detail pane.",
           mouse: "Drag the horizontal divider.",
         },
         {
           key: "esc",
-          label: "Back",
+          label: "Go back",
           note:
             view === "disabled" || view === "trash"
               ? "Return to Inventory."
               : "Clear the filter, step back a pane, clear the selection, or exit, in that order.",
         },
-        { key: "q", label: "Quit", note: "Exit Lampwright." },
+        { key: "q", label: "Quit Lampwright", note: "Exit Lampwright." },
       ],
     },
   ];
@@ -230,6 +230,58 @@ function keyList<T>(
   };
 }
 
+interface ShortcutRow {
+  readonly index: number;
+  readonly key: string;
+  readonly definition: string;
+}
+
+/** Each physical row identifies the shortcut that owns it, including wrapped definitions. */
+function shortcutList(
+  shortcuts: readonly Shortcut[],
+  width: number,
+  height: number,
+  selected: number,
+  first: number,
+) {
+  const inline = shortcuts.filter(
+    ({ key, label }) => key.length + 2 + label.length <= width,
+  );
+  const keyWidth = Math.max(0, ...inline.map((item) => item.key.length));
+  const rows: ShortcutRow[] = [];
+  const starts: number[] = [];
+  for (const [index, { key, label }] of shortcuts.entries()) {
+    starts.push(rows.length);
+    if (key.length + 2 + label.length <= width) {
+      const column = Math.min(keyWidth + 2, width - label.length);
+      rows.push({ index, key: key.padEnd(column), definition: label });
+    } else {
+      rows.push({ index, key, definition: "" });
+      for (const line of wrapTerminalLine(label, Math.max(1, width), "words"))
+        rows.push({ index, key: "", definition: line });
+    }
+  }
+  const start = starts[selected]!;
+  const end = starts[selected + 1] ?? rows.length;
+  // Keep the whole item visible when it fits. An oversized item pages within its own lines.
+  const low = Math.min(start, end - height);
+  const high = Math.max(start, end - height);
+  const offset =
+    end === start + 1
+      ? scrollFor(first, start, height, rows.length)
+      : Math.max(
+          0,
+          Math.min(rows.length - height, Math.max(low, Math.min(first, high))),
+        );
+  const view: TuiPaneView<ShortcutRow> = {
+    items: rows.slice(offset, offset + height),
+    offset,
+    total: rows.length,
+    height,
+  };
+  return { view, rows, starts };
+}
+
 const shortSectionLabels: Readonly<Record<string, string>> = {
   Inventory: "Inv",
   Disabled: "Dis",
@@ -256,7 +308,7 @@ export function helpLayout(state: TuiHelpState) {
   );
   const allSections = helpSections(state);
   const sectionWidth = Math.max(
-    ...allSections.map((section) => section.label.length + "› ".length),
+    ...allSections.map((section) => section.label.length),
   );
   const summaryWidth = Math.max(
     ...allSections.map(
@@ -265,13 +317,11 @@ export function helpLayout(state: TuiHelpState) {
     ),
   );
   const { rows: drawableRows } = fullPaneSize(model.viewport);
-  // Leave one character for each focus marker. The longest chord must fit on one row.
-  const chordWidth =
-    1 +
-    Math.max(
-      ...allSections.flatMap((s) => s.shortcuts.map((k) => k.key.length)),
-    );
-  const minLeft = 2;
+  // Keep at least a short section label and the longest complete chord visible.
+  const chordWidth = Math.max(
+    ...allSections.flatMap((s) => s.shortcuts.map((k) => k.key.length)),
+  );
+  const minLeft = "Inv".length;
   const availableWidth = base.usable - 2; // Divider and key scrollbar.
   const visible = availableWidth >= minLeft + chordWidth && drawableRows >= 3;
   const fullLabels = availableWidth >= sectionWidth + summaryWidth;
@@ -323,12 +373,14 @@ export function helpLayout(state: TuiHelpState) {
     state.sectionScroll ?? 0,
     grid.paneRows,
   );
-  const keys = keyList(
+  const shortcuts = shortcutList(
     current.shortcuts,
+    grid.rightWidth,
+    grid.entryRows,
     keyIndex,
     state.entryScroll ?? 0,
-    grid.entryRows,
   );
+  const keys = shortcuts.view;
   const height = grid.detailRows;
   const lines = shortcutDetail(shortcut, grid.usable - 1, height === 1);
   const offset = Math.max(
@@ -351,6 +403,7 @@ export function helpLayout(state: TuiHelpState) {
     current,
     sectionIndex,
     keys,
+    shortcuts,
     keyIndex,
     detail,
   };
@@ -377,6 +430,8 @@ export function navigateHelp(
     focus,
     sections,
     keys,
+    shortcuts,
+    current,
     detail,
     sectionIndex,
     keyIndex,
@@ -425,13 +480,30 @@ export function navigateHelp(
         : pane === "entries"
           ? keyIndex
           : detail.offset;
+    if (pane === "entries" && action.kind === "page") {
+      const anchor = Math.max(shortcuts.starts[keyIndex]!, keys.offset);
+      const target = Math.max(
+        0,
+        Math.min(keys.total - 1, anchor + action.delta * keys.height),
+      );
+      const entryIndex = shortcuts.rows[target]!.index;
+      return settleHelp({
+        ...state,
+        focus: pane,
+        entryIndex,
+        entryScroll: target,
+        ...(entryIndex === keyIndex ? {} : { scrollOffset: 0 }),
+      });
+    }
     const next =
       "index" in action
         ? action.index
         : index + action.delta * (action.kind === "page" ? view.height : 1);
     if (pane === "detail")
       return settleHelp({ ...state, focus: pane, scrollOffset: next });
-    const position = Math.min(view.total - 1, Math.max(0, next));
+    const count =
+      pane === "entries" ? current.shortcuts.length : sections.total;
+    const position = Math.min(count - 1, Math.max(0, next));
     if (pane === "sections")
       return settleHelp({
         ...state,
@@ -445,7 +517,15 @@ export function navigateHelp(
       ...state,
       focus: pane,
       entryIndex: position,
-      ...(position === keyIndex ? {} : { scrollOffset: 0 }),
+      ...(position === keyIndex
+        ? {}
+        : {
+            scrollOffset: 0,
+            ...(action.kind === "point-entry" &&
+            keys.items.some((row) => row.index === position)
+              ? {}
+              : { entryScroll: shortcuts.starts[position]! }),
+          }),
     });
   }
   return state;

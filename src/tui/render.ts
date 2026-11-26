@@ -368,36 +368,28 @@ function renderHelp(
         .join("\n") + "\n"
     );
   }
-  const listRow = (
-    label: string | undefined,
-    active: boolean,
-    pane: "sections" | "entries",
-    width: number,
-  ) => {
-    const marker = active ? "›" : " ";
-    const compactMarker = label !== undefined && label.length + 2 > width;
-    const prefix = marker + (compactMarker ? "" : " ");
-    const value =
-      label && pane === "sections"
-        ? helpSectionLabel(label, width - prefix.length)
-        : label;
-    const text = fit(value ? prefix + value : "", width);
-    return active ? (focus === pane ? style.focus : style.active)(text) : text;
+  const sectionRow = (row: number) => {
+    const item = sections.items[row];
+    const text = fit(
+      item ? helpSectionLabel(item.label, grid.leftWidth) : "",
+      grid.leftWidth,
+    );
+    return item && sections.offset + row === sectionIndex
+      ? (focus === "sections" ? style.focus : style.active)(text)
+      : text;
   };
-  const sectionRow = (row: number, width: number) =>
-    listRow(
-      sections.items[row]?.label,
-      sections.offset + row === sectionIndex,
-      "sections",
-      width,
+  const keyRow = (row: number) => {
+    const item = keys.items[row];
+    if (!item) return fit("", grid.rightWidth);
+    if (item.index === keyIndex)
+      return (focus === "entries" ? style.focus : style.active)(
+        fit(item.key + item.definition, grid.rightWidth),
+      );
+    return fit(
+      style.title(item.key) + style.muted(item.definition),
+      grid.rightWidth,
     );
-  const keyRow = (row: number, width: number) =>
-    listRow(
-      keys.items[row]?.key,
-      keys.offset + row === keyIndex,
-      "entries",
-      width,
-    );
+  };
   const summaryWidth = grid.rightWidth - (footerRows ? 0 : " Esc".length);
   const label = helpSectionLabel(current.label, summaryWidth);
   const count = " · " + keyCount;
@@ -436,11 +428,8 @@ function renderHelp(
     focus,
     keys,
     detail,
-    (row) => sectionRow(row, grid.leftWidth),
-    (row) =>
-      row === 0
-        ? fit(heading, grid.rightWidth)
-        : keyRow(row - 1, grid.rightWidth),
+    sectionRow,
+    (row) => (row === 0 ? fit(heading, grid.rightWidth) : keyRow(row - 1)),
     detailRow,
   );
   return (footerRows ? [...lines, hint] : lines).join("\n") + "\n";
