@@ -284,21 +284,18 @@ function renderHelp(
       item ? helpSectionLabel(item.label, grid.leftWidth) : "",
       grid.leftWidth,
     );
-    return item && sections.offset + row === sectionIndex
-      ? (focus === "sections" ? style.focus : style.active)(text)
+    return focus === "sections" &&
+      item &&
+      sections.offset + row === sectionIndex
+      ? style.focus(text)
       : text;
   };
   const keyRow = (row: number) => {
     const item = keys.items[row];
     if (!item) return fit("", grid.rightWidth);
-    if (item.index === keyIndex)
-      return (focus === "entries" ? style.focus : style.active)(
-        fit(item.key + item.definition, grid.rightWidth),
-      );
-    return fit(
-      style.title(item.key) + style.muted(item.definition),
-      grid.rightWidth,
-    );
+    if (focus === "entries" && item.index === keyIndex)
+      return style.focus(fit(item.key + item.definition, grid.rightWidth));
+    return fit(item.key + style.muted(item.definition), grid.rightWidth);
   };
   const summaryWidth = grid.rightWidth - (footerRows ? 0 : " Esc".length);
   const label = helpSectionLabel(current.label, summaryWidth);

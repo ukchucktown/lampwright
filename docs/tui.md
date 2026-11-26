@@ -262,8 +262,9 @@ The left pane lists the current view, `Move and select`, and `App`.
 Highlight a section to see its name at the top of the right pane. The
 summary includes the key count when it fits. Each list entry pairs a key or
 chord with its action. Actions align in a column when space permits.
-On narrow screens the action wraps below the key. The theme highlights the
-selected section and every visible line of the selected shortcut. The bottom
+On narrow screens the action wraps below the key. Keys use the terminal’s
+normal text color, and actions use the muted theme style. Only the focused
+list highlights its current row. A shortcut’s highlight covers its wrapped action. The bottom
 pane shows the key, its action, a short explanation and any mouse gesture
 that has the same effect.
 
