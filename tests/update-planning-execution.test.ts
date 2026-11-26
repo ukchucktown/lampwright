@@ -172,7 +172,7 @@ function options(
   before: Inventory,
   final: Inventory,
   plan: UpdatePlan,
-  processRunner = {
+  processRunner: ExecutionModuleOptions["processRunner"] = {
     run: vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" })),
   },
 ): ExecutionModuleOptions {

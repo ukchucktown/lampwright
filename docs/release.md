@@ -1,6 +1,6 @@
 # Release readiness and manual publication
 
-Status: GitHub and npm release preparation for `0.4.2`.
+Status: GitHub and npm release preparation for `0.5.0`.
 This document does not authorize a Git tag, npm publication, or GitHub release;
 each external release action still requires the maintainer's explicit approval.
 
@@ -35,12 +35,9 @@ The release configuration follows these current primary-source requirements:
   before a publish job runs. See
   [GitHub deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
 
-As rechecked on 2026-11-18, `lampwright@0.3.0` is the latest npm version,
-private vulnerability reporting is enabled, and the `npm-production` GitHub
-environment exists. Recheck these point-in-time facts immediately before you
-create the tag and publish the package. The checked-in publish workflow also
-verifies the canonical public repository so it cannot emit a release without
-provenance from another checkout.
+Before release, recheck the latest public npm version, GitHub private
+vulnerability reporting, and the `npm-production` environment. The publish
+workflow checks the canonical public repository before it requests provenance.
 
 ## Automated evidence
 
@@ -48,7 +45,7 @@ provenance from another checkout.
 fails unless exactly one package and only files within the documented allowlist
 are returned. It accepts the npm 11 result array and npm 12 lifecycle object,
 then applies the same strict name, version, exports, schemas, executable
-shebang, and content checks. The package must include these `0.4.2` release
+shebang, and content checks. The package must include these `0.5.0` release
 notes and exclude source, tests, scripts, logs, environment files, and
 `node_modules`.
 
@@ -66,9 +63,11 @@ before its publish step is reachable:
 - the `npm-production` GitHub environment;
 - a fresh install, every source gate, and the package-content audit.
 
-It then runs only `npm publish --provenance --access public`. The workflow has
-read-only repository permission plus the OIDC permission required for
-provenance. It has no automatic push, tag, or release trigger.
+The publish job runs `npm publish --provenance --access public`. Only that job
+has the OIDC permission for provenance. After it succeeds, a read-only job on
+macOS, Linux, and Windows installs the exact version from the public registry
+and checks the installed CLI with `--version` and `--help`. The workflow has
+no automatic push, tag, or release trigger.
 
 ## MVP evidence matrix
 
@@ -138,8 +137,8 @@ Preparation (safe before publication):
       independent approval.
 - [ ] Confirm the npm owner account has two-factor authentication enabled.
 - [ ] Recheck npm metadata and confirm `package.json`, the lockfile, these
-      [`0.4.2` release notes](./releases/0.4.2.md), expected CLI output, and the
-      intended `v0.4.2` tag all agree.
+      [`0.5.0` release notes](./releases/0.5.0.md), expected CLI output, and the
+      intended `v0.5.0` tag all agree.
 - [ ] Freeze the intended release commit. Run `npm ci` and every local quality,
       package, runtime-dependency, and full-dependency gate from a clean
       checkout; resolve every release blocker.
@@ -157,22 +156,22 @@ Preparation (safe before publication):
 
 GitHub minor release (manual and separately authorized):
 
-1. Obtain explicit approval to create and push the signed `v0.4.2` tag at the
+1. Obtain explicit approval to create and push the signed `v0.5.0` tag at the
    accepted candidate commit. Verify the remote tag points to that commit.
-2. Create the GitHub `v0.4.2` release from that tag using the reviewed
-   [`0.4.2` release notes](./releases/0.4.2.md), then verify its tag and commit.
+2. Create the GitHub `v0.5.0` release from that tag using the reviewed
+   [`0.5.0` release notes](./releases/0.5.0.md), then verify its tag and commit.
 3. Only after the GitHub release is verified, obtain separate explicit approval
-   to publish `lampwright@0.4.2`.
+   to publish `lampwright@0.5.0`.
 4. Dispatch `Publish to npm` from the exact tag, enter the exact package
-   confirmation `lampwright@0.4.2`, and enter `v0.4.2` as the GitHub release
+   confirmation `lampwright@0.5.0`, and enter `v0.5.0` as the GitHub release
    confirmation. Satisfy the configured environment gate.
 
 Post-publication verification and credential cleanup:
 
-1. Verify `npm view lampwright@0.4.2`, the npm package-page metadata, and
-   `npx lampwright@0.4.2 --version` and `--help` from clean environments.
-2. Verify provenance and signatures with a current npm CLI using
-   `npm audit signatures`, and capture macOS, Linux, and Windows smoke evidence.
+1. Verify `npm view lampwright@0.5.0` and the npm package-page metadata.
+2. Check the `verify-published` job on each operating system for the version
+   and help output from the installed package. Verify provenance and signatures
+   with a current npm CLI using `npm audit signatures`.
 3. Configure npm trusted publishing for owner `ukchucktown`, repository
    `lampwright`, workflow `publish.yml`, environment `npm-production`, and the
    publish action. Verify the OIDC path on supported Node/npm versions.
