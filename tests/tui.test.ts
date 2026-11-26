@@ -1477,6 +1477,52 @@ describe("terminal theme", () => {
       expect(controller.state).toEqual(browse);
     },
   );
+  it.each([terminalThemeDefinition, nightfallThemeDefinition])(
+    "highlights only the focused Help list row with the $name theme",
+    async (definition) => {
+      const controller = new TuiController(
+        {
+          scan: async () => groupedInventory(["one"]),
+          plan,
+          execute: async () => buildExecutionReport(),
+        },
+        { columns: 95, rows: 12 },
+      );
+      await controller.start();
+      await controller.dispatch({ kind: "open-help" });
+      const state = controller.state;
+      if (state.screen !== "help") throw new Error("Expected Help");
+      const theme = createTuiTheme(definition, "truecolor");
+      const { leftWidth, rightWidth } = layout(state.browse.model);
+      const divider = styleTui(theme, "border", "│");
+      const section = "Inventory".padEnd(leftWidth);
+      const plainKey = "enter  " + styleTui(theme, "muted", "Review removal");
+      const highlightedKey = styleTui(
+        theme,
+        "focus",
+        "enter  Review removal".padEnd(rightWidth),
+      );
+      const frame = () => renderTui(controller.state, theme).split("\n");
+
+      expect(
+        frame()[1]!.startsWith(styleTui(theme, "focus", section) + divider),
+      ).toBe(true);
+      expect(frame()[2]).toContain(divider + plainKey);
+      await controller.dispatch({ kind: "focus", pane: "entries" });
+      expect(frame()[1]!.startsWith(section + divider)).toBe(true);
+      expect(frame()[2]).toContain(divider + highlightedKey);
+      expect(frame()[3]).toContain(
+        divider + "u      " + styleTui(theme, "muted", "Review update"),
+      );
+      await controller.dispatch({ kind: "focus", pane: "detail" });
+      expect(frame()[1]!.startsWith(section + divider)).toBe(true);
+      expect(frame()[2]).toContain(divider + plainKey);
+      expect(frame().join("\n")).toContain(
+        styleTui(theme, "warning", "enter  Review removal"),
+      );
+    },
+  );
+
   it("maps stacked definitions to their shortcut and highlights all its visible lines", async () => {
     const viewport = { columns: 32, rows: 18 };
     const controller = new TuiController(
@@ -1528,7 +1574,9 @@ describe("terminal theme", () => {
         styleTui(color, "focus", text.padEnd(rightWidth)),
       );
     }
-    expect(colored.join("\n")).toContain(styleTui(color, "title", "ctrl+p"));
+    expect(colored.join("\n")).toContain(
+      styleTui(color, "border", "│") + "ctrl+p",
+    );
     expect(colored.join("\n")).toContain(
       styleTui(color, "muted", "Choose a theme"),
     );
