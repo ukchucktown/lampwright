@@ -49,21 +49,31 @@ export function pathContains(parentPath: string, childPath: string): boolean {
   const pathModule = windows ? win32 : posix;
   const normalizedParent = normalizeForComparison(parentPath, windows);
   const normalizedChild = normalizeForComparison(childPath, windows);
-  const relativePath = pathModule.relative(normalizedParent, normalizedChild);
+  const prefix = normalizedParent.endsWith(pathModule.sep)
+    ? normalizedParent
+    : normalizedParent + pathModule.sep;
   return (
-    relativePath.length === 0 ||
-    (relativePath !== ".." &&
-      !relativePath.startsWith(`..${pathModule.sep}`) &&
-      !pathModule.isAbsolute(relativePath))
+    normalizedChild === normalizedParent || normalizedChild.startsWith(prefix)
   );
 }
 
 function isWindowsPath(path: string): boolean {
-  return win32.isAbsolute(path);
+  // win32.isAbsolute also accepts /usr/skills. Only drive, UNC or backslash-rooted
+  // spellings identify a Windows path independently of the host doing the planning.
+  return (
+    path.startsWith("\\") ||
+    /^[a-z]:[\\/]/iu.test(path) ||
+    /^\/\/[^/\\]+[\\/][^/\\]+/u.test(path)
+  );
 }
 
 function normalizeForComparison(path: string, windows: boolean): string {
-  const normalized = (windows ? win32 : posix).normalize(path);
+  const flavor = windows ? win32 : posix;
+  const full = flavor.normalize(path);
+  const normalized =
+    full.endsWith(flavor.sep) && full.length > flavor.parse(full).root.length
+      ? full.slice(0, -1)
+      : full;
   return windows ? normalized.toLowerCase() : normalized;
 }
 

@@ -426,6 +426,12 @@ directories that an earlier action created. The final scan verifies each
 result. If only some links succeed, the report identifies those links and the
 reason for each failure.
 
+The preview uses an advisory write check on the nearest existing destination
+directory. On Windows, that check can miss an ACL denial. If the filesystem
+denies directory or link creation, Execution reports the destination as
+`blocked`. If another process creates the destination after review, only a
+verified link to the selected Installation qualifies as `unchanged`.
+
 ## 10. Removal execution
 
 ### 10.1 Managed removal

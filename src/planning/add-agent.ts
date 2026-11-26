@@ -1,11 +1,12 @@
 import type {
   Installation,
+  AgentDestinationPreview,
   Inventory,
   RemovalTarget,
   Scope,
 } from "../model/types.js";
-import { pathKey } from "../inventory/evidence.js";
-import { pathContains } from "../model/paths.js";
+export type { AgentDestinationPreview } from "../model/types.js";
+import { pathContains, mutationPathKey } from "../model/paths.js";
 import { PlanningError } from "./types.js";
 
 export interface AddAgentPlan {
@@ -13,9 +14,11 @@ export interface AddAgentPlan {
   readonly installationId: Installation["id"];
   readonly skill: string;
   readonly scope: Scope;
+  /** Agent requested by the caller. */
   readonly agent: string;
   readonly source: string;
   readonly destination: string | null;
+  /** Every Manager agent sharing this physical destination. */
   readonly agents: readonly string[];
   readonly directories: readonly string[];
   readonly action: "link" | "unchanged" | "blocked";
@@ -34,12 +37,40 @@ export function planAddAgentBatch(
   selectedAgents: readonly string[],
   plans: readonly AddAgentPlan[],
 ): AddAgentBatchPlan {
-  const destinations = plans.filter(
-    (plan, index) =>
-      !plan.destination ||
-      plans.findIndex((other) => other.destination === plan.destination) ===
-        index,
-  );
+  const groups = new Map<string, AddAgentPlan[]>();
+  for (const plan of plans) {
+    const key = plan.destination
+      ? mutationPathKey(plan.destination)
+      : `unavailable:${plan.agent}`;
+    const group = groups.get(key);
+    if (group) group.push(plan);
+    else groups.set(key, [plan]);
+  }
+  const destinations = Array.from(groups.values(), (group) => {
+    const first = group[0]!;
+    if (group.length === 1) return first;
+    const agents = [...new Set(group.flatMap((plan) => plan.agents))].sort();
+    const blocked = group.find((plan) => plan.action === "blocked");
+    const inconsistent = group.some(
+      (plan) =>
+        plan.action !== first.action ||
+        plan.directories.length !== first.directories.length ||
+        plan.directories.some(
+          (path, index) =>
+            mutationPathKey(path) !==
+            mutationPathKey(first.directories[index]!),
+        ),
+    );
+    if (blocked || inconsistent)
+      return {
+        ...first,
+        agents,
+        action: "blocked" as const,
+        reason:
+          blocked?.reason ?? "Conflicting evidence for the shared destination.",
+      };
+    return { ...first, agents };
+  });
   const overlap = destinations.some(
     (a) =>
       a.destination !== null &&
@@ -50,12 +81,16 @@ export function planAddAgentBatch(
           pathContains(a.destination!, b.destination),
       ),
   );
+  const blockedDestination = destinations.find(
+    (plan) => plan.action === "blocked",
+  );
   const block = !selectedAgents.length
     ? "Select at least one agent."
     : overlap
       ? "The selected destinations overlap."
-      : (destinations.find((plan) => plan.action === "blocked")?.reason ??
-        null);
+      : blockedDestination
+        ? (blockedDestination.reason ?? "Add agent is blocked.")
+        : null;
   return {
     installationId: installation.id,
     selectedAgents,
@@ -68,20 +103,20 @@ export function planAddAgentBatch(
 export function linkedAgentIds(
   installation: Installation,
 ): ReadonlySet<string> {
-  const canonical = pathKey(installation.location.path);
+  const canonical = mutationPathKey(installation.location.path);
   const present = new Set([canonical]);
   for (const { location } of installation.removal.supplementalArtifacts ?? []) {
     if (
       (location.artifactType.kind === "symbolic-link" ||
         location.artifactType.kind === "junction") &&
       location.canonicalPath &&
-      pathKey(location.canonicalPath) === canonical
+      mutationPathKey(location.canonicalPath) === canonical
     )
-      present.add(pathKey(location.path));
+      present.add(mutationPathKey(location.path));
   }
   return new Set(
     installation.agentDestinations?.flatMap((item) =>
-      present.has(pathKey(item.path)) ? item.agents : [],
+      present.has(mutationPathKey(item.path)) ? item.agents : [],
     ),
   );
 }
@@ -123,23 +158,23 @@ export function addAgentInstallation(
   return installation;
 }
 
-export interface AgentDestinationPreview {
-  readonly directories: readonly string[];
-  readonly state: "absent" | "linked" | "blocked";
-  readonly reason: string | null;
-}
-
 export function planAddAgent(
   inventory: Inventory,
   installation: Installation,
   agent: string,
   preview: AgentDestinationPreview | null,
 ): AddAgentPlan {
-  const destination = installation.agentDestinations?.find((entry) =>
-    entry.agents.includes(agent),
-  );
+  const registry = installation.agentDestinations ?? [];
+  const destination = registry.find((entry) => entry.agents.includes(agent));
   const source = installation.location.path;
   const path = destination?.path;
+  const affectedAgents = registry
+    .filter(
+      (entry) =>
+        path !== undefined &&
+        mutationPathKey(entry.path) === mutationPathKey(path),
+    )
+    .flatMap((entry) => entry.agents);
   const otherBoundaries = [
     ...inventory.otherFindings
       .filter((item) => item.classification === "system-skill")
@@ -160,8 +195,8 @@ export function planAddAgent(
     [boundary.path, boundary.canonicalPath].some(
       (root) =>
         root !== null &&
-        (pathContains(root, source) ||
-          (path !== undefined && pathContains(root, path))),
+        (pathsOverlap(root, source) ||
+          (path !== undefined && pathsOverlap(root, path))),
     ),
   );
   const reason =
@@ -172,8 +207,10 @@ export function planAddAgent(
     installation.protection.system.kind !== "none" ||
     !installation.agentDestinations
       ? "Add agent requires an active canonical Skill with a supported Vercel Manager record."
-      : path && path !== source && pathContains(source, path)
-        ? "The destination would create a link inside the selected Skill."
+      : path &&
+          mutationPathKey(path) !== mutationPathKey(source) &&
+          pathsOverlap(source, path)
+        ? "The destination overlaps the canonical Skill directory."
         : incompatible
           ? "The selected source or destination overlaps another ownership boundary."
           : !destination
@@ -189,7 +226,7 @@ export function planAddAgent(
     agent,
     source,
     destination: path ?? null,
-    agents: destination?.agents ?? [],
+    agents: [...new Set(affectedAgents)].sort(),
     directories: preview?.directories ?? [],
     action:
       reason !== null || preview?.state === "blocked"
@@ -199,4 +236,8 @@ export function planAddAgent(
           : "link",
     reason,
   };
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return pathContains(left, right) || pathContains(right, left);
 }

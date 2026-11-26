@@ -1,17 +1,27 @@
-import { constants } from "node:fs";
-import { access as checkAccess } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { ArtifactFileSystem } from "../filesystem/artifact-filesystem.js";
-import type { GitProtection } from "../model/types.js";
-import type { AgentDestinationPreview } from "../planning/add-agent.js";
+import type {
+  ArtifactFileSystem,
+  DirectoryWriteAccess,
+} from "../filesystem/artifact-filesystem.js";
+import type { GitProtection, AgentDestinationPreview } from "../model/types.js";
 import { pathKey } from "./evidence.js";
 
 export interface AgentDestinationAccess {
-  readonly fileSystem: ArtifactFileSystem;
+  readonly fileSystem: ArtifactFileSystem & DirectoryWriteAccess;
   readonly inspectGit: (
     path: string,
     creatingDirectory: boolean,
   ) => Promise<GitProtection>;
+}
+
+export async function isCanonicalDirectory(
+  fileSystem: Pick<ArtifactFileSystem, "lstat" | "realpath">,
+  path: string,
+): Promise<boolean> {
+  return (
+    (await fileSystem.lstat(path)).kind === "directory" &&
+    pathKey(await fileSystem.realpath(path)) === pathKey(path)
+  );
 }
 
 export async function inspectAgentDestination(
@@ -27,21 +37,14 @@ export async function inspectAgentDestination(
     reason,
   });
   try {
-    if (
-      (await fileSystem.lstat(source)).kind !== "directory" ||
-      pathKey(await fileSystem.realpath(source)) !== pathKey(source)
-    )
+    if (!(await isCanonicalDirectory(fileSystem, source)))
       return blocked(
         "The canonical Skill directory has a linked ancestor or has moved.",
       );
     let parent = dirname(destination);
     while (true) {
       try {
-        const stats = await fileSystem.lstat(parent);
-        if (
-          stats.kind !== "directory" ||
-          pathKey(await fileSystem.realpath(parent)) !== pathKey(parent)
-        )
+        if (!(await isCanonicalDirectory(fileSystem, parent)))
           return blocked(
             `The destination has a linked or non-directory parent: ${parent}`,
           );
@@ -68,7 +71,7 @@ export async function inspectAgentDestination(
         return { state: "linked", directories, reason: null };
       return blocked(`Another entry occupies the destination: ${destination}`);
     }
-    await checkAccess(parent, constants.W_OK);
+    await fileSystem.checkDirectoryWritable(parent);
     for (const path of [...directories, destination])
       if (
         (await access.inspectGit(path, path !== destination)).kind ===

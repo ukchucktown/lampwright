@@ -9,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join, relative, isAbsolute } from "node:path";
+import { basename, dirname, join, relative, isAbsolute, sep } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -27,7 +27,13 @@ import {
   renderTui,
   plainTuiTheme,
   TuiController,
+  type InventoryCommandRunner,
 } from "../src/index.js";
+import {
+  buildSystemSkillFinding,
+  buildPluginBoundary,
+  buildInstallation,
+} from "../src/testing/model-builders.js";
 import { nodeArtifactFileSystem } from "../src/filesystem/artifact-filesystem.js";
 import { inspectGitProtection } from "../src/inventory/git-protection.js";
 import { systemCommandRunner } from "../src/inventory/process.js";
@@ -48,17 +54,18 @@ async function fixture() {
     skills: { review: { source: "/fixture/source", sourceType: "local" } },
   });
   await writeFile(lockFile, record);
+  const commandRunner: InventoryCommandRunner = {
+    run: async (command) =>
+      command.executable === "git"
+        ? systemCommandRunner.run(command)
+        : command.executable === "fsutil"
+          ? { exitCode: 0, stdout: "Reparse Tag Value : 0xa0000003\r\n" }
+          : { exitCode: 1, stdout: "" },
+  };
   const scanner = createInventoryScanner({
     environment: { homeDirectory: home, workspaceDirectory: workspace },
     now: () => new Date(),
-    commandRunner: {
-      run: async (command) =>
-        command.executable === "git"
-          ? systemCommandRunner.run(command)
-          : command.executable === "fsutil"
-            ? { exitCode: 0, stdout: "Reparse Tag Value : 0xa0000003\r\n" }
-            : { exitCode: 1, stdout: "" },
-    },
+    commandRunner,
   });
   const scan = () => scanner.scan({});
   const addAgent = createAddAgentModule({
@@ -77,6 +84,7 @@ async function fixture() {
   return {
     home,
     workspace,
+    commandRunner,
     source,
     destination,
     skillFile,
@@ -263,6 +271,373 @@ describe("Add agent", () => {
       ],
     });
     expect(await realpath(f.destination)).toBe(f.source);
+  });
+  it.each(["file", "directory", "other-link", "correct-link"])(
+    "rechecks a racing %s at the destination",
+    async (kind) => {
+      const f = await fixture();
+      const mod = createAddAgentModule({
+        scan: f.scan,
+        inspectGit: (path) =>
+          inspectGitProtection(path, false, systemCommandRunner),
+        fileSystem: {
+          ...nodeArtifactFileSystem,
+          async symlink(source, destination, type) {
+            if (kind === "file") await writeFile(destination, "untouched");
+            else if (kind === "directory") await mkdir(destination);
+            else
+              await nodeArtifactFileSystem.symlink(
+                kind === "correct-link" ? source : f.workspace,
+                destination,
+                type,
+              );
+            throw Object.assign(new Error("entry already exists"), {
+              code: "EEXIST",
+            });
+          },
+        },
+      });
+      const plan = await mod.previewBatch(f.inventory, f.installation, [
+        "antigravity-cli",
+      ]);
+      const report = await mod.executeBatch(plan, true);
+      expect(report).toMatchObject({
+        status: kind === "correct-link" ? "succeeded" : "blocked",
+        results: [
+          { status: kind === "correct-link" ? "unchanged" : "blocked" },
+        ],
+      });
+      if (kind === "file")
+        expect(await readFile(f.destination, "utf8")).toBe("untouched");
+      if (kind === "other-link")
+        expect(await realpath(f.destination)).toBe(f.workspace);
+    },
+  );
+
+  it.each(["EPERM", "EACCES"])(
+    "reports a %s from the actual link as blocked for every destination",
+    async (code) => {
+      const f = await fixture();
+      const mod = createAddAgentModule({
+        scan: f.scan,
+        inspectGit: (path) =>
+          inspectGitProtection(path, false, systemCommandRunner),
+        fileSystem: {
+          ...nodeArtifactFileSystem,
+          async symlink() {
+            throw Object.assign(new Error("permission denied"), { code });
+          },
+        },
+      });
+      const plan = await mod.previewBatch(f.inventory, f.installation, [
+        "antigravity-cli",
+        "claude-code",
+      ]);
+      expect(await mod.executeBatch(plan, true)).toMatchObject({
+        status: "blocked",
+        results: [{ status: "blocked" }, { status: "blocked" }],
+      });
+      await expect(lstat(f.destination)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  it("uses the injected directory write check during preview without creating files", async () => {
+    const f = await fixture();
+    const mod = createAddAgentModule({
+      scan: f.scan,
+      inspectGit: (path) =>
+        inspectGitProtection(path, false, systemCommandRunner),
+      fileSystem: {
+        ...nodeArtifactFileSystem,
+        async checkDirectoryWritable() {
+          throw Object.assign(new Error("fixture access denied"), {
+            code: "EACCES",
+          });
+        },
+      },
+    });
+    expect(
+      await mod.preview(f.inventory, f.installation, "antigravity-cli"),
+    ).toMatchObject({
+      action: "blocked",
+      reason: expect.stringContaining("fixture access denied"),
+    });
+    await expect(lstat(dirname(f.destination))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("executes the refreshed second plan after creating a shared parent", async () => {
+    const f = await fixture();
+    const shared = join(f.home, "new");
+    const requests: string[] = [];
+    const environment = {
+      homeDirectory: f.home,
+      workspaceDirectory: f.workspace,
+      agentHomeDirectories: {
+        "claude-code": join(shared, "claude"),
+        grok: join(shared, "grok"),
+      },
+    };
+    const scanner = createInventoryScanner({
+      environment,
+      now: () => new Date(),
+      commandRunner: f.commandRunner,
+      executablePresent: async () => false,
+    });
+    const scan = () => scanner.scan({});
+    const mod = createAddAgentModule({
+      scan,
+      inspectGit: (path) =>
+        inspectGitProtection(path, false, systemCommandRunner),
+      fileSystem: {
+        ...nodeArtifactFileSystem,
+        async mkdir(path) {
+          requests.push(path);
+          await nodeArtifactFileSystem.mkdir(path);
+        },
+      },
+    });
+    const inventory = await scan();
+    const selected = inventory.installations.find(
+      (item) => item.id === f.installation.id,
+    )!;
+    const plan = await mod.previewBatch(inventory, selected, [
+      "grok",
+      "claude-code",
+    ]);
+    expect(
+      plan.destinations.every((item) => item.directories.includes(shared)),
+    ).toBe(true);
+    expect((await mod.executeBatch(plan, true)).status).toBe("succeeded");
+    expect(requests.filter((path) => path === shared)).toHaveLength(1);
+  });
+
+  it.each([false, true])(
+    "refreshes all selected aliases after an earlier link (secondary alias blocked: %s)",
+    async (denyAlias) => {
+      const f = await fixture();
+      // Equivalent spelling with a repeated separator, preserving the real final component.
+      const alias =
+        dirname(f.destination) + sep + sep + basename(f.destination);
+      const scan = async () => {
+        const snapshot = await f.scan();
+        const installations = snapshot.installations.map((item) =>
+          item.id !== f.installation.id
+            ? item
+            : {
+                ...item,
+                agentDestinations: item.agentDestinations!.flatMap(
+                  (destination) =>
+                    destination.path !== f.destination
+                      ? [destination]
+                      : [
+                          { path: f.destination, agents: ["antigravity"] },
+                          { path: alias, agents: ["antigravity-cli"] },
+                        ],
+                ),
+              },
+        );
+        return { ...snapshot, installations };
+      };
+      let links = 0;
+      const mod = createAddAgentModule({
+        scan,
+        inspectGit: (path, creatingDirectory) =>
+          denyAlias && links > 0 && path === alias
+            ? Promise.resolve({ kind: "protected", worktreeRoot: f.home })
+            : inspectGitProtection(
+                path,
+                false,
+                systemCommandRunner,
+                creatingDirectory,
+              ),
+        fileSystem: {
+          ...nodeArtifactFileSystem,
+          async symlink(source, destination, type) {
+            await nodeArtifactFileSystem.symlink(source, destination, type);
+            links++;
+          },
+        },
+      });
+      const inventory = await scan();
+      const installation = inventory.installations.find(
+        (item) => item.id === f.installation.id,
+      )!;
+      const plan = await mod.previewBatch(inventory, installation, [
+        "aider-desk",
+        "antigravity-cli",
+        "antigravity",
+      ]);
+      expect(plan.block).toBeNull();
+      expect(plan.destinations.map((item) => item.agents)).toEqual([
+        ["aider-desk"],
+        ["antigravity", "antigravity-cli"],
+      ]);
+      const report = await mod.executeBatch(plan, true);
+      expect(report).toMatchObject({
+        status: denyAlias ? "partial" : "succeeded",
+        results: [
+          { status: "added" },
+          {
+            agents: ["antigravity", "antigravity-cli"],
+            status: denyAlias ? "blocked" : "added",
+          },
+        ],
+      });
+      expect(links).toBe(denyAlias ? 1 : 2);
+      if (denyAlias)
+        await expect(lstat(f.destination)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      else expect(await realpath(f.destination)).toBe(f.source);
+    },
+  );
+
+  describe.each(["system", "plugin", "installation"] as const)(
+    "protects an independent %s boundary",
+    (kind) => {
+      it.each([
+        "inside-source",
+        "around-source",
+        "inside-destination",
+        "around-destination",
+      ] as const)("blocks %s and preserves its content", async (relation) => {
+        const f = await fixture();
+        const protectedPath =
+          relation === "inside-source"
+            ? join(f.source, "child")
+            : relation === "around-source"
+              ? dirname(f.source)
+              : relation === "inside-destination"
+                ? join(f.destination, "child")
+                : dirname(f.destination);
+        await mkdir(protectedPath, { recursive: true });
+        const sentinel = join(protectedPath, "untouched.txt");
+        await writeFile(sentinel, "user content");
+        const location = {
+          path: protectedPath,
+          canonicalPath: protectedPath,
+          artifactType: { kind: "directory" as const },
+        };
+        const scan = async () => {
+          const snapshot = await f.scan();
+          if (kind === "system")
+            return {
+              ...snapshot,
+              otherFindings: [
+                ...snapshot.otherFindings,
+                buildSystemSkillFinding({ location }),
+              ],
+            };
+          if (kind === "plugin")
+            return {
+              ...snapshot,
+              plugins: [
+                ...snapshot.plugins,
+                buildPluginBoundary({
+                  resources: [
+                    {
+                      kind: "other",
+                      id: "plugin-content",
+                      location,
+                      protection: f.installation.protection,
+                      cleanupId: null,
+                    },
+                  ],
+                }),
+              ],
+            };
+          return {
+            ...snapshot,
+            installations: [
+              ...snapshot.installations,
+              buildInstallation({
+                id: "unrelated",
+                location,
+                identity: {
+                  strongEvidence: [
+                    {
+                      kind: "canonical-target",
+                      strength: "strong",
+                      canonicalPath: protectedPath,
+                    },
+                  ],
+                  weakEvidence: [],
+                },
+              }),
+            ],
+          };
+        };
+        const inventory = await scan();
+        const selected = inventory.installations.find(
+          (item) => item.id === f.installation.id,
+        )!;
+        const mod = createAddAgentModule({
+          scan,
+          inspectGit: (path) =>
+            inspectGitProtection(path, false, systemCommandRunner),
+          fileSystem: nodeArtifactFileSystem,
+        });
+        const plan = await mod.preview(inventory, selected, "antigravity-cli");
+        expect(plan).toMatchObject({
+          action: "blocked",
+          reason: expect.stringContaining("ownership boundary"),
+        });
+        expect((await mod.execute(plan, true)).status).toBe("blocked");
+        expect(await readFile(sentinel, "utf8")).toBe("user content");
+        if (relation !== "inside-destination")
+          await expect(lstat(f.destination)).rejects.toMatchObject({
+            code: "ENOENT",
+          });
+      });
+    },
+  );
+
+  it("ignores pointer input at the resize prompt and accepts a click after the picker appears", async () => {
+    const f = await fixture();
+    const controller = controllerFor(f);
+    await controller.start();
+    await controller.dispatch({ kind: "add-agent" });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 7, columns: 80 },
+    });
+    expect(renderTui(controller.state, plainTuiTheme)).toContain(
+      "Resize terminal",
+    );
+    for (let row = 1; row <= 7; row++) {
+      const click = { pressed: true, button: 0, column: 40, row };
+      for (const button of [0, 64])
+        expect(
+          mouseAction(
+            controller.state,
+            { ...click, button },
+            { dragging: false, doubleClick: false },
+          ),
+        ).toEqual({ kind: "noop" });
+    }
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 8, columns: 80 },
+    });
+    const lines = renderTui(controller.state, plainTuiTheme).split("\n");
+    const index = lines.findIndex((line) => line.includes("› [ ]"));
+    expect(index).toBeGreaterThan(0);
+    const click = {
+      pressed: true,
+      button: 0,
+      column: lines[index]!.indexOf("› [ ]") + 1,
+      row: index + 1,
+    };
+    expect(
+      mouseAction(controller.state, click, {
+        dragging: false,
+        doubleClick: false,
+      }),
+    ).toEqual({ kind: "point-agent", index: 0 });
   });
   it("hides confirmed copies, links and canonical readers while leaving a conflicting directory for review", async () => {
     const f = await fixture();

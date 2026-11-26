@@ -411,8 +411,8 @@ export function addAgentReviewLines(
 function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
   const style = createPaint(theme);
   const viewport = state.browse.model.viewport;
-  const { width, reviewRows } = agentModalSize(state);
-  if (viewport.rows < 8 || viewport.columns < 24)
+  const { compact, width, reviewRows } = agentModalSize(state);
+  if (compact)
     return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
   let body: readonly string[];
   let hint: string;

@@ -141,7 +141,7 @@ Usage:
   lampwright scan [--json] [--adapter <path>]
   lampwright disable <selector...> [--dry-run] [--yes] [--force] [--json] [--adapter <path>]
   lampwright enable <selector...> [--dry-run] [--yes] [--json] [--adapter <path>]
-  lampwright add-agent <selector> <agent-id> [--dry-run] [--yes] [--json]
+  lampwright add-agent <selector> <agent-id> [--dry-run] [--yes] [--json] [--adapter <path>]
   lampwright update <selector> [--dry-run] [--yes] [--json] [--adapter <path>]
   lampwright remove <selector...> [--all] [--include-plugins] [--dry-run] [--yes] [--force] [--brute-force] [--json] [--adapter <path>]
   lampwright restore <entry-id> [--dry-run] [--yes] [--json]

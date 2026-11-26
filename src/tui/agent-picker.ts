@@ -23,6 +23,7 @@ export function agentModalSize(state: TuiAddAgentState) {
   const viewport = state.browse.model.viewport;
   const { rows } = viewport;
   return {
+    compact: rows < 8 || viewport.columns < 24,
     width: modalContentWidth(viewport, 70),
     listRows: Math.max(1, Math.min(12, rows - 10)),
     reviewRows: Math.max(1, Math.min(18, rows - 8)),
@@ -30,7 +31,7 @@ export function agentModalSize(state: TuiAddAgentState) {
 }
 
 export function agentPickerLayout(state: TuiAddAgentState) {
-  const { width, listRows } = agentModalSize(state);
+  const { compact, width, listRows } = agentModalSize(state);
   const matches = filteredAgents(state);
   const installedMatches = state.query.trim()
     ? matchingAgents(state.installedAgents, state.query)
@@ -66,11 +67,13 @@ export function agentPickerLayout(state: TuiAddAgentState) {
           ]
         : ["space select", "esc back"];
   const headers = 2;
-  const frame = modalFrame(
-    state.browse.model.viewport,
-    width,
-    headers + listRows + shortcuts.length,
-  );
+  const frame = compact
+    ? null
+    : modalFrame(
+        state.browse.model.viewport,
+        width,
+        headers + listRows + shortcuts.length,
+      );
   return {
     width,
     listRows,

@@ -2,6 +2,7 @@ import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   inspectAgentDestination,
+  isCanonicalDirectory,
   hasCode,
   type AgentDestinationAccess,
 } from "../inventory/agent-destination.js";
@@ -68,7 +69,7 @@ export function createAddAgentModule(
         try {
           const parent = dirname(path);
           if (
-            pathKey(await fileSystem.realpath(parent)) !== pathKey(parent) ||
+            !(await isCanonicalDirectory(fileSystem, parent)) ||
             (await options.inspectGit(path, path !== destination)).kind ===
               "protected"
           )
@@ -77,11 +78,7 @@ export function createAddAgentModule(
               message: `The parent or Git protection changed for ${path}.`,
             };
           if (path === destination) {
-            if (
-              (await fileSystem.lstat(plan.source)).kind !== "directory" ||
-              pathKey(await fileSystem.realpath(plan.source)) !==
-                pathKey(plan.source)
-            )
+            if (!(await isCanonicalDirectory(fileSystem, plan.source)))
               return {
                 status: "blocked",
                 message: "The canonical Skill directory changed.",
@@ -94,22 +91,44 @@ export function createAddAgentModule(
             added = true;
           } else {
             await fileSystem.mkdir(path);
-            directoriesCreated.add(path);
+            directoriesCreated.add(pathKey(path));
           }
         } catch (error) {
-          if (!hasCode(error, "EEXIST"))
+          if (hasCode(error, "EEXIST")) {
+            if (path === destination) {
+              const occupant = await inspectAgentDestination(
+                plan.source,
+                destination,
+                options,
+              );
+              if (occupant.state !== "linked")
+                return {
+                  status: "blocked",
+                  message:
+                    occupant.reason ??
+                    `The destination changed: ${destination}.`,
+                };
+            } else if (!(await isCanonicalDirectory(fileSystem, path))) {
+              return {
+                status: "blocked",
+                message: `Another entry occupies ${path}.`,
+              };
+            }
+          } else if (
+            hasCode(error, "EPERM") ||
+            hasCode(error, "EACCES") ||
+            hasCode(error, "EROFS")
+          ) {
+            return {
+              status: "blocked",
+              message: `The filesystem denied write access to ${path}.`,
+            };
+          } else {
             return {
               status: "failed",
               message: error instanceof Error ? error.message : String(error),
             };
-          if (
-            path !== destination &&
-            (await fileSystem.lstat(path)).kind !== "directory"
-          )
-            return {
-              status: "blocked",
-              message: `Another entry occupies ${path}.`,
-            };
+          }
         }
       }
     }
@@ -119,7 +138,7 @@ export function createAddAgentModule(
     };
   }
 
-  async function verified(
+  async function destinationVerified(
     after: Installation,
     plan: AddAgentPlan,
   ): Promise<boolean> {
@@ -165,6 +184,7 @@ export function createAddAgentModule(
     const results: AddAgentDestinationResult[] = [];
     const directoriesCreated = new Set<string>();
     for (const plan of fresh.destinations) {
+      let currentPlan = plan;
       let result: AddAgentReport;
       try {
         if (results.length > 0) {
@@ -172,37 +192,49 @@ export function createAddAgentModule(
           const installation = current.installations.find(
             (item) => item.id === original.id,
           );
+          const selectedAliases = fresh.selectedAgents.filter((agent) =>
+            plan.agents.includes(agent),
+          );
+          const refreshed =
+            installation &&
+            (await previewBatch(current, installation, selectedAliases));
           const next =
-            installation && (await preview(current, installation, plan.agent));
+            refreshed &&
+            refreshed.block === null &&
+            refreshed.destinations.length === 1
+              ? refreshed.destinations[0]
+              : undefined;
           // Earlier links change the Inventory fingerprint and can create common parents.
           const expected = {
             ...plan,
             inventoryId: current.id,
             directories: plan.directories.filter(
-              (path) => !directoriesCreated.has(path),
+              (path) => !directoriesCreated.has(pathKey(path)),
             ),
           };
           if (
+            !next ||
             !installation ||
-            !preserved(original, installation) ||
+            !installationPreserved(original, installation) ||
             !isDeepStrictEqual(next, expected)
           ) {
             results.push({
-              ...identity(plan),
+              ...resultDestination(plan),
               status: "blocked",
               message: "The Installation or destination changed after review.",
             });
             continue;
           }
+          currentPlan = next;
         }
-        result = await apply(plan, directoriesCreated);
+        result = await apply(currentPlan, directoriesCreated);
       } catch (error) {
         result = {
           status: "failed",
           message: error instanceof Error ? error.message : String(error),
         };
       }
-      results.push({ ...identity(plan), ...result });
+      results.push({ ...resultDestination(plan), ...result });
     }
     try {
       const final = (await options.scan()).installations.find(
@@ -212,8 +244,8 @@ export function createAddAgentModule(
         if (
           succeeded(result) &&
           (!final ||
-            !preserved(original, final) ||
-            !(await verified(final, fresh.destinations[index]!)))
+            !installationPreserved(original, final) ||
+            !(await destinationVerified(final, fresh.destinations[index]!)))
         )
           results[index] = {
             ...result,
@@ -237,7 +269,9 @@ export function createAddAgentModule(
         ? "succeeded"
         : completed > 0
           ? "partial"
-          : "failed";
+          : results.every((result) => result.status === "blocked")
+            ? "blocked"
+            : "failed";
     const message =
       results.length === 1
         ? results[0]!.message
@@ -264,7 +298,7 @@ export function createAddAgentModule(
   return { preview, execute, previewBatch, executeBatch };
 }
 
-function identity(plan: AddAgentPlan) {
+function resultDestination(plan: AddAgentPlan) {
   return { destination: plan.destination, agents: plan.agents };
 }
 
@@ -272,7 +306,10 @@ function succeeded(result: AddAgentReport): boolean {
   return result.status === "added" || result.status === "unchanged";
 }
 
-function preserved(before: Installation, after: Installation): boolean {
+function installationPreserved(
+  before: Installation,
+  after: Installation,
+): boolean {
   return (
     after.status === "active" &&
     after.location.path === before.location.path &&

@@ -312,6 +312,12 @@ export type SuspensionEvidence =
     }
   | { readonly kind: "unavailable"; readonly reason: string };
 
+export interface AgentDestinationPreview {
+  readonly directories: readonly string[];
+  readonly state: "absent" | "linked" | "blocked";
+  readonly reason: string | null;
+}
+
 export interface Installation {
   readonly id: InstallationId;
   readonly classification: InstallationClassification;

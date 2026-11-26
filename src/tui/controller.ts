@@ -499,22 +499,22 @@ export class TuiController {
 
     if (action.kind === "add-agent" && state.view === "inventory") {
       const entry = addAgentEntry(state);
-      const copies = entry?.addAgentInstallations ?? [];
+      const installations = entry?.addAgentInstallations ?? [];
       let notice = "Select one installed Skill to add an agent.";
       if (entry) {
         if (!this.dependencies.addAgent)
           notice = "Add agent is unavailable in this host.";
-        else if (copies.length === 0)
+        else if (installations.length === 0)
           notice = "Add agent requires an active canonical Vercel Skill.";
         else {
           const browse = browseSnapshot(state);
-          if (copies.length === 1)
-            this.openAgentPicker(browse, copies[0]!, null);
+          if (installations.length === 1)
+            this.openAgentPicker(browse, installations[0]!, null);
           else
             this.stateValue = {
               screen: "add-agent-installation",
               browse,
-              installations: [...copies].sort(
+              installations: [...installations].sort(
                 (a, b) =>
                   a.scope.kind.localeCompare(b.scope.kind) ||
                   a.location.path.localeCompare(b.location.path),

@@ -8,6 +8,7 @@ export * from "./quarantine/index.js";
 export * from "./disabled-storage/index.js";
 export type {
   ArtifactFileSystem,
+  DirectoryWriteAccess,
   ArtifactFileStats,
   ArtifactLink,
 } from "./filesystem/artifact-filesystem.js";
