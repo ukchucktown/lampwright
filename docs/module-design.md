@@ -178,6 +178,13 @@ status, a message, and the status, path, agents, and message for each
 destination it attempted. The overall status is `succeeded`, `partial`,
 `blocked`, or `failed`. The CLI retains its single-agent plan and report.
 
+The terminal UI reads the `stage` field of `TuiAddAgentState` to select the
+picker controls and content. The `selection` stage holds the search and checked
+agents. The `review` stage retains that picker model alongside its plan so
+Escape can restore the selection. The `execution` stage requires the
+confirmed plan. Success refreshes Inventory. For other outcomes, the
+`result` stage holds the report until the user dismisses it.
+
 ## Disabled Storage module
 
 Interface:

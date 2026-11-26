@@ -1,9 +1,15 @@
 import { modalContentWidth, modalFrame } from "./overlay.js";
 import { currentEntry } from "./browse.js";
-import type { TuiAddAgentState, TuiBrowseState } from "./types.js";
+import type {
+  TuiAddAgentState,
+  TuiBrowseState,
+  TuiAddAgentPickerModel,
+} from "./types.js";
 
-export function filteredAgents(state: TuiAddAgentState): readonly string[] {
-  return matchingAgents(state.agents, state.query);
+export function filteredAgents(
+  picker: TuiAddAgentPickerModel,
+): readonly string[] {
+  return matchingAgents(picker.agents, picker.query);
 }
 
 function matchingAgents(agents: readonly string[], value: string) {
@@ -30,14 +36,17 @@ export function agentModalSize(state: TuiAddAgentState) {
   };
 }
 
-export function agentPickerLayout(state: TuiAddAgentState) {
+export function agentPickerLayout(
+  state: Extract<TuiAddAgentState, { stage: "selection" }>,
+) {
   const { compact, width, listRows } = agentModalSize(state);
-  const matches = filteredAgents(state);
-  const installedMatches = state.query.trim()
-    ? matchingAgents(state.installedAgents, state.query)
+  const picker = state.picker;
+  const matches = filteredAgents(picker);
+  const installedMatches = picker.query.trim()
+    ? matchingAgents(picker.installedAgents, picker.query)
     : [];
   let emptyMessage = "No matching agents";
-  if (!state.query.trim() && state.agents.length === 0)
+  if (!picker.query.trim() && picker.agents.length === 0)
     emptyMessage = "All supported agents already have this skill.";
   else if (installedMatches.length === 1) {
     const agent = installedMatches[0]!;
@@ -46,10 +55,13 @@ export function agentPickerLayout(state: TuiAddAgentState) {
     emptyMessage = `All ${installedMatches.length} matching agents already have this skill.`;
   const offset = Math.max(
     0,
-    Math.min(matches.length - listRows, state.index - Math.floor(listRows / 2)),
+    Math.min(
+      matches.length - listRows,
+      picker.index - Math.floor(listRows / 2),
+    ),
   );
   const longHint = "↑↓ PgUp/PgDn move · space select · enter review · esc back";
-  const hint = !state.agents.length
+  const hint = !picker.agents.length
     ? "esc back"
     : width >= longHint.length + 3
       ? longHint
@@ -57,7 +69,7 @@ export function agentPickerLayout(state: TuiAddAgentState) {
         ? "enter review · esc back"
         : "enter review";
   const shortcuts =
-    !state.agents.length || hint === longHint
+    !picker.agents.length || hint === longHint
       ? []
       : width >= 30
         ? [

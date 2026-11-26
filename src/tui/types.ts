@@ -326,21 +326,34 @@ export interface TuiAddAgentInstallationState {
   readonly index: number;
 }
 
-export interface TuiAddAgentState {
+export interface TuiAddAgentPickerModel {
   readonly previous: TuiAddAgentInstallationState | null;
-  readonly screen: "add-agent";
-  readonly browse: TuiBrowseSnapshot;
-  readonly installation: Installation;
   readonly agents: readonly string[];
   readonly installedAgents: readonly string[];
   readonly index: number;
   readonly query: string;
   readonly selectedAgents: ReadonlySet<string>;
-  readonly plan: AddAgentBatchPlan | null;
-  readonly report: AddAgentBatchReport | null;
-  readonly executing: boolean;
-  readonly scrollOffset: number;
 }
+
+export type TuiAddAgentState = {
+  readonly screen: "add-agent";
+  readonly browse: TuiBrowseSnapshot;
+  readonly installation: Installation;
+} & (
+  | { readonly stage: "selection"; readonly picker: TuiAddAgentPickerModel }
+  | {
+      readonly stage: "review";
+      readonly picker: TuiAddAgentPickerModel;
+      readonly plan: AddAgentBatchPlan;
+      readonly scrollOffset: number;
+    }
+  | { readonly stage: "execution"; readonly plan: AddAgentBatchPlan }
+  | {
+      readonly stage: "result";
+      readonly report: AddAgentBatchReport;
+      readonly scrollOffset: number;
+    }
+);
 
 export interface TuiThemeState {
   readonly screen: "theme";

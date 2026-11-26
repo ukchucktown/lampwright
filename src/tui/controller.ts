@@ -336,8 +336,7 @@ export class TuiController {
     if (
       !this.addAgentExecution &&
       state.screen === "add-agent" &&
-      state.executing &&
-      state.plan
+      state.stage === "execution"
     ) {
       this.addAgentExecution = this.dependencies
         .addAgent!.executeBatch(state.plan, true)
@@ -346,9 +345,11 @@ export class TuiController {
             this.stateValue.screen === "add-agent" ? this.stateValue : state;
           if (report.status !== "succeeded") {
             this.stateValue = {
-              ...latest,
+              screen: "add-agent",
+              stage: "result",
+              browse: latest.browse,
+              installation: state.installation,
               report,
-              executing: false,
               scrollOffset: 0,
             };
             return;
@@ -648,21 +649,20 @@ export class TuiController {
     const installed = installedAgentIds(installation);
     this.stateValue = {
       screen: "add-agent",
+      stage: "selection",
       browse,
       installation,
-      previous,
-      executing: false,
-      selectedAgents: new Set(),
-      query: "",
-      report: null,
-      installedAgents: [...installed].sort(),
-      agents: installation
-        .agentDestinations!.flatMap((item) => item.agents)
-        .filter((agent) => !installed.has(agent))
-        .sort(),
-      index: 0,
-      plan: null,
-      scrollOffset: 0,
+      picker: {
+        previous,
+        selectedAgents: new Set(),
+        query: "",
+        index: 0,
+        installedAgents: [...installed].sort(),
+        agents: installation
+          .agentDestinations!.flatMap((item) => item.agents)
+          .filter((agent) => !installed.has(agent))
+          .sort(),
+      },
     };
   }
 
@@ -670,37 +670,23 @@ export class TuiController {
     state: TuiAddAgentState | TuiAddAgentInstallationState,
     action: TuiAction,
   ): Promise<void> {
-    if (state.screen === "add-agent" && state.executing) return;
-    const module = this.dependencies.addAgent!;
+    if (state.screen === "add-agent" && state.stage === "execution") return;
     if (action.kind === "quit") {
       this.stateValue = { screen: "done", report: null };
       return;
     }
-    if (
-      state.screen === "add-agent" &&
-      state.report &&
-      (action.kind === "cancel" || action.kind === "select")
-    ) {
-      await this.start(state.browse.model.viewport);
-      return;
-    }
-    if (action.kind === "cancel") {
-      if (state.screen === "add-agent" && state.plan)
-        this.stateValue = { ...state, plan: null, scrollOffset: 0 };
-      else if (state.screen === "add-agent" && state.previous)
-        this.stateValue = { ...state.previous, browse: state.browse };
-      else this.stateValue = { screen: "browse", ...state.browse };
-      return;
-    }
-    if (action.kind === "move" || action.kind === "page") {
-      const rows =
-        state.screen === "add-agent"
-          ? state.plan
-            ? agentModalSize(state).reviewRows
-            : agentModalSize(state).listRows
-          : Math.max(1, state.browse.model.viewport.rows - 5);
-      const delta = action.delta * (action.kind === "page" ? rows : 1);
-      if (state.screen === "add-agent-installation") {
+    if (state.screen === "add-agent-installation") {
+      if (action.kind === "cancel")
+        this.stateValue = { screen: "browse", ...state.browse };
+      else if (action.kind === "select")
+        this.openAgentPicker(
+          state.browse,
+          state.installations[state.index]!,
+          state,
+        );
+      else if (action.kind === "move" || action.kind === "page") {
+        const pageRows = Math.max(1, state.browse.model.viewport.rows - 5);
+        const delta = action.delta * (action.kind === "page" ? pageRows : 1);
         this.stateValue = {
           ...state,
           index: Math.max(
@@ -708,81 +694,106 @@ export class TuiController {
             Math.min(state.installations.length - 1, state.index + delta),
           ),
         };
-        return;
       }
-      this.stateValue = state.plan
-        ? {
-            ...state,
-            scrollOffset: Math.max(
-              0,
-              Math.min(
-                Math.max(0, addAgentReviewLines(state).length - rows),
-                state.scrollOffset + delta,
-              ),
-            ),
-          }
-        : {
-            ...state,
+      return;
+    }
+    const modal = {
+      screen: state.screen,
+      browse: state.browse,
+      installation: state.installation,
+    };
+    if (state.stage === "selection") {
+      const picker = state.picker;
+      if (action.kind === "cancel") {
+        this.stateValue = picker.previous
+          ? { ...picker.previous, browse: state.browse }
+          : { screen: "browse", ...state.browse };
+      } else if (action.kind === "move" || action.kind === "page") {
+        const delta =
+          action.delta *
+          (action.kind === "page" ? agentModalSize(state).listRows : 1);
+        this.stateValue = {
+          ...state,
+          picker: {
+            ...picker,
             index: Math.max(
               0,
-              Math.min(filteredAgents(state).length - 1, state.index + delta),
+              Math.min(filteredAgents(picker).length - 1, picker.index + delta),
             ),
-          };
-      return;
-    }
-    if (state.screen === "add-agent-installation") {
-      if (action.kind === "select")
-        this.openAgentPicker(
-          state.browse,
-          state.installations[state.index]!,
-          state,
-        );
-      return;
-    }
-    if (state.report) return;
-    if (state.plan === null) {
-      if (
+          },
+        };
+      } else if (
         action.kind === "append-query" ||
         action.kind === "delete-query" ||
         action.kind === "clear-query"
       ) {
         const query =
           action.kind === "append-query"
-            ? state.query + action.value
+            ? picker.query + action.value
             : action.kind === "clear-query"
               ? ""
-              : [...state.query].slice(0, -1).join("");
-        this.stateValue = { ...state, query, index: 0 };
-        return;
-      }
-      const index = action.kind === "point-agent" ? action.index : state.index;
-      const focused = filteredAgents(state)[index];
-      if (
-        (action.kind === "toggle-select" || action.kind === "point-agent") &&
-        focused
+              : [...picker.query].slice(0, -1).join("");
+        this.stateValue = { ...state, picker: { ...picker, query, index: 0 } };
+      } else if (
+        action.kind === "toggle-select" ||
+        action.kind === "point-agent" ||
+        action.kind === "select"
       ) {
-        const checked = new Set(state.selectedAgents);
-        if (checked.has(focused)) checked.delete(focused);
-        else checked.add(focused);
-        this.stateValue = { ...state, index, selectedAgents: checked };
+        const index =
+          action.kind === "point-agent" ? action.index : picker.index;
+        const focused = filteredAgents(picker)[index];
+        if (action.kind === "select") {
+          const agents = picker.selectedAgents.size
+            ? [...picker.selectedAgents]
+            : focused
+              ? [focused]
+              : [];
+          if (!agents.length) return;
+          const plan = await this.dependencies.addAgent!.previewBatch(
+            state.browse.inventory,
+            state.installation,
+            agents,
+          );
+          this.stateValue = {
+            ...modal,
+            stage: "review",
+            picker,
+            plan,
+            scrollOffset: 0,
+          };
+        } else if (focused) {
+          const checked = new Set(picker.selectedAgents);
+          if (checked.has(focused)) checked.delete(focused);
+          else checked.add(focused);
+          this.stateValue = {
+            ...state,
+            picker: { ...picker, index, selectedAgents: checked },
+          };
+        }
       }
-      if (action.kind === "select") {
-        const agents = state.selectedAgents.size
-          ? [...state.selectedAgents]
-          : focused
-            ? [focused]
-            : [];
-        if (!agents.length) return;
-        const plan = await module.previewBatch(
-          state.browse.inventory,
-          state.installation,
-          agents,
-        );
-        this.stateValue = { ...state, plan, scrollOffset: 0 };
-      }
-    } else if (!state.plan.block && action.kind === "confirm") {
+      return;
+    }
+    if (action.kind === "move" || action.kind === "page") {
+      const rows = agentModalSize(state).reviewRows;
+      const delta = action.delta * (action.kind === "page" ? rows : 1);
+      this.stateValue = {
+        ...state,
+        scrollOffset: Math.max(
+          0,
+          Math.min(
+            Math.max(0, addAgentReviewLines(state).length - rows),
+            state.scrollOffset + delta,
+          ),
+        ),
+      };
+    } else if (state.stage === "result") {
+      if (action.kind === "cancel" || action.kind === "select")
+        await this.start(state.browse.model.viewport);
+    } else if (action.kind === "cancel") {
+      this.stateValue = { ...modal, stage: "selection", picker: state.picker };
+    } else if (action.kind === "confirm" && !state.plan.block) {
       this.addAgentExecution = null;
-      this.stateValue = { ...state, executing: true };
+      this.stateValue = { ...modal, stage: "execution", plan: state.plan };
     }
   }
 

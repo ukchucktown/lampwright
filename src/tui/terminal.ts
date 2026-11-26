@@ -131,7 +131,7 @@ export function mouseAction(
   report: MouseReport,
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
-  if (state.screen === "add-agent" && !state.plan) {
+  if (state.screen === "add-agent" && state.stage === "selection") {
     const layout = agentPickerLayout(state);
     const { firstRow, firstColumn } = layout;
     if (
@@ -156,7 +156,8 @@ export function mouseAction(
     state.screen === "plan" ||
     state.screen === "report" ||
     state.screen === "add-agent-installation" ||
-    state.screen === "add-agent" ||
+    (state.screen === "add-agent" &&
+      (state.stage === "review" || state.stage === "result")) ||
     state.screen === "availability-plan" ||
     state.screen === "availability-report" ||
     state.screen === "update-plan" ||
@@ -384,7 +385,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (state.screen === "help")
     return value === "quit" ? { kind: "quit" } : { kind: "cancel" };
-  if (state.screen === "add-agent" && !state.plan) {
+  if (state.screen === "add-agent" && state.stage === "selection") {
     if (value === "" || value === "review" || value === "enter")
       return { kind: "select" };
     if (value === "up" || value === "down")
@@ -402,7 +403,7 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (
     state.screen === "add-agent" &&
-    state.report &&
+    state.stage === "result" &&
     (value === "" || value === "back")
   )
     return { kind: "cancel" };
@@ -428,7 +429,8 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
   }
   if (
     state.screen === "plan" ||
-    state.screen === "add-agent" ||
+    (state.screen === "add-agent" &&
+      (state.stage === "review" || state.stage === "result")) ||
     state.screen === "availability-plan" ||
     state.screen === "update-plan"
   ) {
@@ -697,7 +699,7 @@ export function parseRawTuiAction(
       : { kind: "noop" };
   if (
     state.screen !== "search" &&
-    !(state.screen === "add-agent" && !state.plan) &&
+    !(state.screen === "add-agent" && state.stage === "selection") &&
     !key.ctrl &&
     !key.meta &&
     text === "q"
@@ -766,7 +768,7 @@ export function parseRawTuiAction(
       return { kind: "append-query", value: text };
     return { kind: "noop" };
   }
-  if (state.screen === "add-agent" && !state.plan) {
+  if (state.screen === "add-agent" && state.stage === "selection") {
     if (key.name === "escape") return { kind: "cancel" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
@@ -781,7 +783,7 @@ export function parseRawTuiAction(
   }
   if (
     state.screen === "add-agent" &&
-    state.report &&
+    state.stage === "result" &&
     (key.name === "return" || key.name === "enter")
   )
     return { kind: "cancel" };
@@ -809,7 +811,8 @@ export function parseRawTuiAction(
   }
   if (
     state.screen === "plan" ||
-    state.screen === "add-agent" ||
+    (state.screen === "add-agent" &&
+      (state.stage === "review" || state.stage === "result")) ||
     state.screen === "availability-plan" ||
     state.screen === "update-plan"
   ) {

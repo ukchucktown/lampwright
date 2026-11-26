@@ -1268,20 +1268,18 @@ describe("terminal theme", () => {
         ...inventory.installations[0]!,
         skill: { name: "l".repeat(120), description: null },
       };
+      const modal = { screen: "add-agent", browse, installation } as const;
       const picker = {
-        screen: "add-agent",
-        browse,
-        installation,
-        previous: null,
-        agents: Array.from({ length: 16 }, (_, i) => `agent-${i}`),
-        installedAgents: [],
-        selectedAgents: new Set<string>(),
-        query: "",
-        index: 0,
-        plan: null,
-        report: null,
-        executing: false,
-        scrollOffset: 0,
+        ...modal,
+        stage: "selection",
+        picker: {
+          previous: null,
+          agents: Array.from({ length: 16 }, (_, i) => `agent-${i}`),
+          installedAgents: [],
+          selectedAgents: new Set<string>(),
+          query: "",
+          index: 0,
+        },
       } as const;
       const plan = {
         installationId: installation.id,
@@ -1313,12 +1311,19 @@ describe("terminal theme", () => {
           index: 0,
         },
         picker,
-        { ...picker, query: "no match" },
-        { ...picker, plan },
-        { ...picker, plan, executing: true },
+        { ...picker, picker: { ...picker.picker, query: "no match" } },
         {
-          ...picker,
+          ...modal,
+          stage: "review",
+          picker: picker.picker,
           plan,
+          scrollOffset: 0,
+        },
+        { ...modal, stage: "execution", plan },
+        {
+          ...modal,
+          stage: "result",
+          scrollOffset: 0,
           report: {
             status: "blocked",
             message: "Destination changed",
@@ -1350,7 +1355,11 @@ describe("terminal theme", () => {
         expect(lines[bottom - 1]!.slice(left + 3, right - 2).trim()).toBe("");
         expect(lines[top + 2]!.slice(left + 3, right - 2).trim()).not.toBe("");
         // Filtered results reserve their slots so the Search field stays in place.
-        if (state.screen !== "add-agent" || !state.query)
+        if (
+          state.screen !== "add-agent" ||
+          state.stage !== "selection" ||
+          !state.picker.query
+        )
           expect(lines[bottom - 2]!.slice(left + 3, right - 2).trim()).not.toBe(
             "",
           );
@@ -2469,18 +2478,17 @@ describe("global name-regex search", () => {
       };
       const picker = {
         screen: "add-agent",
+        stage: "selection",
         browse,
         installation: inventory.installations[0]!,
-        previous: null,
-        agents: ["antigravity-cli", "claude-code"],
-        installedAgents: [],
-        selectedAgents: new Set(["antigravity-cli"]),
-        query: "",
-        index: 1,
-        plan: null,
-        report: null,
-        executing: false,
-        scrollOffset: 0,
+        picker: {
+          previous: null,
+          agents: ["antigravity-cli", "claude-code"],
+          installedAgents: [],
+          selectedAgents: new Set(["antigravity-cli"]),
+          query: "",
+          index: 1,
+        },
       } as const;
       const parsed = parseThemeDocument(
         'extends = "nightfall"\n[styles]\nselected = "green underline"\nactive = "magenta bold"\n',
@@ -2495,7 +2503,7 @@ describe("global name-regex search", () => {
       expect(color).toContain(styleTui(theme, "selected", "1 selected"));
       expect(color).toContain(styleTui(theme, "muted", " · 2 matches"));
       const unchecked = renderTui(
-        { ...picker, selectedAgents: new Set() },
+        { ...picker, picker: { ...picker.picker, selectedAgents: new Set() } },
         theme,
       );
       expect(unchecked).toContain(
@@ -2507,18 +2515,27 @@ describe("global name-regex search", () => {
       expect(color).toContain(
         styleTui(theme, "focus", "› [ ] claude-code").slice(0, -4),
       );
-      const typed = renderTui({ ...picker, query: "agy", index: 0 }, theme);
+      const typed = renderTui(
+        { ...picker, picker: { ...picker.picker, query: "agy", index: 0 } },
+        theme,
+      );
       expect(typed).toContain(styleTui(theme, "active", "agy"));
       expect(typed).toContain(
         styleTui(theme, "focus", "› [x] antigravity-cli").slice(0, -4),
       );
-      const clipped = renderTui({ ...picker, query: "z".repeat(100) }, theme);
+      const clipped = renderTui(
+        { ...picker, picker: { ...picker.picker, query: "z".repeat(100) } },
+        theme,
+      );
       const prompt = clipped
         .split("\n")
         .find((line) => line.includes(styleTui(theme, "title", "> ")));
       expect(prompt).toContain(styleTui(theme, "muted", "…"));
       expect(clipped.replace(ansi, "")).toBe(
-        renderTui({ ...picker, query: "z".repeat(100) }, plainTuiTheme),
+        renderTui(
+          { ...picker, picker: { ...picker.picker, query: "z".repeat(100) } },
+          plainTuiTheme,
+        ),
       );
       expect(
         clipped.split("\n").every((line) => visibleWidth(line) < columns),
