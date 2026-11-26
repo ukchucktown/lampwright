@@ -1,4 +1,10 @@
-import { layout, scrollFor, clampPercent, clampDetailRows } from "./browse.js";
+import {
+  layout,
+  scrollFor,
+  clampPercent,
+  clampDetailRows,
+  type PaneGrid,
+} from "./browse.js";
 import { fullPaneSize } from "./overlay.js";
 import { wrapTerminalLine } from "./text.js";
 import type { TuiAction, TuiHelpState, TuiPaneView } from "./types.js";
@@ -60,7 +66,7 @@ function helpSections({ browse }: TuiHelpState): readonly HelpSection[] {
               {
                 key: "enter",
                 label: "Review removal",
-                note: "Check what would be removed for the checked items or the focused entry.",
+                note: "Inspect files for the checked items or the focused entry.",
                 warning: true,
               },
               ...(inventory.installations.some(
@@ -176,27 +182,37 @@ interface DetailLine {
   readonly role?: "active" | "muted" | "warning";
 }
 
-function shortcutDetail(shortcut: Shortcut, width: number): DetailLine[] {
-  const indent = width >= 16 ? "  " : "";
-  const wrap = (text: string) =>
-    wrapTerminalLine(text, Math.max(1, width - indent.length), "words");
-  return [
-    ...wrapTerminalLine(
-      shortcut.key + "  " + shortcut.label,
-      Math.max(1, width),
-      "words",
-    ).map((text) => ({
-      text,
-      role: shortcut.warning ? ("warning" as const) : ("active" as const),
-    })),
-    ...wrap(shortcut.note).map((text) => ({ text: indent + text })),
-    ...(shortcut.mouse
-      ? wrap("Mouse: " + shortcut.mouse).map((text) => ({
-          text: indent + text,
-          role: "muted" as const,
-        }))
-      : []),
-  ];
+function shortcutDetail(
+  shortcut: Shortcut,
+  width: number,
+  singleRow: boolean,
+): DetailLine[] {
+  const indent = !singleRow && width >= 16 ? "  " : "";
+  const wrap = (text: string, padding = "") =>
+    wrapTerminalLine(text, Math.max(1, width - padding.length), "words").map(
+      (line) => padding + line,
+    );
+  const heading = shortcut.key + "  " + shortcut.label;
+  const role = shortcut.warning ? "warning" : "active";
+  const mouse = shortcut.mouse ? "Mouse: " + shortcut.mouse : "";
+  const titleLines: DetailLine[] = wrap(heading).map((text) => ({
+    text,
+    role,
+  }));
+  const noteLines: DetailLine[] = wrap(shortcut.note, indent).map((text) => ({
+    text,
+  }));
+  const mouseLines: DetailLine[] = mouse
+    ? wrap(mouse, indent).map((text) => ({ text, role: "muted" }))
+    : [];
+  if (!singleRow) return [...titleLines, ...noteLines, ...mouseLines];
+
+  const explanation = mouse ? shortcut.note + "  " + mouse : shortcut.note;
+  const complete = heading + " · " + explanation;
+  if (complete.length <= width) return [{ text: complete, role }];
+  if (explanation.length <= width)
+    return [{ text: explanation }, ...titleLines];
+  return [...noteLines, ...mouseLines, ...titleLines];
 }
 
 function keyList<T>(
@@ -214,9 +230,23 @@ function keyList<T>(
   };
 }
 
+const shortSectionLabels: Readonly<Record<string, string>> = {
+  Inventory: "Inv",
+  Disabled: "Dis",
+  Trash: "Trash",
+  "Move and select": "Move",
+  App: "App",
+};
+
+export function helpSectionLabel(label: string, width: number): string {
+  if (label.length <= width) return label;
+  const short = shortSectionLabels[label] ?? label;
+  return short.length <= width ? short : short.slice(0, Math.max(1, width));
+}
+
 export function helpLayout(state: TuiHelpState) {
   const { model } = state.browse;
-  const grid = layout(
+  const base = layout(
     {
       viewport: model.viewport,
       leftPercent: state.leftPercent ?? model.leftPercent,
@@ -225,18 +255,54 @@ export function helpLayout(state: TuiHelpState) {
     0,
   );
   const allSections = helpSections(state);
-  const longestSummary = Math.max(
+  const sectionWidth = Math.max(
+    ...allSections.map((section) => section.label.length + "› ".length),
+  );
+  const summaryWidth = Math.max(
     ...allSections.map(
       (section) =>
-        section.label.length +
-        (" · " + section.shortcuts.length + " keys").length,
+        (section.label + " · " + section.shortcuts.length + " keys").length,
     ),
   );
-  const split =
-    grid.leftWidth >= "› Move and select".length &&
-    grid.rightWidth >= longestSummary &&
-    grid.detailRows > 0;
-  const compact = fullPaneSize(model.viewport);
+  const { rows: drawableRows } = fullPaneSize(model.viewport);
+  // Leave one character for each focus marker. The longest chord must fit on one row.
+  const chordWidth =
+    1 +
+    Math.max(
+      ...allSections.flatMap((s) => s.shortcuts.map((k) => k.key.length)),
+    );
+  const minLeft = 2;
+  const availableWidth = base.usable - 2; // Divider and key scrollbar.
+  const visible = availableWidth >= minLeft + chordWidth && drawableRows >= 3;
+  const fullLabels = availableWidth >= sectionWidth + summaryWidth;
+  const minimumLeft = fullLabels ? sectionWidth : minLeft;
+  const maximumLeft = availableWidth - (fullLabels ? summaryWidth : chordWidth);
+  const leftWidth = Math.max(
+    minimumLeft,
+    Math.min(base.leftWidth, maximumLeft),
+  );
+  // At the minimum height the summary carries the Escape hint in place of the footer.
+  const footerRows = drawableRows <= 3 ? 0 : 1;
+  const listRows = Math.max(
+    2,
+    Math.min(allSections.length, drawableRows - footerRows - 1),
+  );
+  const spareRows = drawableRows - listRows - footerRows - 1;
+  const compactHeight = spareRows < 2 || (!fullLabels && base.detailRows === 1);
+  const grid: PaneGrid = {
+    ...base,
+    leftWidth,
+    rightWidth: Math.max(0, availableWidth - leftWidth),
+    ...(compactHeight
+      ? {
+          paneRows: listRows,
+          entryRows: listRows - 1,
+          detailRows: Math.max(1, 1 + spareRows - (spareRows > 0 ? 1 : 0)),
+          hideTopRule: true,
+          hideDetailRule: spareRows <= 0,
+        }
+      : {}),
+  };
   const focus = state.focus ?? "sections";
   const sectionIndex = Math.min(
     allSections.length - 1,
@@ -251,27 +317,20 @@ export function helpLayout(state: TuiHelpState) {
   const keyCount =
     current.shortcuts.length +
     (current.shortcuts.length === 1 ? " key" : " keys");
-  const wrapSummary =
-    !split &&
-    compact.bodyRows >= 2 &&
-    (current.label + " · " + keyCount).length > compact.width;
   const sections = keyList(
     allSections,
     sectionIndex,
     state.sectionScroll ?? 0,
-    split ? grid.paneRows : compact.bodyRows,
+    grid.paneRows,
   );
   const keys = keyList(
     current.shortcuts,
     keyIndex,
     state.entryScroll ?? 0,
-    split ? grid.entryRows : compact.bodyRows - (wrapSummary ? 1 : 0),
+    grid.entryRows,
   );
-  const height = split ? grid.detailRows : compact.bodyRows;
-  const lines = shortcutDetail(
-    shortcut,
-    split ? grid.usable - 1 : compact.width,
-  );
+  const height = grid.detailRows;
+  const lines = shortcutDetail(shortcut, grid.usable - 1, height === 1);
   const offset = Math.max(
     0,
     Math.min(state.scrollOffset ?? 0, lines.length - height),
@@ -284,10 +343,9 @@ export function helpLayout(state: TuiHelpState) {
   };
   return {
     grid,
-    split,
-    compact,
+    visible,
+    footerRows,
     keyCount,
-    wrapSummary,
     focus,
     sections,
     current,
@@ -299,7 +357,8 @@ export function helpLayout(state: TuiHelpState) {
 }
 
 export function settleHelp(state: TuiHelpState): TuiHelpState {
-  const { sections, keys, detail } = helpLayout(state);
+  const { visible, sections, keys, detail } = helpLayout(state);
+  if (!visible) return state;
   return {
     ...state,
     sectionScroll: sections.offset,
@@ -312,8 +371,17 @@ export function navigateHelp(
   state: TuiHelpState,
   action: TuiAction,
 ): TuiHelpState {
-  const { grid, split, focus, sections, keys, detail, sectionIndex, keyIndex } =
-    helpLayout(state);
+  const {
+    grid,
+    visible,
+    focus,
+    sections,
+    keys,
+    detail,
+    sectionIndex,
+    keyIndex,
+  } = helpLayout(state);
+  if (!visible) return state;
   if (action.kind === "focus") return { ...state, focus: action.pane };
   if (action.kind === "select")
     return { ...state, focus: focus === "sections" ? "entries" : "detail" };
@@ -367,7 +435,7 @@ export function navigateHelp(
     if (pane === "sections")
       return settleHelp({
         ...state,
-        focus: !split && action.kind === "point-section" ? "entries" : pane,
+        focus: pane,
         sectionIndex: position,
         ...(position === sectionIndex
           ? {}
@@ -375,7 +443,7 @@ export function navigateHelp(
       });
     return settleHelp({
       ...state,
-      focus: !split && action.kind === "point-entry" ? "detail" : pane,
+      focus: pane,
       entryIndex: position,
       ...(position === keyIndex ? {} : { scrollOffset: 0 }),
     });

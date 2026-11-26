@@ -1,4 +1,4 @@
-import { helpLayout } from "./help.js";
+import { helpLayout, helpSectionLabel } from "./help.js";
 import { wrapTerminalLine as wrapPlanLine } from "./text.js";
 import {
   modalContentWidth,
@@ -33,6 +33,7 @@ import {
   currentEntry,
   currentSection,
   detailPane,
+  type PaneGrid,
   layout,
   panes,
   sharedPathCount,
@@ -54,7 +55,6 @@ import type {
   TuiExecutingState,
   TuiEntry,
   TuiPaneView,
-  TuiLayout,
   TuiPlanState,
   TuiReportState,
   TuiSearchState,
@@ -338,8 +338,8 @@ function renderHelp(
 ): string {
   const {
     grid,
-    split,
-    compact,
+    visible,
+    footerRows,
     focus,
     sections,
     current,
@@ -347,17 +347,41 @@ function renderHelp(
     keys,
     keyIndex,
     keyCount,
-    wrapSummary,
     detail,
   } = helpLayout(state);
   const style = createPaint(theme);
+  if (!visible) {
+    const rows = Math.max(0, grid.rows - 1);
+    if (!rows) return "";
+    const message =
+      rows === 1
+        ? "Esc · Resize"
+        : grid.usable >= "Resize terminal".length
+          ? "Resize terminal"
+          : "Resize";
+    return (
+      [
+        style.muted(fit(message, grid.usable)),
+        style.muted(fit("Esc close", grid.usable)),
+      ]
+        .slice(0, rows)
+        .join("\n") + "\n"
+    );
+  }
   const listRow = (
     label: string | undefined,
     active: boolean,
     pane: "sections" | "entries",
     width: number,
   ) => {
-    const text = fit(label ? (active ? "› " : "  ") + label : "", width);
+    const marker = active ? "›" : " ";
+    const compactMarker = label !== undefined && label.length + 2 > width;
+    const prefix = marker + (compactMarker ? "" : " ");
+    const value =
+      label && pane === "sections"
+        ? helpSectionLabel(label, width - prefix.length)
+        : label;
+    const text = fit(value ? prefix + value : "", width);
     return active ? (focus === pane ? style.focus : style.active)(text) : text;
   };
   const sectionRow = (row: number, width: number) =>
@@ -374,7 +398,13 @@ function renderHelp(
       "entries",
       width,
     );
-  const heading = style.title(current.label) + style.muted(" · " + keyCount);
+  const summaryWidth = grid.rightWidth - (footerRows ? 0 : " Esc".length);
+  const label = helpSectionLabel(current.label, summaryWidth);
+  const count = " · " + keyCount;
+  const heading =
+    style.title(label) +
+    (label.length + count.length <= summaryWidth ? style.muted(count) : "") +
+    (footerRows ? "" : style.muted(" Esc"));
   const detailRow = (row: number) => {
     const line = detail.items[row];
     return line ? (line.role ? style[line.role] : plain)(line.text) : "";
@@ -400,33 +430,6 @@ function renderHelp(
   const hint = style.muted(
     fit(hints.find((text) => text.length <= grid.usable) ?? "esc", grid.usable),
   );
-  if (!split) {
-    if (compact.rows < 2) return compact.rows ? hint + "\n" : "";
-    const title =
-      focus === "sections"
-        ? style.title("Sections")
-        : focus === "entries"
-          ? wrapSummary
-            ? style.title(current.label)
-            : heading
-          : style.title("Key detail");
-    const summary =
-      focus === "entries" && wrapSummary
-        ? [fit(style.muted(keyCount), grid.usable)]
-        : [];
-    const body = Array.from(
-      { length: compact.bodyRows - summary.length },
-      (_, row) =>
-        focus === "sections"
-          ? sectionRow(row, grid.usable)
-          : focus === "entries"
-            ? keyRow(row, grid.usable)
-            : fit(detailRow(row), grid.usable),
-    );
-    return (
-      [fit(title, grid.usable), ...summary, ...body, hint].join("\n") + "\n"
-    );
-  }
   const lines = renderPaneRows(
     grid,
     style,
@@ -440,7 +443,7 @@ function renderHelp(
         : keyRow(row - 1, grid.rightWidth),
     detailRow,
   );
-  return [...lines, hint].join("\n") + "\n";
+  return (footerRows ? [...lines, hint] : lines).join("\n") + "\n";
 }
 
 export function agentReviewLayout(
@@ -2640,7 +2643,7 @@ export function renderBrowseLines(
 
 /** The Inventory list grid: section and entry panes above a full-width detail pane. */
 function renderPaneRows(
-  grid: TuiLayout,
+  grid: PaneGrid,
   style: TuiPaint,
   focus: TuiBrowseState["model"]["focus"],
   entries: TuiPaneView<unknown>,
@@ -2652,7 +2655,7 @@ function renderPaneRows(
   const left = "─".repeat(grid.leftWidth);
   const right = "─".repeat(Math.max(0, grid.usable - grid.leftWidth - 1));
   return [
-    style.border(left + "┬" + right),
+    ...(grid.hideTopRule ? [] : [style.border(left + "┬" + right)]),
     ...Array.from(
       { length: grid.paneRows },
       (_, row) =>
@@ -2661,7 +2664,11 @@ function renderPaneRows(
         entryRow(row) +
         scrollMark(entries, row, style),
     ),
-    (focus === "detail" ? style.title : style.border)(left + "┴" + right),
+    ...(grid.hideDetailRule
+      ? []
+      : [
+          (focus === "detail" ? style.title : style.border)(left + "┴" + right),
+        ]),
     ...Array.from(
       { length: grid.detailRows },
       (_, row) =>
