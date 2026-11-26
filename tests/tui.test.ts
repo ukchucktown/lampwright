@@ -318,6 +318,58 @@ describe("Trash projection", () => {
     expect(controller.state.inventory).toEqual(original.inventory);
   });
 
+  it.each(["restore", "purge"] as const)(
+    "requires a visible Trash body to confirm %s",
+    async (kind) => {
+      const operation = trashOperation(["item"]);
+      const quarantine = fakeTrash(operation);
+      const restoreOperation = vi.fn(async () => ({
+        operationId: operation.id,
+        status: "restored" as const,
+        entries: [],
+      }));
+      const purgeOperation = vi.fn(quarantine.purgeOperation);
+      const controller = new TuiController({
+        scan: async () => groupedInventory(),
+        now: () => new Date("2026-01-01T00:00:00.000Z"),
+        plan,
+        execute: vi.fn(),
+        quarantine: { ...quarantine, restoreOperation, purgeOperation },
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "switch-view", view: "trash" });
+      await controller.dispatch({
+        kind: kind === "restore" ? "restore-review" : "purge-review",
+      });
+      await controller.dispatch({
+        kind: "viewport",
+        viewport: { rows: 3, columns: 35 },
+      });
+      expect(renderTui(controller.state, plainTuiTheme)).toContain(
+        "Resize the terminal",
+      );
+      expect(renderTui(controller.state, plainTuiTheme)).not.toContain(
+        "y confirm",
+      );
+      expect(parseLineTuiAction(controller.state, "yes")).toEqual({
+        kind: "noop",
+      });
+      await controller.dispatch({ kind: "confirm" });
+      await controller.waitForTrashExecution();
+      expect(restoreOperation).not.toHaveBeenCalled();
+      expect(purgeOperation).not.toHaveBeenCalled();
+      expect(controller.state).toMatchObject({ screen: "trash-review", kind });
+      await controller.dispatch({
+        kind: "viewport",
+        viewport: { rows: 20, columns: 80 },
+      });
+      await controller.dispatch({ kind: "confirm" });
+      await controller.waitForTrashExecution();
+      expect(
+        kind === "restore" ? restoreOperation : purgeOperation,
+      ).toHaveBeenCalledTimes(1);
+    },
+  );
   it("keeps a blocked restore review non-mutating when y is pressed", async () => {
     const inventory = groupedInventory();
     const operation = trashOperation(["entry-1"]);
@@ -3253,6 +3305,45 @@ describe("terminal removal interactions", () => {
     expect(rendered).not.toContain("review 1-0");
   });
 
+  it("keeps a removal review unchanged when its footer consumes the viewport", async () => {
+    const inventory = groupedInventory();
+    const planner = vi.fn(plan);
+    const execute = vi.fn(async () => buildExecutionReport());
+    const controller = new TuiController({
+      scan: async () => inventory,
+      plan: planner,
+      execute,
+    });
+    await controller.start();
+    await controller.dispatch({ kind: "select" });
+    const visible = controller.state;
+    if (visible.screen !== "plan") throw new Error("Expected removal review");
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 7, columns: 20 },
+    });
+    expect(renderTui(controller.state, plainTuiTheme)).toContain(
+      "Resize the terminal",
+    );
+    const hidden = controller.state;
+    for (const action of [
+      { kind: "force" },
+      { kind: "toggle-details" },
+      { kind: "confirm" },
+    ] as const)
+      await controller.dispatch(action);
+    await controller.waitForExecution();
+    expect(controller.state).toBe(hidden);
+    expect(execute).not.toHaveBeenCalled();
+    expect(planner).toHaveBeenCalledTimes(1);
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { rows: 24, columns: 100 },
+    });
+    await controller.dispatch({ kind: "confirm" });
+    await controller.waitForExecution();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
   it("keeps the end of a long affected path reachable on a narrow terminal", async () => {
     const path =
       "/fixtures/a-very-long-skill-location/with/several/directories/important-tail";
@@ -4169,6 +4260,37 @@ describe("raw terminal pointer input", () => {
     terminal.close();
   });
 
+  it("drops confirmations before and during a coalesced resize until the restored frame is drawn", async () => {
+    const { input, output } = fakeTty();
+    const terminal = createNodeTuiTerminal(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+    const controller = new TuiController(
+      { scan: async () => buildInventory(), plan, execute: vi.fn() },
+      { rows: 24, columns: 100 },
+    );
+    try {
+      await controller.start();
+      await controller.dispatch({ kind: "select" });
+      terminal.render(controller.state);
+      input.write("y");
+      output.rows = 3;
+      output.emit("resize");
+      input.write("y");
+      output.rows = 24;
+      output.emit("resize");
+      input.write("y");
+      await controller.dispatch(await terminal.readAction(controller.state));
+      terminal.render(controller.state);
+      input.write("n");
+      expect(await terminal.readAction(controller.state)).toEqual({
+        kind: "cancel",
+      });
+    } finally {
+      terminal.close();
+    }
+  });
   it("delivers terminal resizes immediately so the controller can repaint", async () => {
     const { input, output } = fakeTty();
     const terminal = createNodeTuiTerminal(

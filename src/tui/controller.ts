@@ -32,6 +32,7 @@ import {
 } from "./browse.js";
 import {
   agentReviewLayout,
+  resizeOnlyViewport,
   availabilityPlanScrollMetrics,
   availabilityReportScrollMetrics,
   planScrollMetrics,
@@ -212,6 +213,16 @@ export class TuiController {
       this.stateValue = resizeState(state, action.viewport);
       return;
     }
+    if (
+      action.kind !== "cancel" &&
+      action.kind !== "quit" &&
+      !(
+        state.screen === "browse" &&
+        (action.kind === "open-help" || action.kind === "switch-view")
+      ) &&
+      resizeOnlyViewport(state)
+    )
+      return;
     if (
       state.screen === "executing" ||
       state.screen === "trash-executing" ||
