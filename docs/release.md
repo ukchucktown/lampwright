@@ -1,6 +1,6 @@
 # Release readiness and manual publication
 
-Status: GitHub and npm release preparation for `0.5.0`.
+Status: GitHub and npm release preparation for `0.5.1`.
 This document does not authorize a Git tag, npm publication, or GitHub release;
 each external release action still requires the maintainer's explicit approval.
 
@@ -45,7 +45,7 @@ workflow checks the canonical public repository before it requests provenance.
 fails unless exactly one package and only files within the documented allowlist
 are returned. It accepts the npm 11 result array and npm 12 lifecycle object,
 then applies the same strict name, version, exports, schemas, executable
-shebang, and content checks. The package must include these `0.5.0` release
+shebang, and content checks. The package must include these `0.5.1` release
 notes and exclude source, tests, scripts, logs, environment files, and
 `node_modules`.
 
@@ -139,8 +139,8 @@ Preparation (safe before publication):
       independent approval.
 - [ ] Confirm the npm owner account has two-factor authentication enabled.
 - [ ] Recheck npm metadata and confirm `package.json`, the lockfile, these
-      [`0.5.0` release notes](./releases/0.5.0.md), expected CLI output, and the
-      intended `v0.5.0` tag all agree.
+      [`0.5.1` release notes](./releases/0.5.1.md), expected CLI output, and the
+      intended `v0.5.1` tag all agree.
 - [ ] Freeze the intended release commit. Run `npm ci` and every local quality,
       package, runtime-dependency, and full-dependency gate from a clean
       checkout; resolve every release blocker.
@@ -156,21 +156,21 @@ Preparation (safe before publication):
 - [ ] Review npm's public-transparency-log notice linked by the provenance
       documentation.
 
-GitHub minor release (manual and separately authorized):
+GitHub patch release (manual and separately authorized):
 
-1. Obtain explicit approval to create and push the signed `v0.5.0` tag at the
+1. Obtain explicit approval to create and push the signed `v0.5.1` tag at the
    accepted candidate commit. Verify the remote tag points to that commit.
-2. Create the GitHub `v0.5.0` release from that tag using the reviewed
-   [`0.5.0` release notes](./releases/0.5.0.md), then verify its tag and commit.
+2. Create the GitHub `v0.5.1` release from that tag using the reviewed
+   [`0.5.1` release notes](./releases/0.5.1.md), then verify its tag and commit.
 3. Only after the GitHub release is verified, obtain separate explicit approval
-   to publish `lampwright@0.5.0`.
+   to publish `lampwright@0.5.1`.
 4. Dispatch `Publish to npm` from the exact tag, enter the exact package
-   confirmation `lampwright@0.5.0`, and enter `v0.5.0` as the GitHub release
+   confirmation `lampwright@0.5.1`, and enter `v0.5.1` as the GitHub release
    confirmation. Satisfy the configured environment gate.
 
 Post-publication verification and credential cleanup:
 
-1. Verify `npm view lampwright@0.5.0` and the npm package-page metadata.
+1. Verify `npm view lampwright@0.5.1` and the npm package-page metadata.
 2. Check the `verify-published` job on each operating system for the version
    and help output from the installed package. Verify provenance and signatures
    with a current npm CLI using `npm audit signatures`. If availability times
