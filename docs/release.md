@@ -65,9 +65,11 @@ before its publish step is reachable:
 
 The publish job runs `npm publish --provenance --access public`. Only that job
 has the OIDC permission for provenance. After it succeeds, a read-only job on
-macOS, Linux, and Windows installs the exact version from the public registry
-and checks the installed CLI with `--version` and `--help`. The workflow has
-no automatic push, tag, or release trigger.
+macOS, Linux, and Windows checks the public registry every 30 seconds for up
+to 30 minutes. It waits for both the exact version in the install metadata
+and a successful HEAD request to its tarball URL. Once both are available,
+the job installs the package and checks the CLI with `--version` and
+`--help`. The workflow has no automatic push, tag, or release trigger.
 
 ## MVP evidence matrix
 
@@ -171,7 +173,11 @@ Post-publication verification and credential cleanup:
 1. Verify `npm view lampwright@0.5.0` and the npm package-page metadata.
 2. Check the `verify-published` job on each operating system for the version
    and help output from the installed package. Verify provenance and signatures
-   with a current npm CLI using `npm audit signatures`.
+   with a current npm CLI using `npm audit signatures`. If availability times
+   out, check the version named in the error and the npm publication status.
+   To retry verification, rerun only the failed smoke jobs. Do not rerun the
+   successful publish job. See [npm publish-time scanning](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/)
+   for the reason a successful publication can take time to become available.
 3. Configure npm trusted publishing for owner `ukchucktown`, repository
    `lampwright`, workflow `publish.yml`, environment `npm-production`, and the
    publish action. Verify the OIDC path on supported Node/npm versions.
