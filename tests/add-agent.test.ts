@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, relative, isAbsolute, sep } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   mouseAction,
   parseMouseReport,
@@ -28,6 +28,9 @@ import {
   plainTuiTheme,
   TuiController,
   type InventoryCommandRunner,
+  type TuiAddAgentState,
+  type AddAgentBatchPlan,
+  type AddAgentBatchReport,
 } from "../src/index.js";
 import {
   buildSystemSkillFinding,
@@ -114,6 +117,85 @@ function controllerFor(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("Add agent", () => {
+  it.each(["failed", "partial"] as const)(
+    "retains the selection, executes once and displays a %s result",
+    async (status) => {
+      type Review = Extract<TuiAddAgentState, { stage: "review" }>;
+      type Execution = Extract<TuiAddAgentState, { stage: "execution" }>;
+      type Result = Extract<TuiAddAgentState, { stage: "result" }>;
+      expectTypeOf<Review["plan"]>().toEqualTypeOf<AddAgentBatchPlan>();
+      expectTypeOf<Execution["plan"]>().toEqualTypeOf<AddAgentBatchPlan>();
+      expectTypeOf<Result["report"]>().toEqualTypeOf<AddAgentBatchReport>();
+      expectTypeOf<Execution>().not.toHaveProperty("report");
+      expectTypeOf<Result>().not.toHaveProperty("plan");
+      expectTypeOf<
+        Extract<TuiAddAgentState, { stage: "selection" }>
+      >().not.toHaveProperty("plan");
+      const f = await fixture();
+      const report: AddAgentBatchReport = {
+        status,
+        message: "Fixture result",
+        results: [
+          {
+            destination: f.destination,
+            agents: ["antigravity", "antigravity-cli"],
+            status: status === "partial" ? "added" : "failed",
+            message: status === "partial" ? "Verified link" : "Write failed",
+          },
+          {
+            destination: join(f.home, ".claude", "skills", "review"),
+            agents: ["claude-code"],
+            status: "failed",
+            message: "Write failed",
+          },
+        ],
+      };
+      const executeBatch = vi.fn(async () => report);
+      const controller = controllerFor({
+        ...f,
+        addAgent: { ...f.addAgent, executeBatch },
+      });
+      await controller.start();
+      await controller.dispatch({ kind: "add-agent" });
+      await controller.dispatch({ kind: "append-query", value: "claude" });
+      await controller.dispatch({ kind: "toggle-select" });
+      await controller.dispatch({ kind: "clear-query" });
+      await controller.dispatch({ kind: "append-query", value: "agy" });
+      await controller.dispatch({ kind: "toggle-select" });
+      const selection = controller.state;
+      expect(selection).toMatchObject({ stage: "selection" });
+      await controller.dispatch({ kind: "select" });
+      expect(controller.state).toMatchObject({
+        stage: "review",
+        plan: { selectedAgents: ["antigravity-cli", "claude-code"] },
+      });
+      await controller.dispatch({ kind: "cancel" });
+      expect(controller.state).toEqual(selection);
+      expect(controller.state).not.toHaveProperty("plan");
+      await controller.dispatch({ kind: "select" });
+      await controller.dispatch({ kind: "confirm" });
+      expect(controller.state).toMatchObject({
+        stage: "execution",
+        plan: { selectedAgents: ["antigravity-cli", "claude-code"] },
+      });
+      await controller.dispatch({ kind: "confirm" });
+      await Promise.all([
+        controller.waitForAddAgentExecution(),
+        controller.waitForAddAgentExecution(),
+      ]);
+      expect(executeBatch).toHaveBeenCalledTimes(1);
+      expect(controller.state).toMatchObject({ stage: "result", report });
+      expect(controller.state).not.toHaveProperty("plan");
+      expect(renderTui(controller.state, plainTuiTheme)).toContain(
+        "Fixture result",
+      );
+      await controller.dispatch({ kind: "confirm" });
+      expect(executeBatch).toHaveBeenCalledTimes(1);
+      await controller.dispatch({ kind: "cancel" });
+      expect(controller.state).toMatchObject({ screen: "browse" });
+    },
+  );
+
   it("reviews one shared Antigravity destination, preserves the Skill and Owner, and verifies both agents", async () => {
     const f = await fixture();
     const existing = join(f.home, ".claude", "skills", "review");
@@ -666,14 +748,17 @@ describe("Add agent", () => {
     await controller.start();
     await controller.dispatch({ kind: "add-agent" });
     expect(controller.state).toMatchObject({ screen: "add-agent" });
-    if (controller.state.screen !== "add-agent")
+    if (
+      controller.state.screen !== "add-agent" ||
+      controller.state.stage !== "selection"
+    )
       throw new Error("Expected agent picker");
-    expect(controller.state.agents).not.toContain("claude-code");
-    expect(controller.state.agents).not.toContain("codex");
-    expect(controller.state.agents).not.toContain("antigravity-cli");
-    expect(controller.state.agents).not.toContain("antigravity");
-    expect(controller.state.agents).toContain("qwen-code");
-    expect(controller.state.agents).toContain("augment");
+    expect(controller.state.picker.agents).not.toContain("claude-code");
+    expect(controller.state.picker.agents).not.toContain("codex");
+    expect(controller.state.picker.agents).not.toContain("antigravity-cli");
+    expect(controller.state.picker.agents).not.toContain("antigravity");
+    expect(controller.state.picker.agents).toContain("qwen-code");
+    expect(controller.state.picker.agents).toContain("augment");
     await controller.dispatch({ kind: "append-query", value: "cli" });
     const mixed = renderTui(controller.state, plainTuiTheme);
     expect(mixed).toMatch(/\d+ to add · \d+ installed/u);
@@ -685,7 +770,8 @@ describe("Add agent", () => {
     );
     await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "select" });
-    expect(controller.state.plan).toBe(null);
+    expect(controller.state).toMatchObject({ stage: "selection" });
+    expect(controller.state).not.toHaveProperty("plan");
     await controller.dispatch({ kind: "clear-query" });
     await controller.dispatch({ kind: "append-query", value: "misspelled" });
     expect(renderTui(controller.state, plainTuiTheme)).toContain(
@@ -694,8 +780,9 @@ describe("Add agent", () => {
     await controller.dispatch({ kind: "clear-query" });
     await controller.dispatch({ kind: "append-query", value: "qwen" });
     await controller.dispatch({ kind: "select" });
-    expect(controller.state.plan).toMatchObject({
-      destinations: [{ action: "blocked" }],
+    expect(controller.state).toMatchObject({
+      stage: "review",
+      plan: { destinations: [{ action: "blocked" }] },
     });
     expect(await readFile(join(occupied, "private.txt"), "utf8")).toBe(
       "from another installation",
@@ -779,7 +866,11 @@ describe("Add agent", () => {
     const controller = controllerFor(f);
     await controller.start();
     await controller.dispatch({ kind: "add-agent" });
-    expect(controller.state).toMatchObject({ screen: "add-agent", agents: [] });
+    expect(controller.state).toMatchObject({
+      screen: "add-agent",
+      stage: "selection",
+      picker: { agents: [] },
+    });
     const frame = () => renderTui(controller.state, plainTuiTheme);
     expect(frame()).toContain("All supported agents already have this skill");
     await controller.dispatch({
@@ -794,7 +885,8 @@ describe("Add agent", () => {
     expect(frame()).not.toContain("space select · enter review");
     await controller.dispatch({ kind: "toggle-select" });
     await controller.dispatch({ kind: "select" });
-    expect(controller.state).toMatchObject({ plan: null });
+    expect(controller.state).toMatchObject({ stage: "selection" });
+    expect(controller.state).not.toHaveProperty("plan");
   });
   it.each([9, 24])(
     "keeps checked agents across filters at %i rows",
@@ -867,8 +959,8 @@ describe("Add agent", () => {
         }),
       );
       expect(controller.state).toMatchObject({
-        query: "",
-        selectedAgents: new Set(["antigravity-cli"]),
+        stage: "selection",
+        picker: { query: "", selectedAgents: new Set(["antigravity-cli"]) },
       });
       expect(frame().split("\n")[searchRow + 1]).toContain("1 selected");
       for (const char of "claude") await press(char);
@@ -878,7 +970,8 @@ describe("Add agent", () => {
       await press("q");
       expect(controller.state).toMatchObject({
         screen: "add-agent",
-        query: "q",
+        stage: "selection",
+        picker: { query: "q" },
       });
       for (const char of "wen") await press(char);
       expect(frame()).toContain("qwen-code");
@@ -1098,10 +1191,11 @@ describe("Add agent", () => {
       );
       const picker = controller.state;
       expect(picker.screen).toBe("add-agent");
-      if (picker.screen !== "add-agent") throw new Error("No agent picker");
+      if (picker.screen !== "add-agent" || picker.stage !== "selection")
+        throw new Error("No agent picker");
       await controller.dispatch({
         kind: "move",
-        delta: picker.agents.indexOf("antigravity-cli"),
+        delta: picker.picker.agents.indexOf("antigravity-cli"),
       });
       await controller.dispatch({ kind: "select" });
       expect(renderTui(controller.state, plainTuiTheme)).toContain(
@@ -1116,6 +1210,14 @@ describe("Add agent", () => {
         screen: "browse",
         model: {
           notice: expect.stringContaining("available to antigravity-cli"),
+        },
+        inventory: {
+          installations: [
+            expect.objectContaining({
+              id: f.installation.id,
+              exposedTo: expect.arrayContaining(["antigravity-cli"]),
+            }),
+          ],
         },
       });
       expect(await realpath(f.destination)).toBe(f.source);

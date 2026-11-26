@@ -371,10 +371,10 @@ function renderHelp(
 }
 
 export function addAgentReviewLines(
-  state: TuiAddAgentState,
+  state: Extract<TuiAddAgentState, { stage: "result" | "review" }>,
 ): readonly string[] {
   const { width } = agentModalSize(state);
-  if (state.report)
+  if (state.stage === "result")
     return wrapPlanLines(
       [
         state.report.message,
@@ -388,7 +388,6 @@ export function addAgentReviewLines(
       width,
     );
   const plan = state.plan;
-  if (!plan) return [];
   const scope = state.installation.scope;
   return wrapPlanLines(
     [
@@ -416,10 +415,10 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
     return fit("Resize terminal", Math.max(0, viewport.columns - 1)) + "\n";
   let body: readonly string[];
   let hint: string;
-  if (state.executing) {
+  if (state.stage === "execution") {
     body = [style.info("Applying and verifying agent links…")];
     hint = "";
-  } else if (state.plan) {
+  } else if (state.stage === "review" || state.stage === "result") {
     const lines = addAgentReviewLines(state);
     const offset = Math.min(
       state.scrollOffset,
@@ -433,12 +432,14 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
           `${offset + 1}–${offset + body.length} of ${lines.length} · ↑↓ scroll`,
         ),
       ];
-    hint = state.report
-      ? "esc inventory"
-      : state.plan.block
-        ? "esc back"
-        : "y confirm · esc back";
+    hint =
+      state.stage === "result"
+        ? "esc inventory"
+        : state.plan.block
+          ? "esc back"
+          : "y confirm · esc back";
   } else {
+    const picker = state.picker;
     const {
       matches,
       installedMatches,
@@ -451,8 +452,8 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
     const options = matches
       .slice(offset, offset + listRows)
       .map((agent, index) => {
-        const focused = state.index === offset + index;
-        const selected = state.selectedAgents.has(agent);
+        const focused = picker.index === offset + index;
+        const selected = picker.selectedAgents.has(agent);
         const mark = selected ? "[x]" : "[ ]";
         const line = fit(
           `${focused ? "›" : " "} ${mark} ${agentLabel(agent)}`,
@@ -471,7 +472,7 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
       else {
         const compact = installedMatches.length
           ? "Already installed"
-          : !state.agents.length && !state.query.trim()
+          : !picker.agents.length && !picker.query.trim()
             ? width >= 20
               ? "All agents installed"
               : "All installed"
@@ -483,11 +484,11 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
     }
     while (options.length < listRows) options.push("");
     const installedCount =
-      !state.agents.length && !state.query.trim()
-        ? state.installedAgents.length
+      !picker.agents.length && !picker.query.trim()
+        ? picker.installedAgents.length
         : installedMatches.length &&
             !matches.length &&
-            !state.selectedAgents.size
+            !picker.selectedAgents.size
           ? installedMatches.length
           : null;
     const matchCount = installedMatches.length
@@ -499,8 +500,10 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
         : fitStyledSegments(
             [
               {
-                text: `${state.selectedAgents.size} selected`,
-                paint: state.selectedAgents.size ? style.selected : style.muted,
+                text: `${picker.selectedAgents.size} selected`,
+                paint: picker.selectedAgents.size
+                  ? style.selected
+                  : style.muted,
               },
               { text: ` · ${matchCount}`, paint: style.muted },
             ],
@@ -508,14 +511,14 @@ function renderAgentModal(state: TuiAddAgentState, theme: TuiTheme): string {
             style.muted,
           );
     body = [
-      searchPrompt(state.query, "type an agent name", width, style),
+      searchPrompt(picker.query, "type an agent name", width, style),
       count,
       ...options,
       ...shortcuts.map((line) => style.muted(fit(line, width))),
     ];
     hint = pickerHint;
   }
-  const title = `${state.report ? "Add agent results" : state.plan ? "Review agents" : "Add agents"} · ${state.installation.skill.name}`;
+  const title = `${state.stage === "result" ? "Add agent results" : state.stage === "selection" ? "Add agents" : "Review agents"} · ${state.installation.skill.name}`;
   const frame = overlayPanel(
     dimFrame(browseFrame(state.browse, theme), theme),
     viewport,
