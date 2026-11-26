@@ -22,7 +22,7 @@ it.
 
 | Tool | Version reviewed | Sources |
 | --- | --- | --- |
-| Lampwright | 0.5.0 | This repository |
+| Lampwright | 0.5.1 | This repository |
 | `asm` | 2.24.0 | [README](https://github.com/luongnv89/asm#readme), [`src/skill-state.ts`](https://github.com/luongnv89/asm/blob/main/src/skill-state.ts), [`src/uninstaller.ts`](https://github.com/luongnv89/asm/blob/main/src/uninstaller.ts), [`src/auditor.ts`](https://github.com/luongnv89/asm/blob/v2.24.0/src/auditor.ts), [CI workflows](https://github.com/luongnv89/asm/tree/main/.github/workflows) |
 | `skills` | 1.9.0 | [README](https://github.com/vercel-labs/skills#readme), [CLI reference](https://github.com/vercel-labs/skills/blob/main/docs/commands.md), [`src/cli.ts`](https://github.com/vercel-labs/skills/blob/v1.9.0/src/cli.ts), [`src/add.ts`](https://github.com/vercel-labs/skills/blob/v1.9.0/src/add.ts), [CI workflow](https://github.com/vercel-labs/skills/blob/main/.github/workflows/ci.yml) |
 | `skill-cli` | 0.7.2 | [README](https://github.com/VictorTomaili/skill-cli/blob/v0.7.2/README.md) |

@@ -97,7 +97,7 @@ The primary interface is an interactive terminal Inventory. The supported,
 version-pinned invocation for the current release is:
 
 ```console
-npx lampwright@0.5.0
+npx lampwright@0.5.1
 ```
 
 This command downloads the package to npm's cache. Lampwright does not install
@@ -201,7 +201,7 @@ the format of a theme file, and the order in which Lampwright selects a theme.
 - [Lampwright and similar tools](./docs/comparison.md)
 - [Terminal UI](./docs/tui.md)
 - [Non-interactive CLI](./docs/cli.md)
-- [0.5.0 release notes](./docs/releases/0.5.0.md)
+- [0.5.1 release notes](./docs/releases/0.5.1.md)
 - [Release readiness](./docs/release.md)
 - [Product ideas](./docs/ideas.md) — unapproved directions under consideration
 - [Architectural decisions](./docs/adr/)
