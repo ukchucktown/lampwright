@@ -1877,8 +1877,11 @@ async function candidateComparisonKey(candidate: Candidate): Promise<string> {
     return `directory:${candidate.canonicalPath}`;
   }
 
-  const stats = await lstatWithContext(candidate.path);
-  if (stats.ino !== 0) {
+  const stats = await withFilesystemContext(
+    candidate.path,
+    lstat(candidate.path, { bigint: true }),
+  );
+  if (stats.ino !== 0n) {
     return `entry:${stats.dev}:${stats.ino}`;
   }
   return `entry-path:${pathComparisonKey(candidate.path)}`;
