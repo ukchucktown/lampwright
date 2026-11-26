@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { waitForPublishedVersion } from "./published-availability.mjs";
 
 const { name, version } = JSON.parse(readFileSync("package.json", "utf8"));
 if (
@@ -14,6 +15,8 @@ if (
   );
 const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("Run the published package check through npm.");
+
+await waitForPublishedVersion(name, version);
 
 const directory = mkdtempSync(join(tmpdir(), "lampwright-published-"));
 try {
