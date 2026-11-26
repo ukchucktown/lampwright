@@ -1123,59 +1123,71 @@ describe("terminal theme", () => {
       await key("", "?");
       const first = frame();
       expect(first).toHaveLength(viewport.rows - 1);
-      expect(first[0]).toMatch(/^Help +│Inventory/u);
-      expect(first.join("\n")).toMatch(/enter +Review removal/u);
-      expect(first.join("\n")).not.toContain("┌");
+      const inventoryLines = renderTui(before, plainTuiTheme).split("\n");
+      const split = first[0]!.indexOf("┬");
+      const divider = first.findIndex((row) => row.includes("┴"));
+      expect(split).toBe(
+        inventoryLines.find((row) => row.includes("┬"))!.indexOf("┬"),
+      );
+      expect(divider).toBe(
+        inventoryLines.findIndex((row) => row.includes("┴")),
+      );
+      expect(first[0]).toMatch(/^─+┬─+$/u);
+      expect(first[1]).toMatch(/› Inventory +│Inventory · 3 keys/u);
+      expect(first[2]!.slice(split + 1).trim()).toBe("› enter");
+      expect(first[divider + 1]!.trim()).toBe("enter  Review removal");
+      expect(first[divider + 2]).toContain("checked items");
       expect(first.at(-1)).toContain("esc close");
       const color = createNightfallTheme("truecolor");
       const colored = renderTui(controller.state, color);
-      expect(colored).toContain(styleTui(color, "warning", "Review removal"));
-      expect(colored).toContain(styleTui(color, "title", "enter  "));
+      expect(colored).toContain(
+        styleTui(color, "warning", "enter  Review removal"),
+      );
       expect(colored.replace(ansi, "").trimEnd()).toBe(first.join("\n"));
-      const split = first[0]!.indexOf("│");
-      const sectionRow =
-        first.findIndex((line) => line.startsWith("› Inventory")) + 1;
-      await pointer(split + 1, sectionRow);
-      expect(frame()).toEqual(first); // The divider has no action.
       await key("down");
-      expect(frame()[0]).toContain("│Move and select");
-      const move = frame().join("\n");
-      expect(move).toContain("PgUp PgDn");
-      expect(move).toContain("Scroll the wheel");
-      expect(move).not.toContain("Review removal");
-      await pointer(2, sectionRow, 65);
-      expect(frame()[0]).toContain("│App");
-      expect(frame().join("\n")).toMatch(/ctrl\+p +Theme/u);
-      await pointer(2, sectionRow);
-      expect(frame()).toEqual(first);
-      await pointer(split + 3, sectionRow, 0, true);
+      expect(frame()[1]).toContain("│Move and select · 8 keys");
+      expect(frame()[divider + 1]).toContain("↑↓  Move one row");
+      expect(frame()[divider + 3]).toContain("Mouse: Scroll the wheel");
+      await pointer(split + 3, 4, 0, true);
       expect(controller.state).toMatchObject({
         screen: "help",
         focus: "entries",
+        entryIndex: 1,
       });
+      expect(frame()[divider + 1]).toContain("PgUp PgDn  Move one page");
+      await pointer(split + 3, 3, 65);
+      expect(frame()[divider + 1]).toContain("tab  Next pane");
+      await pointer(2, divider + 2);
+      expect(controller.state).toMatchObject({ focus: "detail" });
       await key("d", "d");
       expect(controller.state.screen).toBe("help");
-      await key("left");
+      await pointer(2, 4); // App, the third section
+      expect(frame()[1]).toContain("│App · 5 keys");
+      expect(frame()[divider + 1]).toContain("ctrl+p  Theme");
+      await key("return");
       await key("pagedown");
-      expect(frame()[0]).toContain("│App");
-      await key("right");
+      await key("pagedown");
+      expect(frame()[divider + 1]).toContain("q  Quit");
+      expect(frame()[divider + 2]).toContain("Exit Lampwright.");
       await controller.dispatch({
         kind: "viewport",
-        viewport: { columns: 32, rows: 7 },
+        viewport: { columns: 20, rows: 6 },
       });
-      const narrow = frame();
-      expect(narrow[0]).toContain("Help · App");
-      await pointer(2, 3, 65);
-      expect(controller.state).toMatchObject({
-        scrollOffset: 1,
-        focus: "entries",
-      });
-      await key("pagedown");
-      expect(frame()).not.toEqual(narrow);
-      for (let i = 0; i < 16; i++) await key("pagedown");
-      expect(frame().join(" ")).toContain("Exit Lampwright.");
+      expect(frame()[0]?.trim()).toBe("App · 5 keys");
+      expect(frame().join("\n")).toContain("› q");
+      await key("return");
+      expect(frame()[0]?.trim()).toBe("Key detail");
+      expect(frame().join("\n")).toContain("Exit Lampwright.");
       await controller.dispatch({ kind: "viewport", viewport });
-      expect(frame()[0]).toContain("│App");
+      expect(frame()[1]).toContain("│App · 5 keys");
+      expect(frame()[divider + 1]).toContain("q  Quit");
+      await controller.dispatch({ kind: "resize-panes", delta: 4 });
+      expect(frame()[0]!.indexOf("┬")).toBeGreaterThan(split);
+      const detailDelta = viewport.rows === 12 ? 1 : -2;
+      await controller.dispatch({ kind: "resize-detail", delta: detailDelta });
+      expect(frame().findIndex((row) => row.includes("┴"))).toBe(
+        divider - detailDelta,
+      );
       await key("escape");
       expect(controller.state).toEqual(before);
     },
@@ -1203,59 +1215,67 @@ describe("terminal theme", () => {
       const frame = () =>
         renderTui(controller.state, plainTuiTheme).trimEnd().split("\n");
       await line("help");
+      expect(frame()[0]?.trim()).toBe("Sections");
       expect(frame()[1]?.trim()).toMatch(new RegExp("^› " + view, "i"));
-      expect(frame().at(-1)).toContain("Enter/→");
-      await line("");
+      await line("in");
+      expect(frame()[0]).toMatch(/· [23] keys/u);
+      await line("enter");
       const collect = async () => {
-        const rows: string[] = [];
-        let previous = "";
-        for (let i = 0; i < 120; i++) {
-          const visible = frame();
-          expect(visible.length).toBeLessThanOrEqual(5);
-          expect(visible.every((row) => visibleWidth(row) <= 19)).toBe(true);
-          const text = visible.join("\n");
-          if (text === previous) break;
-          rows.push(
-            ...(rows.length ? visible.slice(-2, -1) : visible.slice(1, -1)).map(
-              (s) => s.trim(),
-            ),
-          );
-          previous = text;
+        const rows = frame()
+          .slice(1, -1)
+          .map((row) => row.trim());
+        let prior = frame().join("\n");
+        for (let i = 0; i < 40; i++) {
           await line("down");
+          const next = frame();
+          expect(next).toHaveLength(5);
+          expect(next.every((row) => visibleWidth(row) <= 19)).toBe(true);
+          if (next.join("\n") === prior) break;
+          rows.push(next.at(-2)!.trim());
+          prior = next.join("\n");
         }
         return rows.join(" ");
       };
-      const actions = await collect();
-      if (view === "trash") {
-        expect(actions).toContain("Double-click the entry.");
-        expect(actions).toContain("permanently delete.");
-      } else {
-        expect(actions).toContain(
+      const explanation = await collect();
+      if (view === "trash")
+        expect(explanation).toContain("Mouse: Double-click the entry.");
+      else {
+        expect(explanation).toContain(
           view === "inventory" ? "Review removal" : "Review enable",
         );
-        expect(actions).toContain("the checked items or the focused entry.");
+        expect(explanation).toContain(
+          "the checked items or the focused entry.",
+        );
       }
       await line("out");
-      const row = frame().findIndex((s) => s.includes("Move and select")) + 1;
-      await controller.dispatch(
-        mouseAction(
-          controller.state,
-          { column: 3, row, button: 0, pressed: true },
-          { dragging: false, doubleClick: false },
-        ),
-      );
-      expect(frame()[0]).toContain("Move and select");
-      const controls = await collect();
-      expect(controls).toContain("Click a view tab.");
-      if (view === "trash") {
-        for (const text of ["space", "ctrl+u", "Typing a name"])
-          expect(controls).not.toContain(text);
-      } else {
-        expect(controls).toContain("Double-click a row.");
-        expect(controls).toContain("Typing a name");
+      await line("out");
+      const clickRow = async (label: string) => {
+        const row = frame().findIndex((text) => text.includes(label)) + 1;
+        expect(row).toBeGreaterThan(0);
+        await controller.dispatch(
+          mouseAction(
+            controller.state,
+            { column: 2, row, button: 0, pressed: true },
+            { dragging: false, doubleClick: false },
+          ),
+        );
+      };
+      await clickRow("Move and select");
+      expect(frame()[0]?.trim()).toBe("Move and select");
+      expect(frame()[1]?.trim()).toBe(view === "trash" ? "5 keys" : "8 keys");
+      expect(frame()[2]?.trim()).toBe("› ↑↓");
+      const seen = new Set<string>();
+      for (let i = 0; i < 8; i++) {
+        for (const row of frame().slice(2, -1))
+          seen.add(row.trim().replace(/^› /u, ""));
+        await line("down");
       }
-      await line("tab");
-      expect(frame()[0]!.trim()).toBe("Help");
+      expect(seen.has("ctrl+t")).toBe(true);
+      for (const shortcut of ["space", "ctrl+u", "/"])
+        expect(seen.has(shortcut)).toBe(view !== "trash");
+      await clickRow("ctrl+t");
+      expect(frame()[0]?.trim()).toBe("Key detail");
+      expect(await collect()).toContain("Mouse: Click a view tab.");
       await line("back");
       expect(controller.state).toEqual(before);
     },

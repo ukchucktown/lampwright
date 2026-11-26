@@ -1,4 +1,4 @@
-import { helpLayout, navigateHelp } from "./help.js";
+import { settleHelp, navigateHelp } from "./help.js";
 import { installedAgentIds } from "../planning/add-agent.js";
 import {
   filteredAgents,
@@ -233,8 +233,6 @@ export class TuiController {
           this.stateValue = { screen: "browse", ...state.browse };
         else if (action.kind === "quit")
           this.stateValue = { screen: "done", report: null };
-        else if (action.kind === "select")
-          this.stateValue = { ...state, focus: "entries" };
         else this.stateValue = navigateHelp(state, action);
       } else if (state.screen === "plan") await this.planAction(state, action);
       else if (state.screen === "availability-plan")
@@ -1779,13 +1777,7 @@ function resizeState(
     return { ...state, browse: resizeBrowse(state.browse, viewport) };
   if (state.screen === "help") {
     const resized = { ...state, browse: resizeBrowse(state.browse, viewport) };
-    return {
-      ...resized,
-      scrollOffset: Math.min(
-        state.scrollOffset ?? 0,
-        helpLayout(resized).maximumOffset,
-      ),
-    };
+    return settleHelp(resized);
   }
   if (state.screen === "search")
     return {

@@ -4,7 +4,7 @@ import { emitKeypressEvents } from "node:readline";
 import type { Interface as ReadlineInterface, Key } from "node:readline";
 import { createInterface } from "node:readline/promises";
 
-import { layout, panes } from "./browse.js";
+import { layout, panes, nextPane } from "./browse.js";
 import { searchLayout } from "./search.js";
 import { browseTabHitboxes, renderTui } from "./render.js";
 import {
@@ -133,33 +133,36 @@ export function mouseAction(
   context: { dragging: DragTarget; doubleClick: boolean },
 ): TuiAction {
   if (state.screen === "help") {
-    const grid = helpLayout(state);
-    const row = report.row - grid.firstBodyRow;
-    if (
-      row < 0 ||
-      row >= grid.pageRows ||
-      report.column < 1 ||
-      report.column > grid.width ||
-      (grid.split && report.column === grid.leftWidth + 1)
-    )
-      return { kind: "noop" };
-    const pane = grid.split
-      ? report.column <= grid.leftWidth
-        ? "sections"
-        : "entries"
-      : grid.focus;
+    const { grid, split, focus, sections, keys, compact, wrapSummary } =
+      helpLayout(state);
+    const row = report.row - 2;
+    const pane = split
+      ? gridPointerPane(grid, report)
+      : row >= 0 &&
+          row < compact.bodyRows &&
+          report.column >= 1 &&
+          report.column <= grid.usable
+        ? focus
+        : null;
     if ((report.button & 64) !== 0)
-      return {
-        kind: "move-pane",
-        pane,
-        delta: (report.button & 1) === 0 ? -1 : 1,
-      };
-    if (!report.pressed || (report.button & 35) !== 0) return { kind: "noop" };
-    if (pane === "entries") return { kind: "focus", pane };
-    const index = grid.sectionOffset + row;
-    return index < grid.sections.length
-      ? { kind: "point-section", index }
-      : { kind: "noop" };
+      return pane
+        ? { kind: "move-pane", pane, delta: (report.button & 1) === 0 ? -1 : 1 }
+        : { kind: "noop" };
+    if (!report.pressed || (report.button & 3) !== 0) return { kind: "noop" };
+    if (split) {
+      const resize = paneResizeAction(grid, report, context.dragging);
+      if (resize) return resize;
+    }
+    if ((report.button & 32) !== 0 || !pane) return { kind: "noop" };
+    if (pane === "detail") return { kind: "focus", pane };
+    const view = pane === "sections" ? sections : keys;
+    const itemRow =
+      row - ((split || wrapSummary) && pane === "entries" ? 1 : 0);
+    if (itemRow < 0 || itemRow >= view.items.length) return { kind: "noop" };
+    return {
+      kind: pane === "sections" ? "point-section" : "point-entry",
+      index: view.offset + itemRow,
+    };
   }
   if (
     state.screen === "search" ||
@@ -212,10 +215,6 @@ export function mouseAction(
       return { kind: "switch-view", view: "trash" };
   }
   const grid = layout(state.model);
-  const { leftWidth, columns, paneRows, rows } = grid;
-  const paneTop = grid.headerRows + 1;
-  const detailDividerRow = paneTop + paneRows + 1;
-
   if ((report.button & 64) !== 0) {
     const pane = pointerPane(state, report);
     if (pane === null) return { kind: "noop" };
@@ -229,22 +228,8 @@ export function mouseAction(
   if (!report.pressed) return { kind: "noop" };
   if ((report.button & 3) !== 0) return { kind: "noop" };
 
-  if (context.dragging === "detail" || report.row === detailDividerRow)
-    return {
-      kind: "set-detail-rows",
-      rows: rows - report.row - 2,
-    };
-
-  if (
-    context.dragging === "panes" ||
-    (report.column === leftWidth + 1 &&
-      report.row > paneTop &&
-      report.row < detailDividerRow)
-  )
-    return {
-      kind: "set-left-percent",
-      percent: Math.round((report.column / columns) * 100),
-    };
+  const resize = paneResizeAction(grid, report, context.dragging);
+  if (resize) return resize;
 
   if ((report.button & 32) !== 0) return { kind: "noop" };
 
@@ -298,11 +283,45 @@ function inColumns(column: number, range: readonly [number, number]): boolean {
   return column >= range[0] && column <= range[1];
 }
 
+function paneResizeAction(
+  grid: ReturnType<typeof layout>,
+  report: MouseReport,
+  dragging: DragTarget,
+): TuiAction | null {
+  const { leftWidth, columns, paneRows, rows } = grid;
+  const paneTop = grid.headerRows + 1;
+  const detailDividerRow = paneTop + paneRows + 1;
+
+  if (dragging === "detail" || report.row === detailDividerRow)
+    return {
+      kind: "set-detail-rows",
+      rows: rows - report.row - 2,
+    };
+
+  if (
+    dragging === "panes" ||
+    (report.column === leftWidth + 1 &&
+      report.row > paneTop &&
+      report.row < detailDividerRow)
+  )
+    return {
+      kind: "set-left-percent",
+      percent: Math.round((report.column / columns) * 100),
+    };
+
+  return null;
+}
+
 function pointerPane(state: TuiState, report: MouseReport): PointerPane | null {
   if (state.screen !== "browse") return null;
-  const { headerRows, paneRows, detailRows, leftWidth, usable } = layout(
-    state.model,
-  );
+  return gridPointerPane(layout(state.model), report);
+}
+
+function gridPointerPane(
+  grid: ReturnType<typeof layout>,
+  report: MouseReport,
+): PointerPane | null {
+  const { headerRows, paneRows, detailRows, leftWidth, usable } = grid;
   const paneTop = headerRows + 1;
   const paneRow = report.row - paneTop - 1;
   if (paneRow >= 0 && paneRow < paneRows) {
@@ -424,14 +443,17 @@ export function parseLineTuiAction(state: TuiState, line: string): TuiAction {
     if (value === "pageup" || value === "pagedown")
       return { kind: "page", delta: value === "pageup" ? -1 : 1 };
     if (value === "in" || value === "right")
-      return { kind: "focus", pane: "entries" };
-    if (value === "out" || value === "left")
-      return { kind: "focus", pane: "sections" };
-    if (value === "tab")
       return {
         kind: "focus",
-        pane: state.focus === "entries" ? "sections" : "entries",
+        pane: state.focus === "entries" ? "detail" : "entries",
       };
+    if (value === "out" || value === "left")
+      return {
+        kind: "focus",
+        pane: state.focus === "detail" ? "entries" : "sections",
+      };
+    if (value === "tab")
+      return { kind: "focus", pane: nextPane(state.focus ?? "sections") };
     if (value === "quit") return { kind: "quit" };
     if (value === "" || value === "enter" || value === "select")
       return { kind: "select" };
@@ -727,6 +749,18 @@ class LineTuiTerminal implements TuiTerminal {
   }
 }
 
+function paneResizeKey(key: Key): TuiAction | null {
+  if (key.name === "right" && key.shift)
+    return { kind: "resize-panes", delta: 2 };
+  if (key.name === "left" && key.shift)
+    return { kind: "resize-panes", delta: -2 };
+  if (key.name === "up" && key.shift)
+    return { kind: "resize-detail", delta: -1 };
+  if (key.name === "down" && key.shift)
+    return { kind: "resize-detail", delta: 1 };
+  return null;
+}
+
 /** Maps a decoded raw-terminal key into a semantic action. */
 export function parseRawTuiAction(
   state: TuiState,
@@ -735,16 +769,26 @@ export function parseRawTuiAction(
 ): TuiAction {
   if (key.ctrl && key.name === "c") return { kind: "quit" };
   if (state.screen === "help") {
+    const resize = paneResizeKey(key);
+    if (resize) return resize;
     if (key.name === "up" || key.name === "down")
       return { kind: "move", delta: key.name === "up" ? -1 : 1 };
     if (key.name === "pageup" || key.name === "pagedown")
       return { kind: "page", delta: key.name === "pageup" ? -1 : 1 };
-    if (key.name === "left") return { kind: "focus", pane: "sections" };
-    if (key.name === "right") return { kind: "focus", pane: "entries" };
+    if (key.name === "left")
+      return {
+        kind: "focus",
+        pane: state.focus === "detail" ? "entries" : "sections",
+      };
+    if (key.name === "right")
+      return {
+        kind: "focus",
+        pane: state.focus === "entries" ? "detail" : "entries",
+      };
     if (key.name === "tab")
       return {
         kind: "focus",
-        pane: state.focus === "entries" ? "sections" : "entries",
+        pane: nextPane(state.focus ?? "sections", key.shift),
       };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
@@ -778,23 +822,10 @@ export function parseRawTuiAction(
     if (text === "p" && state.view === "trash") return { kind: "purge-review" };
     if (key.name === "return" || key.name === "enter")
       return { kind: "select" };
-    if (key.name === "right" && key.shift)
-      return { kind: "resize-panes", delta: 2 };
-    if (key.name === "left" && key.shift)
-      return { kind: "resize-panes", delta: -2 };
-    if (key.name === "up" && key.shift)
-      return { kind: "resize-detail", delta: -1 };
-    if (key.name === "down" && key.shift)
-      return { kind: "resize-detail", delta: 1 };
-    if (key.name === "tab") {
-      const panes = ["sections", "entries", "detail"] as const;
-      const index = panes.indexOf(state.model.focus);
-      const delta = key.shift ? -1 : 1;
-      return {
-        kind: "focus",
-        pane: panes[(index + delta + panes.length) % panes.length]!,
-      };
-    }
+    const resize = paneResizeKey(key);
+    if (resize) return resize;
+    if (key.name === "tab")
+      return { kind: "focus", pane: nextPane(state.model.focus, key.shift) };
     if (key.name === "right") return { kind: "focus", pane: "entries" };
     if (key.name === "left") return { kind: "focus", pane: "sections" };
     if (key.name === "pageup") return { kind: "page", delta: -1 };
