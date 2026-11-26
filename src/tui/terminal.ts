@@ -152,13 +152,12 @@ export function mouseAction(
     if (resize) return resize;
     if ((report.button & 32) !== 0 || !pane) return { kind: "noop" };
     if (pane === "detail") return { kind: "focus", pane };
-    const view = pane === "sections" ? sections : keys;
-    const itemRow = row - (pane === "entries" ? 1 : 0);
-    if (itemRow < 0 || itemRow >= view.items.length) return { kind: "noop" };
-    return {
-      kind: pane === "sections" ? "point-section" : "point-entry",
-      index: view.offset + itemRow,
-    };
+    if (pane === "sections")
+      return row >= 0 && row < sections.items.length
+        ? { kind: "point-section", index: sections.offset + row }
+        : { kind: "noop" };
+    const item = keys.items[row - 1]; // The first row is the section summary.
+    return item ? { kind: "point-entry", index: item.index } : { kind: "noop" };
   }
   if (
     state.screen === "search" ||

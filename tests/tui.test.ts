@@ -1133,8 +1133,10 @@ describe("terminal theme", () => {
         inventoryLines.findIndex((row) => row.includes("┴")),
       );
       expect(first[0]).toMatch(/^─+┬─+$/u);
-      expect(first[1]).toMatch(/› Inventory +│Inventory · 3 keys/u);
-      expect(first[2]!.slice(split + 1).trim()).toBe("› enter");
+      expect(first[1]).toMatch(/^Inventory +│Inventory · 3 keys/u);
+      expect(first[2]!.slice(split + 1).trim()).toMatch(
+        /^enter +Review removal$/u,
+      );
       expect(first[divider + 1]!.trim()).toBe("enter  Review removal");
       expect(first[divider + 2]).toContain("checked items");
       expect(first.at(-1)).toContain("esc close");
@@ -1156,14 +1158,14 @@ describe("terminal theme", () => {
       });
       expect(frame()[divider + 1]).toContain("PgUp PgDn  Move one page");
       await pointer(split + 3, 3, 65);
-      expect(frame()[divider + 1]).toContain("tab  Next pane");
+      expect(frame()[divider + 1]).toContain("tab  Focus next pane");
       await pointer(2, divider + 2);
       expect(controller.state).toMatchObject({ focus: "detail" });
       await key("d", "d");
       expect(controller.state.screen).toBe("help");
       await pointer(2, 4); // App, the third section
       expect(frame()[1]).toContain("│App · 5 keys");
-      expect(frame()[divider + 1]).toContain("ctrl+p  Theme");
+      expect(frame()[divider + 1]).toContain("ctrl+p  Choose a theme");
       await key("return");
       await key("pagedown");
       await key("pagedown");
@@ -1174,7 +1176,7 @@ describe("terminal theme", () => {
         viewport: { columns: 20, rows: 6 },
       });
       expect(frame()[0]).toContain("│App");
-      expect(frame().join("\n")).toContain("› q");
+      expect(frame().join("\n")).toMatch(/│q +/u);
       await key("return");
       expect(frame()[0]).toContain("│App");
       expect(frame().at(-2)).toContain("Exit Lampwright.");
@@ -1215,9 +1217,9 @@ describe("terminal theme", () => {
         renderTui(controller.state, plainTuiTheme).trimEnd().split("\n");
       const frame = lines();
       expect(frame).toHaveLength(viewport.rows - 1);
-      expect(frame[0]).toMatch(/› Inventory +│Inventory · 3 keys/u);
-      expect(frame[1]).toMatch(/Move and select *│› enter/u);
-      expect(frame[2]).toMatch(/App +│ +u/u);
+      expect(frame[0]).toMatch(/^Inventory +│Inventory · 3 keys/u);
+      expect(frame[1]).toMatch(/Move and select *│enter +Review removal/u);
+      expect(frame[2]).toMatch(/App +│u +Review update/u);
       expect(frame.at(-2)).toContain("Inspect files");
       expect(frame.at(-1)).toContain("esc close");
       const pointer = (column: number, row: number, button = 0) =>
@@ -1231,6 +1233,12 @@ describe("terminal theme", () => {
       const entryColumn = frame[0]!.indexOf("│") + 3;
       await pointer(3, 3);
       expect(lines()[0]).toContain("│App · 5 keys");
+      const theme = lines()[1]!;
+      expect(theme).toMatch(/│ctrl\+p +Choose a theme/u);
+      expect(theme.indexOf("Choose a theme")).toBe(
+        lines()[2]!.indexOf("Resize section pane"),
+      );
+      expect(lines().join("\n")).not.toMatch(/[›>]/u);
       expect(lines().at(-2)).toContain("Preview a theme.");
       await pointer(entryColumn, 3);
       expect(lines().at(-2)).toContain("Change the width");
@@ -1245,9 +1253,9 @@ describe("terminal theme", () => {
         viewport: { columns: 118, rows: 15 },
       });
       expect(lines()[0]).toMatch(/─┬─/u);
-      expect(lines().some((row) => row.includes("shift+←→  Pane width"))).toBe(
-        true,
-      );
+      expect(
+        lines().some((row) => row.includes("shift+←→  Resize section pane")),
+      ).toBe(true);
       await controller.dispatch({ kind: "viewport", viewport });
       await controller.dispatch({ kind: "cancel" });
       expect(controller.state).toEqual(before);
@@ -1321,7 +1329,7 @@ describe("terminal theme", () => {
             row
               .slice(row.indexOf("│") + 1, -1)
               .trim()
-              .replace(/^› */u, ""),
+              .split(/  +/u)[0]!,
           );
         await line("down");
       }
@@ -1372,7 +1380,7 @@ describe("terminal theme", () => {
       await move("down");
       await move("tab");
       await move("down");
-      expect(frame().join("\n")).toMatch(/│› *PgUp PgDn/u);
+      expect(frame().join("\n")).toMatch(/│PgUp PgDn/u);
       const lists = frame()
         .filter((row) => row.includes("│") && !row.startsWith("PgUp"))
         .slice(0, 2);
@@ -1382,7 +1390,7 @@ describe("terminal theme", () => {
         sectionIndex: 1,
         entryIndex: 1,
       });
-      expect(frame().join("\n")).toMatch(/│› *PgUp PgDn/u);
+      expect(frame().join("\n")).toMatch(/│PgUp PgDn/u);
       expect(frame().join("\n")).toMatch(/esc/iu);
       expect(frame()).toHaveLength(viewport.rows - 1);
       expect(
@@ -1417,6 +1425,77 @@ describe("terminal theme", () => {
       expect(controller.state).toEqual(browse);
     },
   );
+  it("maps stacked definitions to their shortcut and highlights all its visible lines", async () => {
+    const viewport = { columns: 32, rows: 18 };
+    const controller = new TuiController(
+      {
+        scan: async () => groupedInventory(["one"]),
+        plan,
+        execute: async () => buildExecutionReport(),
+      },
+      viewport,
+    );
+    await controller.start();
+    await controller.dispatch({ kind: "open-help" });
+    await controller.dispatch({ kind: "point-section", index: 2 });
+    const color = createNightfallTheme("truecolor");
+    const lines = () =>
+      renderTui(controller.state, plainTuiTheme).trimEnd().split("\n");
+    const width = lines()[0]!.indexOf("┬");
+    const entry = (i: number) =>
+      lines()
+        [i]!.slice(width + 1, -1)
+        .trimEnd();
+    const definitionRow = lines().findIndex((row) =>
+      row.includes("│Resize section pane"),
+    );
+    expect(definitionRow).toBeGreaterThan(0);
+    expect(entry(definitionRow - 1)).toBe("shift+←→");
+    await controller.dispatch(
+      mouseAction(
+        controller.state,
+        { column: width + 3, row: definitionRow + 1, button: 0, pressed: true },
+        { dragging: false, doubleClick: false },
+      ),
+    );
+    expect(controller.state).toMatchObject({
+      screen: "help",
+      focus: "entries",
+      entryIndex: 1,
+    });
+    const colored = renderTui(controller.state, color).split("\n");
+    const detail = colored
+      .map((row) => row.replace(ansi, ""))
+      .findIndex((row) => row.includes("┴"));
+    expect(colored[detail + 2]!.replace(ansi, "")).toContain(
+      "Change the width",
+    );
+    const rightWidth = viewport.columns - width - 3;
+    for (const text of ["shift+←→", "Resize section pane"]) {
+      expect(colored.join("\n")).toContain(
+        styleTui(color, "focus", text.padEnd(rightWidth)),
+      );
+    }
+    expect(colored.join("\n")).toContain(styleTui(color, "title", "ctrl+p"));
+    expect(colored.join("\n")).toContain(
+      styleTui(color, "muted", "Choose a theme"),
+    );
+    await controller.dispatch({ kind: "move", delta: 1 });
+    expect(controller.state).toMatchObject({ entryIndex: 2 });
+    await controller.dispatch({
+      kind: "viewport",
+      viewport: { columns: 15, rows: 4 },
+    });
+    await controller.dispatch({ kind: "point-entry", index: 0 });
+    const seen = new Set<string>();
+    for (let i = 0; i < 6; i++) {
+      seen.add(lines()[1]!.split("│")[1]!.trim());
+      await controller.dispatch({ kind: "page", delta: 1 });
+    }
+    expect([...seen].join(" ")).toMatch(/Choose a theme/u);
+    await controller.dispatch({ kind: "page", delta: -1 });
+    expect(controller.state.screen).toBe("help");
+  });
   it.each([32, 80])(
     "aligns Theme and every Add agents frame to the same content insets at %i columns",
     (columns) => {
